@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 import uuid # Importar para generar UUIDs
+import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted # Importar para manejar errores de cuota
 
 # Cargar variables de entorno
 load_dotenv()
@@ -281,3 +283,92 @@ async def delete_post(post_id: int, current_user: User = Depends(get_current_use
         return
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al eliminar la publicación: {str(e)}")
+
+# --- Modelos de Datos para IA ---
+class AIPostRequest(BaseModel):
+    topic: str
+    # En el futuro, podríamos añadir más campos como 'tone', 'style', etc.
+
+class AIPostResponse(BaseModel):
+    generated_text: str
+
+    # --- Endpoint de IA con Google Gemini (con fallback de modelos) ---
+@app.post("/ai/generate-post-content", response_model=AIPostResponse)
+async def generate_ai_post_content(
+    request: AIPostRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Genera contenido para una publicación utilizando la API de Google Gemini,
+    intentando con modelos en orden de preferencia y con fallback en caso de cuota excedida.
+    """
+    # Lista de modelos de Gemini en orden de preferencia (del más potente al más ligero)
+    PREFERRED_GEMINI_MODELS = [
+        'gemini-1.5-pro-latest',
+        'gemini-1.5-flash-latest',
+        # Puedes añadir más modelos aquí si es necesario
+    ]
+
+    try:
+        # --- Configuración de la API de Google ---
+        api_key = os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            raise HTTPException(status_code=500, detail="La clave de API de Google no está configurada.")
+        
+        genai.configure(api_key=api_key)
+        
+        # --- Creación del Prompt ---
+        prompt = f"""
+Eres 'SocialPro', un experto estratega de redes sociales y content manager con 10 años de experiencia. Tu objetivo es crear contenido para Instagram que sea auténtico, atractivo y que genere interacción.
+
+**Instrucciones:**
+1.  **Analiza el siguiente tema:** "{request.topic}"
+2.  **Tono y Voz:** Utiliza un tono enérgico, positivo e inspirador.
+3.  **Formato de Salida:** Genera un texto para la publicación (máximo 300 caracteres) y, en una nueva línea, una lista de 5 a 7 hashtags relevantes y específicos.
+4.  **Llamada a la acción (CTA):** Incluye una pregunta o una frase que invite a los usuarios a comentar o visitar un enlace.
+
+**Ejemplo de resultado:**
+¡Dale un giro a tu estilo! 🌿✨ Descubre nuestra nueva colección hecha con materiales reciclados. Moda que cuida del planeta y de ti. ¿Cuál es tu pieza favorita? ¡Cuéntanos abajo!
+#ModaSostenible #EcoFriendly #EstiloConsciente #Novedades #HechoAMano #SlowFashion
+
+---
+
+Ahora, genera el contenido para el tema proporcionado.
+"""
+
+        generated_text = None
+        last_error_detail = "No se pudo generar contenido con IA. Inténtalo de nuevo más tarde."
+
+        for model_name in PREFERRED_GEMINI_MODELS:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(prompt)
+                
+                if response.text:
+                    generated_text = response.text
+                    print(f"Contenido generado exitosamente con el modelo: {model_name}")
+                    break # Salir del bucle si se genera el contenido
+                else:
+                    last_error_detail = f"El modelo {model_name} no pudo generar una respuesta válida."
+                    print(f"Advertencia: {last_error_detail}")
+
+            except ResourceExhausted as e:
+                last_error_detail = f"Cuota excedida para el modelo {model_name}. Intentando con el siguiente... Detalles: {str(e)}"
+                print(f"Error de cuota: {last_error_detail}")
+                continue # Intentar con el siguiente modelo
+            except Exception as e:
+                last_error_detail = f"Error inesperado con el modelo {model_name}: {str(e)}"
+                print(f"Error general con el modelo: {last_error_detail}")
+                # Si es un error diferente a cuota, no intentamos con otro modelo
+                raise HTTPException(status_code=500, detail=f"Error al generar contenido con IA: {last_error_detail}")
+
+        if generated_text:
+            return {"generated_text": generated_text}
+        else:
+            raise HTTPException(status_code=500, detail=f"Error al generar contenido con IA: {last_error_detail}")
+
+    except HTTPException:
+        raise # Re-lanzar HTTPException ya manejada
+    except Exception as e:
+        print(f"Error general en el endpoint de IA: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al generar contenido con IA: {str(e)}")

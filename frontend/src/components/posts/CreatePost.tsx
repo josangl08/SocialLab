@@ -1,21 +1,27 @@
 import React, { useState, FormEvent } from 'react';
-import { useAuth } from '../../context/AuthContext'; // Ruta corregida
+import { useAuth } from '../../context/AuthContext';
 import './CreatePost.css';
 
 interface CreatePostProps {
-  onPostCreated: () => void; // Callback para notificar que una publicación ha sido creada
+  onPostCreated: () => void;
 }
 
 const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
   const { token } = useAuth();
   const [content, setContent] = useState<string>('');
-  const [mediaFile, setMediaFile] = useState<File | null>(null); // Estado para el archivo multimedia
-  const [mediaPreview, setMediaPreview] = useState<string | null>(null); // Nuevo estado para la URL de previsualización
-  const [postType, setPostType] = useState<string>('post'); // Default to 'post'
-  const [status, setStatus] = useState<string>('draft'); // Default to 'draft'
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [postType, setPostType] = useState<string>('post');
+  const [status, setStatus] = useState<string>('draft');
   const [scheduledAt, setScheduledAt] = useState<string>('');
   const [message, setMessage] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(false); // Nuevo estado de carga
+  const [loading, setLoading] = useState<boolean>(false);
+
+  // --- Nuevos estados para la funcionalidad de IA ---
+  const [aiTopic, setAiTopic] = useState<string>('');
+  const [aiLoading, setAiLoading] = useState<boolean>(false);
+  const [aiMessage, setAiMessage] = useState<string>('');
+
 
   const formatErrorMessage = (errorData: any) => {
     if (errorData && Array.isArray(errorData.detail)) {
@@ -42,10 +48,46 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
     }
   };
 
+  // --- Nueva función para generar contenido con IA ---
+  const handleGenerateAIContent = async () => {
+    if (!aiTopic) {
+      setAiMessage('Por favor, introduce un tema para la IA.');
+      return;
+    }
+    setAiLoading(true);
+    setAiMessage('');
+    setMessage('');
+
+    try {
+      const response = await fetch('http://localhost:8000/ai/generate-post-content', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ topic: aiTopic }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setContent(data.generated_text); // Actualizar el contenido principal
+        setAiMessage('Contenido generado exitosamente.');
+      } else {
+        const errorData = await response.json();
+        setAiMessage('Error al generar contenido: ' + formatErrorMessage(errorData));
+      }
+    } catch (error: any) {
+      setAiMessage('Error de red o servidor: ' + error.message);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setMessage('');
-    setLoading(true); // Iniciar carga
+    setLoading(true);
 
     if (!token) {
       setMessage('Error: No hay token de autenticación.');
@@ -53,7 +95,6 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
       return;
     }
 
-    // Validación adicional para el archivo multimedia si es obligatorio
     if (!mediaFile) {
       setMessage('Error: Un archivo multimedia es obligatorio para publicaciones de Instagram.');
       setLoading(false);
@@ -67,52 +108,87 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
     if (scheduledAt) {
       formData.append('scheduled_at', new Date(scheduledAt).toISOString());
     }
-    formData.append('media_file', mediaFile); // El archivo ahora es obligatorio
+    formData.append('media_file', mediaFile);
 
     try {
       const response = await fetch('http://localhost:8000/posts', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
-          // No establecer 'Content-Type', FormData lo hace automáticamente con boundary
         },
         body: formData,
       });
 
       if (response.ok) {
-        const data = await response.json();
         setMessage('Publicación creada exitosamente!');
         setContent('');
-        setMediaFile(null); // Limpiar el input de archivo
-        setMediaPreview(null); // Limpiar la previsualización
-        (event.target as HTMLFormElement).reset(); // Resetear el formulario completo
+        setAiTopic('');
+        setMediaFile(null);
+        setMediaPreview(null);
+        (event.target as HTMLFormElement).reset();
         setPostType('post');
         setStatus('draft');
         setScheduledAt('');
-        onPostCreated(); // Llamar al callback para refrescar la lista
+        onPostCreated();
       } else {
         const errorData = await response.json();
         setMessage('Error al crear publicación: ' + formatErrorMessage(errorData));
       }
-    } catch (error) {
+    } catch (error: any) {
       setMessage('Error de red o servidor: ' + error.message);
       console.error('Error de red o servidor:', error);
     } finally {
-      setLoading(false); // Finalizar carga
+      setLoading(false);
     }
   };
 
   return (
     <div className="mt-4 p-4 bg-light rounded shadow-sm create-post-card">
       <h3 className="mb-4 text-primary">Crear Nueva Publicación</h3>
-      <form onSubmit={handleSubmit}>
-        <div className="mb-3">
+      
+      {/* --- Sección de IA --- */}
+      <div className="p-3 mb-4 bg-white rounded border">
+        <h5 className="text-secondary">Asistente de Contenido IA</h5>
+        <div className="mb-2">
           <textarea
             className="form-control"
-            placeholder="Contenido de la publicación"
+            placeholder="Escribe un tema o idea para tu publicación (ej: 'lanzamiento de nuevas zapatillas ecológicas')..."
+            value={aiTopic}
+            onChange={(e) => setAiTopic(e.target.value)}
+            rows={2}
+            disabled={aiLoading || loading}
+          />
+        </div>
+        <button 
+          type="button" 
+          className="btn btn-outline-primary w-100" 
+          onClick={handleGenerateAIContent} 
+          disabled={aiLoading || loading}
+        >
+          {aiLoading ? (
+            <><span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Generando...</>
+          ) : (
+            '✨ Generar texto con IA'
+          )}
+        </button>
+        {aiMessage && (
+          <p className={`mt-2 text-center small ${aiMessage.startsWith('Error') ? 'text-danger' : 'text-success'}`}>
+            {aiMessage}
+          </p>
+        )}
+      </div>
+      {/* --- Fin Sección de IA --- */}
+
+      <form onSubmit={handleSubmit}>
+        <div className="mb-3">
+          <label htmlFor="content" className="form-label">Contenido de la Publicación</label>
+          <textarea
+            id="content"
+            className="form-control"
+            placeholder="El texto generado por la IA aparecerá aquí..."
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            rows={4}
+            rows={5}
             required
             disabled={loading}
           />
@@ -124,9 +200,9 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
             className="form-control"
             id="mediaFile"
             onChange={handleFileChange}
-            required // Ahora es obligatorio
+            required
             disabled={loading}
-            accept="image/*,video/*" // Aceptar solo imágenes y videos
+            accept="image/*,video/*"
           />
           {mediaPreview && (
             <div className="mt-2 text-center">
@@ -138,33 +214,35 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
             </div>
           )}
         </div>
-        <div className="mb-3">
-          <label htmlFor="postType" className="form-label">Tipo de Publicación</label>
-          <select
-            className="form-select"
-            id="postType"
-            value={postType}
-            onChange={(e) => setPostType(e.target.value)}
-            disabled={loading}
-          >
-            <option value="post">Post</option>
-            <option value="reel">Reel</option>
-            <option value="story">Story</option>
-          </select>
-        </div>
-        <div className="mb-3">
-          <label htmlFor="status" className="form-label">Estado</label>
-          <select
-            className="form-select"
-            id="status"
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            disabled={loading}
-          >
-            <option value="draft">Borrador</option>
-            <option value="scheduled">Programado</option>
-            <option value="published">Publicado</option>
-          </select>
+        <div className="row">
+          <div className="col-md-6 mb-3">
+            <label htmlFor="postType" className="form-label">Tipo de Publicación</label>
+            <select
+              className="form-select"
+              id="postType"
+              value={postType}
+              onChange={(e) => setPostType(e.target.value)}
+              disabled={loading}
+            >
+              <option value="post">Post</option>
+              <option value="reel">Reel</option>
+              <option value="story">Story</option>
+            </select>
+          </div>
+          <div className="col-md-6 mb-3">
+            <label htmlFor="status" className="form-label">Estado</label>
+            <select
+              className="form-select"
+              id="status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              disabled={loading}
+            >
+              <option value="draft">Borrador</option>
+              <option value="scheduled">Programado</option>
+              <option value="published">Publicado</option>
+            </select>
+          </div>
         </div>
         <div className="mb-3">
           <label htmlFor="scheduledAt" className="form-label">Programar para (opcional)</label>
@@ -179,7 +257,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
         </div>
         <button type="submit" className="btn btn-primary w-100" disabled={loading}>
             {loading ? (
-              <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+              <><span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Creando...</>
             ) : (
               'Crear Publicación'
             )}
@@ -195,3 +273,4 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
 };
 
 export default CreatePost;
+

@@ -138,8 +138,14 @@ const PostList: React.FC<PostListProps> = ({ refresh }) => {
                     <h5 className="card-title text-dark">Contenido:</h5>
                     <p className="card-text text-secondary">{post.content}</p>
                     {post.media_url && (
-                      <div className="mb-2">
-                        <strong className="text-dark">Medio:</strong> <a href={post.media_url} target="_blank" rel="noopener noreferrer" className="text-primary">Ver</a>
+                      <div className="mb-2 text-center">
+                        {post.media_url.match(/\.(jpeg|jpg|gif|png|webp|svg)(\?.*)?$/i) ? (
+                          <img src={post.media_url} alt="Publicación" className="img-fluid rounded" style={{ maxHeight: '200px', maxWidth: '100%' }} />
+                        ) : post.media_url.match(/\.(mp4|webm|ogg)(\?.*)?$/i) ? (
+                          <video src={post.media_url} controls className="img-fluid rounded" style={{ maxHeight: '200px', maxWidth: '100%' }} />
+                        ) : (
+                          <p className="text-warning">Formato de medio no soportado para previsualización. <a href={post.media_url} target="_blank" rel="noopener noreferrer" className="text-primary">Ver</a></p>
+                        )}
                       </div>
                     )}
                     <p className="card-text"><strong className="text-dark">Tipo:</strong> {post.post_type}</p>
