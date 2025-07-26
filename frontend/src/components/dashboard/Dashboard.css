@@ -3,11 +3,12 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
-  background-color: var(--bs-info-bg-opacity-10);
+  min-height: 100%; /* Ajustar a 100% del padre (content-area) */
+  background-color: var(--background-light); /* Usar la variable de color */
 }
 
 .dashboard-card {
   max-width: 900px;
   margin: auto;
+  background-color: #FFFFFF; /* Fondo blanco para la tarjeta */
 }

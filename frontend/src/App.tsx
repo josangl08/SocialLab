@@ -3,7 +3,10 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import Login from './components/auth/Login';
 import Register from './components/auth/Register';
 import Dashboard from './components/dashboard/Dashboard';
-import UserProfile from './components/user/UserProfile'; // Actualizar ruta
+import UserProfile from './components/user/UserProfile';
+import CreatePost from './components/posts/CreatePost';
+import CalendarView from './components/calendar/CalendarView'; // Importar CalendarView
+import MainLayout from './components/layout/MainLayout';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import './App.css';
 import 'bootstrap/dist/css/bootstrap.min.css';
@@ -14,7 +17,7 @@ interface ProtectedRouteProps {
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   const { isAuthenticated } = useAuth();
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
+  return isAuthenticated ? <MainLayout>{children}</MainLayout> : <Navigate to="/login" replace />;
 };
 
 function App() {
@@ -24,11 +27,21 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          
+          {/* Rutas protegidas dentro del MainLayout */}
           <Route
             path="/dashboard"
             element={
               <ProtectedRoute>
                 <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/create-post"
+            element={
+              <ProtectedRoute>
+                <CreatePost onPostCreated={() => { /* Lógica para refrescar la lista de posts si es necesario */ }} />
               </ProtectedRoute>
             }
           />
@@ -40,6 +53,15 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/calendar"
+            element={
+              <ProtectedRoute>
+                <CalendarView />
+              </ProtectedRoute>
+            }
+          />
+
           {/* Redirigir a /dashboard si está autenticado, de lo contrario a /login */}
           <Route
             path="*"

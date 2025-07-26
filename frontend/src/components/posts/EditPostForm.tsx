@@ -181,7 +181,6 @@ const EditPostForm: React.FC<EditPostFormProps> = ({ post, onSave, onCancel }) =
           >
             <option value="draft">Borrador</option>
             <option value="scheduled">Programado</option>
-            <option value="published">Publicado</option>
           </select>
         </div>
         <div className="mb-3">

@@ -21,7 +21,14 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
   const [aiTopic, setAiTopic] = useState<string>('');
   const [aiLoading, setAiLoading] = useState<boolean>(false);
   const [aiMessage, setAiMessage] = useState<string>('');
+  const [aiRole, setAiRole] = useState<string>('content_manager'); // Nuevo estado para el rol de la IA
 
+  // Definir los roles disponibles para el frontend
+  const aiRoles = [
+    { value: 'content_manager', label: 'Content Manager Profesional' },
+    { value: 'marketing_expert', label: 'Experto en Marketing Digital' },
+    { value: 'casual_friend', label: 'Amigo Casual y Cercano' },
+  ];
 
   const formatErrorMessage = (errorData: any) => {
     if (errorData && Array.isArray(errorData.detail)) {
@@ -65,7 +72,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ topic: aiTopic }),
+        body: JSON.stringify({ topic: aiTopic, role: aiRole }), // Enviar el rol seleccionado
       });
 
       if (response.ok) {
@@ -149,6 +156,22 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
       {/* --- Sección de IA --- */}
       <div className="p-3 mb-4 bg-white rounded border">
         <h5 className="text-secondary">Asistente de Contenido IA</h5>
+        <div className="mb-3">
+          <label htmlFor="aiRole" className="form-label">Rol de la IA:</label>
+          <select
+            id="aiRole"
+            className="form-select"
+            value={aiRole}
+            onChange={(e) => setAiRole(e.target.value)}
+            disabled={aiLoading || loading}
+          >
+            {aiRoles.map((role) => (
+              <option key={role.value} value={role.value}>
+                {role.label}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="mb-2">
           <textarea
             className="form-control"
@@ -240,7 +263,6 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
             >
               <option value="draft">Borrador</option>
               <option value="scheduled">Programado</option>
-              <option value="published">Publicado</option>
             </select>
           </div>
         </div>

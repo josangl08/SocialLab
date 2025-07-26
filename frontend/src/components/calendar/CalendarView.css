@@ -1,0 +1,82 @@
+/* Estilos para el calendario */
+.rbc-calendar {
+  font-family: 'Arial', sans-serif;
+}
+
+/* Colores de fondo para tipos de publicación */
+.rbc-event.event-post {
+  background-color: #00BCD4; /* Cian vibrante para Posts */
+}
+
+.rbc-event.event-reel {
+  background-color: #FF4081; /* Rosa para Reels */
+}
+
+.rbc-event.event-story {
+  background-color: #FFC107; /* Amarillo para Stories */
+}
+
+/* Estilos base para los eventos del calendario */
+.rbc-event {
+  padding: 5px 8px;
+  font-size: 0.85em;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); /* Sombra sutil */
+  transition: all 0.3s cubic-bezier(.25,.8,.25,1);
+  border: 2px solid transparent; /* Borde inicial transparente */
+  border-left-width: 8px; /* Ancho del borde para el estado */
+  box-sizing: border-box; /* Incluir padding y border en el ancho/alto */
+}
+
+.rbc-event.event-status-draft,
+.rbc-event.event-status-scheduled {
+  color: var(--text-dark); /* Color de texto para borrador y programado */
+}
+
+.rbc-event.event-status-published {
+  color: white; /* Color de texto para publicado */
+}
+
+.rbc-event:hover {
+  box-shadow: 0 3px 6px rgba(0,0,0,0.16), 0 3px 6px rgba(0,0,0,0.23);
+}
+
+/* Colores y formas para estados de publicación */
+.rbc-event.event-status-draft {
+  background-color: rgba(255, 165, 0, 0.2); /* Naranja semitransparente */
+  border-color: #FFA500; /* Borde naranja sólido */
+  border-radius: 15px; /* Forma redondeada */
+}
+
+.rbc-event.event-status-scheduled {
+  background-color: rgba(33, 150, 243, 0.2); /* Azul semitransparente */
+  border-color: #2196F3; /* Borde azul sólido */
+  border-radius: 10px; /* Esquinas redondeadas */
+}
+
+.rbc-event.event-status-published {
+  background-color: #4CAF50; /* Verde opaco */
+  border-color: #4CAF50; /* Borde verde sólido */
+  border-radius: 0; /* Forma cuadrada */
+}
+
+.rbc-event-content {
+  white-space: normal;
+}
+
+/* Ajustes para la barra de herramientas del calendario */
+.rbc-toolbar button {
+  color: var(--text-dark);
+  border-color: var(--secondary-color);
+}
+
+.rbc-toolbar button:hover {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+.rbc-toolbar button.rbc-active {
+  background-color: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}

@@ -1,0 +1,31 @@
+.sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  background-color: var(--sidebar-dark) !important; /* Fondo oscuro para el sidebar */
+  color: var(--sidebar-text-light); /* Texto claro */
+}
+
+.sidebar .nav-link {
+  color: var(--sidebar-text-light) !important; /* Color de los enlaces */
+}
+
+.sidebar .nav-link:hover,
+.sidebar .nav-link.active {
+  background-color: var(--primary-color) !important; /* Cian vibrante para hover/activo */
+  color: #FFFFFF !important;
+}
+
+.sidebar .btn-outline-light {
+  color: var(--primary-color) !important;
+  border-color: var(--primary-color) !important;
+}
+
+.sidebar .btn-outline-light:hover {
+  background-color: var(--primary-color) !important;
+  color: #FFFFFF !important;
+}
+
+.sidebar .fs-4 {
+  color: var(--primary-color); /* Color del título SocialLab */
+  font-weight: bold;
+}

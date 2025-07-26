@@ -7,7 +7,10 @@ from supabase import create_client, Client
 from dotenv import load_dotenv
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
+from typing import Literal # Importar Literal para tipos de estado
 import uuid # Importar para generar UUIDs
+import requests # Importar para hacer peticiones HTTP
+from starlette.responses import RedirectResponse # Importar para redirecciones
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted # Importar para manejar errores de cuota
 
@@ -17,6 +20,11 @@ load_dotenv()
 # --- Configuración de Supabase ---
 url: str = os.environ.get("SUPABASE_URL")
 key: str = os.environ.get("SUPABASE_KEY")
+
+# --- Configuración de Instagram OAuth ---
+INSTAGRAM_APP_ID = os.environ.get("INSTAGRAM_APP_ID")
+INSTAGRAM_APP_SECRET = os.environ.get("INSTAGRAM_APP_SECRET")
+INSTAGRAM_REDIRECT_URI = os.environ.get("REDIRECT_URI")
 
 if not url or not key:
     raise Exception("Error: Las variables de entorno SUPABASE_URL y SUPABASE_KEY son necesarias.")
@@ -44,7 +52,7 @@ class Token(BaseModel):
 class PostBase(BaseModel):
     content: str
     post_type: str # "post", "reel", "story"
-    status: str = "draft" # "draft", "scheduled", "published"
+    status: Literal["draft", "scheduled", "published"] = "draft" # Restringir a draft, scheduled o published
     scheduled_at: datetime | None = None
 
 class PostCreate(PostBase):
@@ -66,7 +74,7 @@ app = FastAPI(
 # Configuración de CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Permite el origen de tu frontend
+    allow_origins=["http://localhost:5173", "http://localhost:5174"],  # Permite el origen de tu frontend
     allow_credentials=True,
     allow_methods=["*"],  # Permite todos los métodos (GET, POST, PUT, DELETE, etc.)
     allow_headers=["*"],  # Permite todos los encabezados
@@ -89,6 +97,25 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         return User(id=user_data.id, email=user_data.email, created_at=user_data.created_at)
     except Exception as e:
         print(f"Error al obtener usuario: {e}")
+        raise credentials_exception
+
+# Nueva dependencia para obtener el usuario desde un token en el query parameter
+async def get_current_user_from_query_token(token: str):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="No se pudieron validar las credenciales desde el query token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        user_response = supabase.auth.get_user(token)
+        user_data = user_response.user
+
+        if not user_data:
+            raise credentials_exception
+        
+        return User(id=user_data.id, email=user_data.email, created_at=user_data.created_at)
+    except Exception as e:
+        print(f"Error al obtener usuario desde query token: {e}")
         raise credentials_exception
 
 # --- Endpoints de la API ---
@@ -284,15 +311,214 @@ async def delete_post(post_id: int, current_user: User = Depends(get_current_use
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al eliminar la publicación: {str(e)}")
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al eliminar la publicación: {str(e)}")
+
+# --- Endpoints de Instagram OAuth ---
+@app.get("/instagram/login")
+async def instagram_login(token: str, current_user: User = Depends(get_current_user_from_query_token)):
+    if not INSTAGRAM_APP_ID:
+        raise HTTPException(status_code=500, detail="INSTAGRAM_APP_ID no configurado.")
+    
+    # Codificar el user_id en el parámetro 'state'
+    state_param = current_user.id
+    
+    # Construir la URL de autorización de Facebook Graph API
+    auth_url = (
+        f"https://graph.facebook.com/oauth/authorize?client_id={INSTAGRAM_APP_ID}"
+        f"&redirect_uri={INSTAGRAM_REDIRECT_URI}"
+        "&scope=instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,instagram_manage_insights"
+        "&response_type=code"
+        f"&state={state_param}"
+    )
+    return RedirectResponse(auth_url)
+
+@app.get("/callback/instagram")
+async def instagram_callback(
+    code: str | None = None,
+    error: str | None = None,
+    state: str | None = None # Para recibir el user_id
+):
+    if error:
+        raise HTTPException(status_code=400, detail=f"Error de Instagram OAuth: {error}")
+    
+    if not code:
+        raise HTTPException(status_code=400, detail="No se recibió el código de autorización de Instagram.")
+
+    if not state:
+        raise HTTPException(status_code=400, detail="No se recibió el ID de usuario en el parámetro state.")
+
+    # El user_id de SocialLab se pasa en el parámetro state
+    sociallab_user_id = state
+
+    if not INSTAGRAM_APP_ID or not INSTAGRAM_APP_SECRET or not INSTAGRAM_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="Credenciales de Instagram no configuradas.")
+
+    # Intercambiar el código de autorización por un token de acceso de corta duración
+    token_exchange_url = "https://graph.facebook.com/oauth/access_token"
+    data = {
+        'client_id': INSTAGRAM_APP_ID,
+        'client_secret': INSTAGRAM_APP_SECRET,
+        'grant_type': 'authorization_code',
+        'redirect_uri': INSTAGRAM_REDIRECT_URI,
+        'code': code,
+    }
+    
+    try:
+        response = requests.post(token_exchange_url, data=data)
+        response.raise_for_status() # Lanza una excepción para códigos de estado HTTP erróneos
+        token_data = response.json()
+        
+        short_lived_access_token = token_data.get('access_token')
+
+        if not short_lived_access_token:
+            raise HTTPException(status_code=500, detail="No se pudo obtener el token de acceso de corta duración de Instagram.")
+
+        # Intercambiar el token de corta duración por uno de larga duración
+        long_lived_token_exchange_url = "https://graph.facebook.com/oauth/access_token"
+        long_lived_data = {
+            'grant_type': 'fb_exchange_token',
+            'client_id': INSTAGRAM_APP_ID,
+            'client_secret': INSTAGRAM_APP_SECRET,
+            'fb_exchange_token': short_lived_access_token
+        }
+
+        long_lived_response = requests.get(long_lived_token_exchange_url, params=long_lived_data)
+        long_lived_response.raise_for_status()
+        long_lived_token_data = long_lived_response.json()
+
+        long_lived_access_token = long_lived_token_data.get('access_token')
+        long_lived_expires_in = long_lived_token_data.get('expires_in') # Obtener expires_in del token de larga duración
+
+        if not long_lived_access_token:
+            raise HTTPException(status_code=500, detail="No se pudo obtener el token de acceso de larga duración de Instagram.")
+
+        # Si expires_in no está presente, usar un valor por defecto (60 días en segundos)
+        if long_lived_expires_in is None:
+            long_lived_expires_in = 60 * 24 * 60 * 60  # 60 días en segundos
+            print("Advertencia: 'expires_in' no recibido para el token de larga duración. Usando 60 días por defecto.")
+
+        # Calcular la fecha de expiración
+        expires_at = datetime.utcnow() + timedelta(seconds=long_lived_expires_in)
+
+        # Obtener el ID de la página de Facebook asociada al token
+        pages_url = f"https://graph.facebook.com/v19.0/me/accounts?access_token={long_lived_access_token}"
+        pages_response = requests.get(pages_url)
+        pages_response.raise_for_status()
+        pages_data = pages_response.json()
+
+        facebook_page_id = None
+        if pages_data and pages_data.get('data'):
+            # Asumimos que la primera página es la que nos interesa o que el usuario solo tiene una
+            facebook_page_id = pages_data['data'][0].get('id')
+
+        if not facebook_page_id:
+            raise HTTPException(status_code=500, detail="No se pudo obtener el ID de la página de Facebook.")
+
+        # Obtener el ID de la cuenta de Instagram Business
+        instagram_business_account_url = f"https://graph.facebook.com/v19.0/{facebook_page_id}?fields=instagram_business_account&access_token={long_lived_access_token}"
+        instagram_account_response = requests.get(instagram_business_account_url)
+        instagram_account_response.raise_for_status()
+        instagram_account_data = instagram_account_response.json()
+
+        instagram_business_account_id = None
+        if instagram_account_data.get('instagram_business_account'):
+            instagram_business_account_id = instagram_account_data['instagram_business_account'].get('id')
+
+        if not instagram_business_account_id:
+            raise HTTPException(status_code=500, detail="No se pudo obtener el ID de la cuenta de Instagram Business.")
+
+        # Guardar en Supabase usando el sociallab_user_id
+        try:
+            supabase.table('instagram_accounts').upsert({
+                'user_id': sociallab_user_id,
+                'instagram_business_account_id': instagram_business_account_id,
+                'long_lived_access_token': long_lived_access_token,
+                'expires_at': expires_at.isoformat() + 'Z' # Supabase espera formato ISO con Z para UTC
+            }).execute()
+            print("Instagram account details saved to Supabase.")
+        except Exception as e:
+            print(f"Error saving Instagram account details to Supabase: {e}")
+            raise HTTPException(status_code=500, detail=f"Error al guardar los detalles de la cuenta de Instagram: {str(e)}")
+
+        # Redirigir al frontend, quizás a una página de éxito o al dashboard
+        return RedirectResponse(url="http://localhost:5173/dashboard?instagram_connected=true")
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error durante el intercambio de tokens o la obtención de IDs: {e.response.text if e.response else e}")
+        raise HTTPException(status_code=500, detail=f"Error durante el proceso de autenticación de Instagram: {e}")
+
 # --- Modelos de Datos para IA ---
 class AIPostRequest(BaseModel):
     topic: str
-    # En el futuro, podríamos añadir más campos como 'tone', 'style', etc.
+    role: str = "content_manager" # Nuevo campo para el rol de la IA, con un valor por defecto
 
 class AIPostResponse(BaseModel):
     generated_text: str
 
-    # --- Endpoint de IA con Google Gemini (con fallback de modelos) ---
+# --- Definición de roles para la IA ---
+AI_ROLES = {
+    "content_manager": {
+        "name": "Content Manager Profesional",
+        "prompt_template": """
+Eres 'SocialPro', un experto estratega de redes sociales y content manager con 10 años de experiencia en marcas de moda y estilo de vida. Tu objetivo es crear contenido para Instagram que sea auténtico, que genere engagement y que impulse las ventas.
+
+**Instrucciones:**
+1.  **Analiza el tema:** {topic}
+2.  **Tono y Voz:** El tono debe ser inspirador, enérgico y juvenil.
+3.  **Formato de Salida:** Genera un texto para un post de Instagram (máximo 300 caracteres) y, en una nueva línea, una lista de 5-7 hashtags relevantes y específicos.
+4.  **Llamada a la acción (CTA):** Incluye una pregunta o una frase que invite a los usuarios a comentar o visitar un enlace.
+
+**Ejemplo de resultado:**
+¡Dale un giro a tu estilo! 🌿✨ Descubre nuestra nueva colección hecha con materiales reciclados. Moda que cuida del planeta y de ti. ¿Cuál es tu pieza favorita? ¡Cuéntanos abajo!
+#ModaSostenible #EcoFriendly #EstiloConsciente #Novedades #HechoAMano #SlowFashion
+
+---
+
+Ahora, genera el contenido para el tema proporcionado.
+"""
+    },
+    "marketing_expert": {
+        "name": "Experto en Marketing Digital",
+        "prompt_template": """
+Eres un experto en marketing digital especializado en campañas de redes sociales. Tu objetivo es crear contenido que maximice el alcance, la conversión y el ROI.
+
+**Instrucciones:**
+1.  **Analiza el tema:** {topic}
+2.  **Tono y Voz:** El tono debe ser persuasivo, profesional y orientado a resultados.
+3.  **Formato de Salida:** Genera un texto para un post de Instagram (máximo 300 caracteres) y, en una nueva línea, una lista de 5-7 hashtags orientados a la conversión.
+4.  **Llamada a la acción (CTA):** Incluye una llamada a la acción clara y directa que impulse una acción específica (ej. compra, registro).
+
+**Ejemplo de resultado:**
+¡No te quedes atrás! 📈 Descubre cómo nuestra solución puede transformar tu negocio. Oferta por tiempo limitado. ¡Regístrate hoy y obtén un 20% de descuento! #MarketingDigital #NegociosOnline #EstrategiaDigital #OfertaEspecial #TransformaTuNegocio
+
+---
+
+Ahora, genera el contenido para el tema proporcionado.
+"""
+    },
+    "casual_friend": {
+        "name": "Amigo Casual y Cercano",
+        "prompt_template": """
+Eres un amigo cercano y divertido que comparte noticias emocionantes en Instagram. Tu objetivo es sonar auténtico, amigable y generar una conversación relajada.
+
+**Instrucciones:**
+1.  **Analiza el tema:** {topic}
+2.  **Tono y Voz:** El tono debe ser informal, amigable y conversacional.
+3.  **Formato de Salida:** Genera un texto para un post de Instagram (máximo 300 caracteres) y, en una nueva línea, 3-5 hashtags populares y divertidos.
+4.  **Llamada a la acción (CTA):** Haz una pregunta abierta o una invitación a compartir experiencias.
+
+**Ejemplo de resultado:**
+¡Adivina qué! 🎉 Acabamos de lanzar algo súper cool y creo que te va a encantar. ¿Ya lo probaste? ¡Cuéntame qué te parece! 👇 #Novedad #Amigos #VibraPositiva #QueEmocion
+
+---
+
+Ahora, genera el contenido para el tema proporcionado.
+"""
+    }
+}
+
+# --- Endpoint de IA con Google Gemini (con fallback de modelos) ---
 @app.post("/ai/generate-post-content", response_model=AIPostResponse)
 async def generate_ai_post_content(
     request: AIPostRequest,
@@ -322,7 +548,7 @@ async def generate_ai_post_content(
 Eres 'SocialPro', un experto estratega de redes sociales y content manager con 10 años de experiencia. Tu objetivo es crear contenido para Instagram que sea auténtico, atractivo y que genere interacción.
 
 **Instrucciones:**
-1.  **Analiza el siguiente tema:** "{request.topic}"
+1.  **Analiza el tema:** "{request.topic}"
 2.  **Tono y Voz:** Utiliza un tono enérgico, positivo e inspirador.
 3.  **Formato de Salida:** Genera un texto para la publicación (máximo 300 caracteres) y, en una nueva línea, una lista de 5 a 7 hashtags relevantes y específicos.
 4.  **Llamada a la acción (CTA):** Incluye una pregunta o una frase que invite a los usuarios a comentar o visitar un enlace.

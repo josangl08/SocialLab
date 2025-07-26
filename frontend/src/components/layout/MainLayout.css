@@ -1,0 +1,18 @@
+:root {
+  --primary-color: #00BCD4; /* Cian vibrante */
+  --secondary-color: #607D8B; /* Gris azulado suave */
+  --background-light: #F5F5F5; /* Fondo general claro */
+  --text-dark: #212121; /* Texto principal oscuro */
+  --sidebar-dark: #212121; /* Fondo oscuro para el sidebar */
+  --sidebar-text-light: #F5F5F5; /* Texto claro para el sidebar */
+}
+
+.main-layout-container {
+  min-height: 100vh;
+  background-color: var(--background-light); /* Fondo general */
+}
+
+.content-area {
+  background-color: var(--background-light); /* Fondo del área de contenido */
+  color: var(--text-dark); /* Color de texto principal */
+}

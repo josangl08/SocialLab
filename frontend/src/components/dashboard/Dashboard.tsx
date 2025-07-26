@@ -1,41 +1,42 @@
-import React, { useState } from 'react';
-import { useAuth } from '../../context/AuthContext'; // Ruta corregida
+import React from 'react';
 import PostList from '../posts/PostList';
-import CreatePost from '../posts/CreatePost';
-import { Link } from 'react-router-dom'; // Importar Link
 import './Dashboard.css'; // Importar el archivo CSS
 
 const Dashboard: React.FC = () => {
-  const { logout } = useAuth();
-  const [refreshPosts, setRefreshPosts] = useState<boolean>(false);
+  const handleConnectInstagram = async () => {
+    const token = localStorage.getItem('authToken'); // Usar la clave correcta
 
-  const handlePostCreated = () => {
-    setRefreshPosts(prev => !prev); // Cambiar el estado para forzar la recarga de PostList
+    if (!token) {
+      alert('Debes iniciar sesión en SocialLab primero para conectar Instagram.');
+      return;
+    }
+
+    try {
+      console.log("Attempting to connect to Instagram...");
+      // Redirigir directamente al endpoint del backend que inicia el flujo de OAuth
+      window.location.href = `http://localhost:8000/instagram/login?token=${token}`;
+
+    } catch (error) {
+      console.error('Error en handleConnectInstagram:', error);
+      alert('Ocurrió un error al intentar conectar con Instagram.');
+    }
   };
 
   return (
-    <div className="dashboard-container bg-info bg-opacity-10">
+    <div className="dashboard-container">
       <div className="container">
         <div className="row justify-content-center">
-          <div className="col-12 col-md-10 col-lg-9 col-xl-8">
+          <div className="col-12">
             <div className="card p-4 shadow-sm dashboard-card">
               <h2 className="mb-4 text-center text-primary">Bienvenido al Dashboard</h2>
-              <p className="mb-4 text-center text-secondary">Has iniciado sesión correctamente.</p>
-              <div className="d-flex justify-content-center mb-4">
-                <Link to="/profile" className="btn btn-info me-2">Ver Perfil</Link> {/* Enlace al perfil */}
-                <button
-                  onClick={logout}
-                  className="btn btn-danger"
-                >
-                  Cerrar Sesión
-                </button>
-              </div>
+              <p className="mb-4 text-center text-secondary">Aquí puedes ver tus publicaciones.</p>
 
-              {/* Componente para crear publicaciones */}
-              <CreatePost onPostCreated={handlePostCreated} />
+              <button className="btn btn-info mb-4" onClick={handleConnectInstagram}>
+                Conectar Instagram
+              </button>
 
               {/* Aquí se mostrará la lista de publicaciones */}
-              <PostList key={refreshPosts ? 'refresh' : 'no-refresh'} />
+              <PostList />
             </div>
           </div>
         </div>
