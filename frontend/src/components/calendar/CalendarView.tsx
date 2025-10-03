@@ -4,11 +4,11 @@ import format from 'date-fns/format';
 import parse from 'date-fns/parse';
 import startOfWeek from 'date-fns/startOfWeek';
 import getDay from 'date-fns/getDay';
-import es from 'date-fns/locale/es'; // Importar el locale español
+import es from 'date-fns/locale/es';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
-import './CalendarView.css'; // Importar el CSS para el calendario
+import './CalendarView.css';
 import { useAuth } from '../../context/AuthContext';
-import PostDetailModal from '../posts/PostDetailModal'; // Importar el modal
+import PostDetailModal from '../posts/PostDetailModal';
 
 interface Post {
   id: number;
@@ -19,6 +19,7 @@ interface Post {
   status: string;
   scheduled_at: string | null;
   created_at: string;
+  publication_date: string | null;
 }
 
 const locales = {
@@ -34,14 +35,14 @@ const localizer = dateFnsLocalizer({
 });
 
 const CalendarView: React.FC = () => {
-  const { token } = useAuth();
+  const { token, syncCompleted } = useAuth(); // Añadir syncCompleted
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [currentView, setCurrentView] = useState<string>('month');
-  const [showModal, setShowModal] = useState<boolean>(false); // Estado para controlar la visibilidad del modal
-  const [selectedPost, setSelectedPost] = useState<Post | null>(null); // Estado para la publicación seleccionada
+  const [showModal, setShowModal] = useState<boolean>(false);
+  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
 
   useEffect(() => {
     const fetchPostsForCalendar = async () => {
@@ -51,6 +52,7 @@ const CalendarView: React.FC = () => {
         return;
       }
 
+      setLoading(true);
       try {
         const response = await fetch('http://localhost:8000/posts', {
           method: 'GET',
@@ -63,15 +65,15 @@ const CalendarView: React.FC = () => {
         if (response.ok) {
           const data: Post[] = await response.json();
           const calendarEvents = data.map(post => {
-            const start = post.scheduled_at ? new Date(post.scheduled_at) : new Date(post.created_at);
-            const end = start; // Para eventos de un solo día
+            const start = post.publication_date ? new Date(post.publication_date) : (post.scheduled_at ? new Date(post.scheduled_at) : new Date(post.created_at));
+            const end = start;
             return {
               id: post.id,
               title: `[${post.status.toUpperCase()}] ${post.content.substring(0, 50)}...`,
               start: start,
               end: end,
               allDay: false,
-              resource: post, // Guardar el objeto post completo si se necesita
+              resource: post,
               className: `event-${post.post_type} event-status-${post.status}`
             };
           });
@@ -88,7 +90,7 @@ const CalendarView: React.FC = () => {
     };
 
     fetchPostsForCalendar();
-  }, [token]);
+  }, [token, syncCompleted]); // Volver a cargar si syncCompleted cambia
 
   const eventPropGetter = (event: any) => {
     return { className: event.className };
@@ -103,7 +105,7 @@ const CalendarView: React.FC = () => {
   };
 
   const handleSelectEvent = (event: any) => {
-    setSelectedPost(event.resource); // El objeto post completo está en event.resource
+    setSelectedPost(event.resource);
     setShowModal(true);
   };
 
@@ -153,14 +155,12 @@ const CalendarView: React.FC = () => {
           onNavigate={handleNavigate}
           view={currentView}
           onView={handleViewChange}
-          onSelectEvent={handleSelectEvent} // Manejar el clic en el evento
+          onSelectEvent={handleSelectEvent}
         />
       </div>
-      {/* Modal de detalles de la publicación */}
       <PostDetailModal show={showModal} onHide={handleCloseModal} post={selectedPost} />
     </div>
   );
 };
 
 export default CalendarView;
-

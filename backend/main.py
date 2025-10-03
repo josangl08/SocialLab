@@ -1,4 +1,6 @@
 import os
+import sys
+import logging
 from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, Form
 from starlette.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -7,15 +9,28 @@ from supabase import create_client, Client
 from dotenv import load_dotenv
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
-from typing import Literal # Importar Literal para tipos de estado
-import uuid # Importar para generar UUIDs
-import requests # Importar para hacer peticiones HTTP
-from starlette.responses import RedirectResponse # Importar para redirecciones
+from typing import Literal
+import uuid
+import requests
+from starlette.responses import RedirectResponse
 import google.generativeai as genai
-from google.api_core.exceptions import ResourceExhausted # Importar para manejar errores de cuota
+from google.api_core.exceptions import ResourceExhausted
 
 # Cargar variables de entorno
 load_dotenv()
+
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Asegurar que los logs se muestren inmediatamente
+sys.stdout.flush()
 
 # --- Configuración de Supabase ---
 url: str = os.environ.get("SUPABASE_URL")
@@ -61,8 +76,9 @@ class PostCreate(PostBase):
 class Post(PostBase):
     id: int
     user_id: str
-    media_url: str | None = None # Añadir de nuevo para el modelo de respuesta
+    media_url: str | None = None
     created_at: datetime
+    publication_date: datetime | None = None
 
 # --- Inicialización de la Aplicación FastAPI ---
 app = FastAPI(
@@ -220,10 +236,17 @@ async def create_post(
 @app.get("/posts", response_model=list[Post])
 async def get_posts(current_user: User = Depends(get_current_user)):
     """
-    Obtiene todas las publicaciones del usuario autenticado.
+    Obtiene todas las publicaciones del usuario autenticado ordenadas por fecha.
     """
     try:
-        response = supabase.table('posts').select('*').eq('user_id', current_user.id).execute()
+        response = (
+            supabase.table('posts')
+            .select('*')
+            .eq('user_id', current_user.id)
+            .order('publication_date', desc=True)
+            .order('created_at', desc=True)
+            .execute()
+        )
         return response.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener las publicaciones: {str(e)}")
@@ -448,6 +471,211 @@ async def instagram_callback(
         print(f"Error durante el intercambio de tokens o la obtención de IDs: {e.response.text if e.response else e}")
         raise HTTPException(status_code=500, detail=f"Error durante el proceso de autenticación de Instagram: {e}")
 
+@app.get("/instagram/sync")
+async def instagram_sync(current_user: User = Depends(get_current_user)):
+    """
+    Sincroniza publicaciones desde Instagram a SocialLab.
+    Obtiene las últimas publicaciones de la cuenta Instagram Business
+    y las almacena en la base de datos.
+    """
+    logger.info(f"[SYNC] Iniciando sincronización para usuario: {current_user.id}")
+
+    try:
+        # 1. Obtener el token de acceso del usuario
+        logger.info("[SYNC] Obteniendo token de Instagram desde Supabase...")
+        response = supabase.table('instagram_accounts').select('long_lived_access_token, instagram_business_account_id').eq('user_id', current_user.id).single().execute()
+
+        if not response.data or not response.data.get('long_lived_access_token'):
+            logger.error(f"[SYNC ERROR] No se encontraron credenciales para usuario: {current_user.id}")
+            raise HTTPException(
+                status_code=404,
+                detail="No se encontraron credenciales de Instagram para este usuario."
+            )
+
+        access_token = response.data['long_lived_access_token']
+        stored_ig_id = response.data.get('instagram_business_account_id')
+        logger.info(f"[SYNC] Token encontrado. IG Business ID: {stored_ig_id}")
+
+        # 2. Obtener el ID de la cuenta de Instagram Business
+        logger.info("[SYNC] Obteniendo páginas de Facebook...")
+        user_accounts_url = f"https://graph.facebook.com/v19.0/me/accounts?access_token={access_token}"
+        user_accounts_response = requests.get(user_accounts_url)
+        user_accounts_response.raise_for_status()
+        user_accounts_data = user_accounts_response.json()
+
+        logger.info(f"[SYNC] Respuesta de páginas FB: {user_accounts_data}")
+
+        if not user_accounts_data.get('data'):
+            logger.error("[SYNC ERROR] No se encontraron páginas de Facebook")
+            raise HTTPException(
+                status_code=500,
+                detail="No se encontraron páginas de Facebook asociadas a esta cuenta."
+            )
+
+        facebook_page_id = user_accounts_data['data'][0]['id']
+        facebook_page_name = user_accounts_data['data'][0].get('name', 'Sin nombre')
+        logger.info(f"[SYNC] Página FB encontrada: {facebook_page_name} (ID: {facebook_page_id})")
+
+        # 3. Obtener cuenta de Instagram Business asociada
+        logger.info("[SYNC] Obteniendo cuenta Instagram Business...")
+        ig_account_url = f"https://graph.facebook.com/v19.0/{facebook_page_id}?fields=instagram_business_account&access_token={access_token}"
+        ig_account_response = requests.get(ig_account_url)
+        ig_account_response.raise_for_status()
+        ig_account_data = ig_account_response.json()
+
+        logger.info(f"[SYNC] Respuesta de IG Business: {ig_account_data}")
+
+        if not ig_account_data.get('instagram_business_account'):
+            logger.error("[SYNC ERROR] No se encontró instagram_business_account en respuesta")
+            raise HTTPException(
+                status_code=500,
+                detail="No se encontró una cuenta de Instagram Business asociada. Verifica que tu cuenta sea tipo 'Business' y esté vinculada a la página de Facebook."
+            )
+
+        instagram_user_id = ig_account_data['instagram_business_account']['id']
+        logger.info(f"[SYNC] Instagram Business Account ID: {instagram_user_id}")
+
+        # 4. Obtener las publicaciones de la cuenta de Instagram
+        logger.info("[SYNC] Obteniendo publicaciones de Instagram...")
+        media_url = f"https://graph.facebook.com/v19.0/{instagram_user_id}/media?fields=id,caption,media_type,media_url,timestamp,permalink,media_product_type&access_token={access_token}"
+        media_response = requests.get(media_url)
+        media_response.raise_for_status()
+        media_data = media_response.json().get('data', [])
+
+        logger.info(f"[SYNC] Publicaciones obtenidas: {len(media_data)}")
+
+        if not media_data:
+            logger.warning("[SYNC WARNING] No se encontraron publicaciones en Instagram")
+            return {
+                "status": "ok",
+                "message": "No se encontraron publicaciones en Instagram. Verifica que tu cuenta tenga posts publicados."
+            }
+
+        # 5. Preparar los datos para el upsert en Supabase
+        posts_to_upsert = []
+        for item in media_data:
+            media_product_type = item.get('media_product_type', 'FEED')
+            media_type = item.get('media_type', 'IMAGE').lower()
+
+            # Determinar el tipo de post basado en media_product_type
+            if media_product_type == 'REELS':
+                post_type = 'reel'
+            elif media_product_type == 'STORY':
+                post_type = 'story'
+            else:
+                # FEED o AD, usar media_type
+                post_type = media_type
+
+            post_data = {
+                'user_id': current_user.id,
+                'instagram_post_id': item['id'],
+                'content': item.get('caption', ''),
+                'media_url': item.get('media_url'),
+                'post_type': post_type,
+                'media_product_type': media_product_type,
+                'status': 'published',
+                'publication_date': item.get('timestamp')
+            }
+            posts_to_upsert.append(post_data)
+            logger.info(f"[SYNC] Post preparado: {item['id'][:15]}... - {media_product_type} ({media_type})")
+
+        # 6. Realizar el upsert en la base de datos
+        logger.info(f"[SYNC] Insertando {len(posts_to_upsert)} publicaciones en Supabase...")
+        upsert_response = supabase.table('posts').upsert(
+            posts_to_upsert,
+            on_conflict='instagram_post_id'
+        ).execute()
+
+        logger.info(f"[SYNC SUCCESS] Sincronización completada. {len(posts_to_upsert)} publicaciones procesadas.")
+
+        return {
+            "status": "ok",
+            "message": f"Sincronizadas {len(posts_to_upsert)} publicaciones.",
+            "posts_synced": len(posts_to_upsert)
+        }
+
+    except requests.exceptions.RequestException as e:
+        error_detail = str(e)
+        if e.response:
+            error_detail = f"Status {e.response.status_code}: {e.response.text}"
+            logger.error(f"[SYNC ERROR] Error de API: {error_detail}")
+
+        # Si el token ha expirado, la API de Facebook devolverá un error
+        if e.response and e.response.status_code in [400, 401]:
+            logger.error("[SYNC ERROR] Token expirado o inválido")
+            raise HTTPException(
+                status_code=401,
+                detail="El token de acceso de Instagram ha expirado o es inválido. Por favor, vuelve a conectar tu cuenta."
+            )
+
+        logger.error(f"[SYNC ERROR] Error de comunicación con Instagram API: {error_detail}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al comunicarse con la API de Instagram: {error_detail}"
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logger.error(f"[SYNC ERROR] Error inesperado: {str(e)}")
+        import traceback
+        logger.error(f"[SYNC ERROR] Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error durante la sincronización: {str(e)}"
+        )
+
+
+@app.get("/instagram/status")
+async def instagram_status(current_user: User = Depends(get_current_user)):
+    """
+    Verifica si el usuario tiene Instagram conectado y devuelve el estado.
+    Esto evita depender solo de localStorage en el frontend.
+    """
+    try:
+        response = supabase.table('instagram_accounts').select(
+            'instagram_business_account_id, expires_at, created_at'
+        ).eq('user_id', current_user.id).single().execute()
+
+        if not response.data:
+            return {
+                "connected": False,
+                "message": "No se encontraron credenciales de Instagram"
+            }
+
+        expires_at_str = response.data.get('expires_at')
+        created_at_str = response.data.get('created_at')
+
+        # Verificar si el token ha expirado
+        if expires_at_str:
+            from datetime import datetime
+            expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+            now = datetime.now(expires_at.tzinfo)
+
+            if expires_at < now:
+                return {
+                    "connected": False,
+                    "expired": True,
+                    "expires_at": expires_at_str,
+                    "message": "El token de Instagram ha expirado. Vuelve a conectar tu cuenta."
+                }
+
+        return {
+            "connected": True,
+            "instagram_business_account_id": response.data.get('instagram_business_account_id'),
+            "expires_at": expires_at_str,
+            "created_at": created_at_str
+        }
+
+    except Exception as e:
+        # Si la tabla no existe o hay error, asumimos no conectado
+        return {
+            "connected": False,
+            "error": str(e)
+        }
+
+
 # --- Modelos de Datos para IA ---
 class AIPostRequest(BaseModel):
     topic: str
@@ -598,3 +826,281 @@ Ahora, genera el contenido para el tema proporcionado.
     except Exception as e:
         print(f"Error general en el endpoint de IA: {e}")
         raise HTTPException(status_code=500, detail=f"Error al generar contenido con IA: {str(e)}")
+
+
+# --- Instagram Publishing API Endpoints ---
+
+@app.post("/instagram/publish/{post_id}")
+async def publish_to_instagram(
+    post_id: int,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Publica un post local a Instagram.
+
+    Proceso:
+    1. Verifica que el post existe y pertenece al usuario
+    2. Obtiene credenciales de Instagram del usuario
+    3. Sube la media a Supabase Storage (servidor público)
+    4. Crea contenedor de media en Instagram
+    5. Publica el contenedor
+    6. Actualiza el post con instagram_post_id
+    """
+    try:
+        logger.info(f"Iniciando publicación a Instagram para post_id={post_id}")
+
+        # 1. Verificar que el post existe y pertenece al usuario
+        post_response = (
+            supabase.table('posts')
+            .select('*')
+            .eq('id', post_id)
+            .eq('user_id', current_user.id)
+            .single()
+            .execute()
+        )
+
+        if not post_response.data:
+            raise HTTPException(
+                status_code=404,
+                detail="Post no encontrado"
+            )
+
+        post = post_response.data
+
+        # Verificar que no esté ya publicado en Instagram
+        if post.get('instagram_post_id'):
+            raise HTTPException(
+                status_code=400,
+                detail="Este post ya está publicado en Instagram"
+            )
+
+        # 2. Obtener credenciales de Instagram
+        ig_response = (
+            supabase.table('instagram_accounts')
+            .select('instagram_business_account_id, long_lived_access_token')
+            .eq('user_id', current_user.id)
+            .single()
+            .execute()
+        )
+
+        if not ig_response.data:
+            raise HTTPException(
+                status_code=400,
+                detail="No hay cuenta de Instagram conectada"
+            )
+
+        ig_account_id = ig_response.data['instagram_business_account_id']
+        access_token = ig_response.data['long_lived_access_token']
+
+        # 3. Verificar que hay media_url (debe estar en servidor público)
+        media_url = post.get('media_url')
+        if not media_url:
+            raise HTTPException(
+                status_code=400,
+                detail="El post debe tener una imagen o video"
+            )
+
+        # 4. Crear contenedor de media en Instagram
+        logger.info(f"Creando contenedor de media en Instagram")
+
+        # Determinar tipo de media
+        post_type = post.get('post_type', 'image').lower()
+        media_type = 'VIDEO' if post_type in ['video', 'reel'] else 'IMAGE'
+
+        container_params = {
+            'access_token': access_token,
+            'caption': post.get('content', ''),
+        }
+
+        if media_type == 'IMAGE':
+            container_params['image_url'] = media_url
+        else:
+            container_params['video_url'] = media_url
+            container_params['media_type'] = 'REELS' if post_type == 'reel' else 'VIDEO'
+
+        # Crear contenedor
+        container_url = f"https://graph.facebook.com/v19.0/{ig_account_id}/media"
+        container_response = requests.post(container_url, data=container_params)
+
+        if container_response.status_code != 200:
+            logger.error(
+                f"Error al crear contenedor: {container_response.text}"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error al crear contenedor en Instagram: {container_response.json().get('error', {}).get('message', 'Error desconocido')}"
+            )
+
+        container_id = container_response.json().get('id')
+        logger.info(f"Contenedor creado: {container_id}")
+
+        # 5. Verificar estado del contenedor
+        status_url = f"https://graph.facebook.com/v19.0/{container_id}"
+        status_params = {
+            'fields': 'status_code',
+            'access_token': access_token
+        }
+
+        # Esperar a que el contenedor esté listo
+        import time
+        max_attempts = 10
+        for attempt in range(max_attempts):
+            status_response = requests.get(status_url, params=status_params)
+            if status_response.status_code == 200:
+                status_code = status_response.json().get('status_code')
+                if status_code == 'FINISHED':
+                    break
+                elif status_code == 'ERROR':
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Error al procesar media en Instagram"
+                    )
+            time.sleep(2)
+
+        # 6. Publicar el contenedor
+        logger.info(f"Publicando contenedor {container_id}")
+        publish_url = f"https://graph.facebook.com/v19.0/{ig_account_id}/media_publish"
+        publish_params = {
+            'creation_id': container_id,
+            'access_token': access_token
+        }
+
+        publish_response = requests.post(publish_url, data=publish_params)
+
+        if publish_response.status_code != 200:
+            logger.error(
+                f"Error al publicar: {publish_response.text}"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error al publicar en Instagram: {publish_response.json().get('error', {}).get('message', 'Error desconocido')}"
+            )
+
+        instagram_post_id = publish_response.json().get('id')
+        logger.info(f"Post publicado exitosamente: {instagram_post_id}")
+
+        # 7. Actualizar post en base de datos
+        update_response = (
+            supabase.table('posts')
+            .update({
+                'instagram_post_id': instagram_post_id,
+                'status': 'published',
+                'publication_date': datetime.utcnow().isoformat()
+            })
+            .eq('id', post_id)
+            .execute()
+        )
+
+        return {
+            "success": True,
+            "instagram_post_id": instagram_post_id,
+            "message": "Post publicado exitosamente en Instagram"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al publicar en Instagram: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al publicar en Instagram: {str(e)}"
+        )
+
+
+@app.post("/instagram/schedule/{post_id}")
+async def schedule_instagram_post(
+    post_id: int,
+    scheduled_time: datetime,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Programa un post para ser publicado en Instagram en una fecha/hora específica.
+    """
+    try:
+        logger.info(
+            f"Programando post {post_id} para {scheduled_time}"
+        )
+
+        # Verificar que el post existe y pertenece al usuario
+        post_response = (
+            supabase.table('posts')
+            .select('*')
+            .eq('id', post_id)
+            .eq('user_id', current_user.id)
+            .single()
+            .execute()
+        )
+
+        if not post_response.data:
+            raise HTTPException(
+                status_code=404,
+                detail="Post no encontrado"
+            )
+
+        post = post_response.data
+
+        # Verificar que no esté ya publicado
+        if post.get('instagram_post_id'):
+            raise HTTPException(
+                status_code=400,
+                detail="Este post ya está publicado en Instagram"
+            )
+
+        # Verificar que la fecha sea futura
+        if scheduled_time <= datetime.utcnow():
+            raise HTTPException(
+                status_code=400,
+                detail="La fecha programada debe ser en el futuro"
+            )
+
+        # Actualizar post con fecha programada
+        update_response = (
+            supabase.table('posts')
+            .update({
+                'scheduled_publish_time': scheduled_time.isoformat(),
+                'status': 'scheduled'
+            })
+            .eq('id', post_id)
+            .execute()
+        )
+
+        return {
+            "success": True,
+            "message": f"Post programado para {scheduled_time.isoformat()}",
+            "scheduled_time": scheduled_time.isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al programar post: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al programar post: {str(e)}"
+        )
+
+
+@app.get("/instagram/scheduled-posts")
+async def get_scheduled_posts(current_user: User = Depends(get_current_user)):
+    """
+    Obtiene todos los posts programados del usuario.
+    """
+    try:
+        response = (
+            supabase.table('posts')
+            .select('*')
+            .eq('user_id', current_user.id)
+            .eq('status', 'scheduled')
+            .not_.is_('scheduled_publish_time', 'null')
+            .order('scheduled_publish_time', desc=False)
+            .execute()
+        )
+
+        return response.data
+
+    except Exception as e:
+        logger.error(f"Error al obtener posts programados: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al obtener posts programados: {str(e)}"
+        )

@@ -1,0 +1,1 @@
+ALTER TABLE posts ADD COLUMN instagram_post_id TEXT UNIQUE;
