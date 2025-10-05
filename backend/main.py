@@ -87,6 +87,16 @@ app = FastAPI(
     version="0.1.0"
 )
 
+# Importar routers
+from routes.templates import router as templates_router
+from routes.content_generation import router as content_router
+from routes.template_sync_routes import router as template_sync_router
+
+# Registrar routers
+app.include_router(templates_router)
+app.include_router(content_router)
+app.include_router(template_sync_router)
+
 # Configuración de CORS
 app.add_middleware(
     CORSMiddleware,

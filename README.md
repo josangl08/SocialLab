@@ -111,48 +111,79 @@ npm run dev
 
 ```
 SocialLab/
-├── backend/                 # Backend FastAPI
-│   ├── main.py             # Aplicación principal
-│   ├── migrations/         # Migraciones SQL (001-005)
-│   ├── requirements.txt    # Dependencias Python
-│   └── .env               # Variables de entorno
-├── frontend/               # Frontend React
-│   ├── src/
-│   │   ├── components/    # Componentes React
-│   │   └── context/       # Context providers
-│   ├── package.json
-│   └── vite.config.ts
-├── start.py               # Script para iniciar todo
-└── MASTER_PLAN_INSTAGRAM_PLANNER.md  # 📖 GUÍA COMPLETA
+├── README.md                        # Este archivo
+├── MASTER_PLAN_INSTAGRAM_PLANNER.md # 📖 Documentación completa
+├── start.py                         # Script para iniciar todo
+│
+├── docs/                            # 📚 Documentación
+│   ├── METADATA_SCHEMA.md           # Schema de metadata PROJECT 1
+│   ├── GOOGLE_DRIVE_SETUP.md        # Setup Google Drive OAuth
+│   └── GUIA_USO.md                  # Guía de uso completa
+│
+├── backend/                         # Backend FastAPI
+│   ├── main.py                      # Aplicación principal
+│   ├── requirements.txt             # Dependencias Python
+│   ├── .env                         # Variables de entorno (no commitear)
+│   ├── .env.example                 # Template de variables
+│   │
+│   ├── database/                    # Conexión DB
+│   │   └── supabase_client.py
+│   │
+│   ├── services/                    # Servicios core
+│   │   ├── google_drive_connector.py
+│   │   ├── template_selector.py
+│   │   ├── template_sync.py
+│   │   ├── image_composer.py
+│   │   ├── caption_generator.py
+│   │   └── project1_sync.py
+│   │
+│   ├── routes/                      # API endpoints
+│   │   └── content_generation.py
+│   │
+│   ├── auth/                        # Autenticación
+│   │   └── instagram_oauth.py
+│   │
+│   ├── migrations/                  # Migraciones SQL (001-006)
+│   │   └── README.md                # Cómo ejecutar migraciones
+│   │
+│   ├── scripts/                     # Scripts utilitarios
+│   │   ├── apply_migrations.py
+│   │   ├── diagnostic.py
+│   │   └── create_test_templates.py
+│   │
+│   └── tests/                       # Tests
+│       ├── test_template_selector.py
+│       ├── test_image_composer.py
+│       └── test_end_to_end.py       # Test flujo completo
+│
+└── frontend/                        # Frontend React
+    ├── src/
+    │   ├── components/              # Componentes React
+    │   └── context/                 # Context providers
+    ├── package.json
+    └── vite.config.ts
 ```
 
 ## 🔑 Variables de Entorno Requeridas
 
 ### Backend (.env)
 
+Copia `backend/.env.example` a `backend/.env` y configura tus credenciales:
+
 ```bash
-# Supabase
-SUPABASE_URL=your_supabase_url
-SUPABASE_KEY=your_supabase_anon_key
-
-# JWT
-JWT_SECRET=your_jwt_secret
-
-# Instagram/Facebook
-INSTAGRAM_APP_ID=your_instagram_app_id
-INSTAGRAM_APP_SECRET=your_instagram_app_secret
-INSTAGRAM_REDIRECT_URI=http://localhost:8000/callback/instagram
-
-# Google Drive (opcional para PROJECT 1)
-GOOGLE_DRIVE_FOLDER_ID=your_folder_id
-
-# Google Gemini AI (gratuito)
-GEMINI_API_KEY=your_gemini_api_key
+cp backend/.env.example backend/.env
 ```
 
-Ver documentación completa en MASTER_PLAN para todas las variables.
+Ver `backend/.env.example` para todas las variables requeridas.
+
+Documentación completa de configuración:
+- Google Drive: `docs/GOOGLE_DRIVE_SETUP.md`
+- Guía completa: `docs/GUIA_USO.md`
+- Plan maestro: `MASTER_PLAN_INSTAGRAM_PLANNER.md`
 
 ## 📊 Base de Datos
+
+Ver `backend/migrations/README.md` para documentación completa de migraciones.
 
 ### Migraciones disponibles:
 
@@ -161,26 +192,29 @@ Ver documentación completa en MASTER_PLAN para todas las variables.
 3. **003_create_instagram_accounts_table.sql** - Tabla de cuentas Instagram
 4. **004_add_media_product_type.sql** - Tipo de contenido (FEED, REELS, STORY)
 5. **005_add_scheduled_publish_time.sql** - Programación de posts
+6. **006_add_missing_ids_and_schema.sql** - Schema completo (17 tablas)
 
-Ejecutar en Supabase SQL Editor en orden.
+Ejecutar en Supabase SQL Editor en orden o usar `python scripts/apply_migrations.py`
 
 ## 🎨 Funcionalidades Principales
 
-### ✅ Implementado (PROJECT 1 Base)
+### ✅ Implementado (Fase 1)
 - Autenticación de usuarios
 - Conexión con Instagram Business
 - Sincronización de posts existentes
 - Dashboard básico
 - Calendario de publicaciones
+- **Sincronización con Google Drive** (templates y PROJECT 1)
+- **Selección inteligente de templates** (basado en metadata)
+- **Composición de imágenes con Pillow** (template + gráfico)
+- **Generación de captions con IA** (Google Gemini 2.0 Flash)
 
-### 🚧 En Desarrollo (PROJECT 2 Planner)
-- Sincronización con Google Drive (datos PROJECT 1)
-- Selección inteligente de templates
-- Composición de imágenes con Pillow
-- Generación de captions con IA (Gemini)
-- Programación automática
+### 🚧 En Desarrollo (Fase 2+)
+- Programación automática de publicaciones
 - Publicación directa en Instagram
 - Analytics completo con insights
+- Sistema de colas para generación masiva
+- AI Strategy personalizada por cuenta
 
 Ver roadmap completo en MASTER_PLAN.
 
@@ -194,14 +228,22 @@ Ver roadmap completo en MASTER_PLAN.
 ## 🧪 Testing
 
 ```bash
-# Backend
+# Backend - Tests individuales
 cd backend
-pytest
+python -m tests.test_template_selector
+python -m tests.test_image_composer
+python -m tests.test_end_to_end
+
+# Backend - Con pytest
+cd backend
+pytest tests/
 
 # Frontend
 cd frontend
 npm run test
 ```
+
+Ver `backend/tests/__init__.py` para documentación completa de tests.
 
 ## 🚀 Deployment
 
@@ -227,10 +269,10 @@ Ver desglose completo en MASTER_PLAN.
 
 Para problemas comunes:
 1. Ver sección "Troubleshooting" en MASTER_PLAN
-2. Ejecutar script de diagnóstico (si existe):
+2. Ejecutar script de diagnóstico:
    ```bash
    cd backend
-   python diagnostic.py
+   python scripts/diagnostic.py
    ```
 
 ## 📄 Licencia
