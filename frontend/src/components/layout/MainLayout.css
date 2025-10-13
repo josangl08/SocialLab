@@ -1,18 +1,67 @@
+/* SocialLab - Dark Theme Variables */
 :root {
-  --primary-color: #00BCD4; /* Cian vibrante */
-  --secondary-color: #607D8B; /* Gris azulado suave */
-  --background-light: #F5F5F5; /* Fondo general claro */
-  --text-dark: #212121; /* Texto principal oscuro */
-  --sidebar-dark: #212121; /* Fondo oscuro para el sidebar */
-  --sidebar-text-light: #F5F5F5; /* Texto claro para el sidebar */
+  /* Primary Gradient Colors */
+  --primary-gradient-start: #667eea;
+  --primary-gradient-end: #764ba2;
+  --primary-color: #667eea;
+  --primary-hover: #5568d3;
+  --secondary-color: #764ba2;
+
+  /* Background Colors */
+  --sidebar-dark: #1a1d23;
+  --background-main: #22282d;
+  --background-card: #2a3038;
+  --background-card-hover: #303740;
+  --background-input: #1f2429;
+  --background-light: #22282d;
+
+  /* Text Colors */
+  --text-primary: #e8e9ed;
+  --text-secondary: #a0a6b1;
+  --text-muted: #6b7280;
+  --text-dark: #e8e9ed;
+  --text-white: #ffffff;
+  --sidebar-text-light: #e8e9ed;
+
+  /* Border Colors */
+  --border-light: #2d3339;
+  --border-medium: #3d444d;
+  --border-accent: #667eea;
+
+  /* Status Colors */
+  --status-success: #10b981;
+  --status-warning: #f59e0b;
+  --status-error: #ef4444;
+  --status-info: #3b82f6;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4);
+
+  /* Transitions */
+  --transition-base: 0.3s ease;
+
+  /* Border Radius */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
 }
 
 .main-layout-container {
   min-height: 100vh;
-  background-color: var(--background-light); /* Fondo general */
+  background-color: var(--background-main);
+  display: flex;
+  flex-direction: row;
 }
 
 .content-area {
-  background-color: var(--background-light); /* Fondo del área de contenido */
-  color: var(--text-dark); /* Color de texto principal */
+  background-color: var(--background-main);
+  color: var(--text-primary);
+  flex: 1;
+  overflow-y: auto;
+  max-height: 100vh;
+  position: relative;
+  z-index: 1;
 }

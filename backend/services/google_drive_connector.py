@@ -68,9 +68,7 @@ class GoogleDriveConnector:
                 else:
                     if not os.path.exists(self.credentials_path):
                         logger.error(
-                            f"Archivo {self.credentials_path} no encontrado"
-                        )
-                        logger.info(
+                            f"Archivo {self.credentials_path} no encontrado. "
                             "Descarga credentials.json desde Google Cloud Console"
                         )
                         return False
@@ -88,8 +86,7 @@ class GoogleDriveConnector:
                         )
                         flow.redirect_uri = redirect_uri
                         auth_url, _ = flow.authorization_url(prompt='consent')
-                        logger.info(f"🔗 Visita esta URL: {auth_url}")
-                        # En producción, esto se maneja con endpoint /callback/google
+                        logger.info(f"Visita esta URL para autenticar: {auth_url}")
                         return False  # Requiere implementar endpoint
                     else:
                         # Desarrollo: Desktop App (local server)
@@ -101,11 +98,11 @@ class GoogleDriveConnector:
 
             # Crear servicio de Drive
             self.service = build('drive', 'v3', credentials=self.creds)
-            logger.info("✅ Autenticado con Google Drive exitosamente")
+            logger.info("Google Drive autenticado exitosamente")
             return True
 
         except Exception as e:
-            logger.error(f"❌ Error en autenticación: {str(e)}")
+            logger.error(f"Error en autenticación de Google Drive: {str(e)}")
             return False
 
     def list_files(
@@ -149,11 +146,10 @@ class GoogleDriveConnector:
             ).execute()
 
             files = results.get('files', [])
-            logger.info(f"📁 Encontrados {len(files)} archivos")
             return files
 
         except Exception as e:
-            logger.error(f"❌ Error listando archivos: {str(e)}")
+            logger.error(f"Error listando archivos: {str(e)}")
             return []
 
     def download_file(
@@ -184,17 +180,15 @@ class GoogleDriveConnector:
 
             while not done:
                 status, done = downloader.next_chunk()
-                logger.info(f"⬇️  Descarga {int(status.progress() * 100)}%")
 
             # Guardar archivo
             with open(destination_path, 'wb') as f:
                 f.write(fh.getvalue())
 
-            logger.info(f"✅ Archivo descargado: {destination_path}")
             return True
 
         except Exception as e:
-            logger.error(f"❌ Error descargando archivo: {str(e)}")
+            logger.error(f"Error descargando archivo: {str(e)}")
             return False
 
     def download_metadata_json(
@@ -229,7 +223,7 @@ class GoogleDriveConnector:
             files = results.get('files', [])
 
             if not files:
-                logger.warning(f"⚠️  {filename} no encontrado en carpeta")
+                logger.warning(f"{filename} no encontrado en carpeta")
                 return None
 
             file_id = files[0]['id']
@@ -248,11 +242,10 @@ class GoogleDriveConnector:
             content = fh.getvalue().decode('utf-8')
             metadata = json.loads(content)
 
-            logger.info(f"✅ Metadata cargada: {len(metadata)} items")
             return metadata
 
         except Exception as e:
-            logger.error(f"❌ Error descargando metadata: {str(e)}")
+            logger.error(f"Error descargando metadata: {str(e)}")
             return None
 
     def list_project1_exports(
@@ -301,11 +294,10 @@ class GoogleDriveConnector:
 
                 exports.append(export_info)
 
-            logger.info(f"📦 Encontrados {len(exports)} exports de PROJECT 1")
             return exports
 
         except Exception as e:
-            logger.error(f"❌ Error listando exports: {str(e)}")
+            logger.error(f"Error listando exports: {str(e)}")
             return []
 
     def get_file_direct_url(self, file_id: str) -> str:
@@ -352,11 +344,10 @@ class GoogleDriveConnector:
             ).execute()
 
             channel_id = response.get('id')
-            logger.info(f"✅ Webhook configurado: {channel_id}")
             return channel_id
 
         except Exception as e:
-            logger.error(f"❌ Error configurando webhook: {str(e)}")
+            logger.error(f"Error configurando webhook: {str(e)}")
             return None
 
 

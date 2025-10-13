@@ -131,6 +131,7 @@ SocialLab/
 │   │
 │   ├── services/                    # Servicios core
 │   │   ├── google_drive_connector.py
+│   │   ├── instagram_insights.py  # 🆕 Instagram Analytics
 │   │   ├── template_selector.py
 │   │   ├── template_sync.py
 │   │   ├── image_composer.py
@@ -138,7 +139,9 @@ SocialLab/
 │   │   └── project1_sync.py
 │   │
 │   ├── routes/                      # API endpoints
-│   │   └── content_generation.py
+│   │   ├── content_generation.py
+│   │   ├── instagram_insights_routes.py  # 🆕 Analytics API
+│   │   └── drive_routes.py
 │   │
 │   ├── auth/                        # Autenticación
 │   │   └── instagram_oauth.py
@@ -159,7 +162,15 @@ SocialLab/
 └── frontend/                        # Frontend React
     ├── src/
     │   ├── components/              # Componentes React
-    │   └── context/                 # Context providers
+    │   │   ├── auth/                # Login, Register
+    │   │   ├── dashboard/           # Dashboard principal
+    │   │   ├── posts/               # PostList, PostGenerator 🆕
+    │   │   ├── calendar/            # PostCalendar, CalendarView
+    │   │   ├── analytics/           # Analytics 🆕
+    │   │   ├── strategy/            # StrategyConfig 🆕
+    │   │   ├── layout/              # MainLayout, Sidebar
+    │   │   └── user/                # UserProfile
+    │   └── context/                 # Context providers (Auth)
     ├── package.json
     └── vite.config.ts
 ```
@@ -193,28 +204,60 @@ Ver `backend/migrations/README.md` para documentación completa de migraciones.
 4. **004_add_media_product_type.sql** - Tipo de contenido (FEED, REELS, STORY)
 5. **005_add_scheduled_publish_time.sql** - Programación de posts
 6. **006_add_missing_ids_and_schema.sql** - Schema completo (17 tablas)
+7. **007_add_instagram_accounts_rls_policies.sql** 🆕 - Row Level Security para Instagram accounts
+8. **008_fix_posts_bucket_policies.sql** 🆕 - Políticas de storage para posts
 
 Ejecutar en Supabase SQL Editor en orden o usar `python scripts/apply_migrations.py`
 
 ## 🎨 Funcionalidades Principales
 
-### ✅ Implementado (Fase 1)
-- Autenticación de usuarios
-- Conexión con Instagram Business
-- Sincronización de posts existentes
-- Dashboard básico
-- Calendario de publicaciones
-- **Sincronización con Google Drive** (templates y PROJECT 1)
-- **Selección inteligente de templates** (basado en metadata)
-- **Composición de imágenes con Pillow** (template + gráfico)
-- **Generación de captions con IA** (Google Gemini 2.0 Flash)
+### ✅ Implementado (Fases 1-4)
+- **Autenticación y Gestión de Usuarios**
+  - Login/Register con Supabase Auth
+  - Gestión de sesiones y tokens JWT
 
-### 🚧 En Desarrollo (Fase 2+)
-- Programación automática de publicaciones
+- **Instagram Integration**
+  - Conexión con Instagram Business API
+  - OAuth flow completo
+  - Sincronización automática de posts existentes
+  - Instagram Insights y Analytics en tiempo real
+
+- **Dashboard Completo**
+  - Vista general con métricas clave (seguidores, engagement, alcance)
+  - Top posts y tendencias de engagement
+  - Mejores horarios para publicar (basado en datos reales)
+  - Posts programados próximos
+
+- **Analytics Avanzado**
+  - Métricas de rendimiento por período (7, 30, 90 días)
+  - Gráficos de tendencia de engagement
+  - Análisis de mejores horarios para publicar
+  - Posts más exitosos con métricas detalladas
+  - Insights y recomendaciones automáticas
+
+- **Generación de Contenido con IA**
+  - Sincronización con Google Drive (templates y PROJECT 1)
+  - Selección inteligente de templates (basado en metadata)
+  - Composición automática de imágenes con Pillow
+  - Generación de captions con Google Gemini 2.0 Flash
+  - Sistema de borradores con fecha programada
+
+- **Calendario Interactivo**
+  - Vista mensual de publicaciones
+  - Posts programados con preview
+  - Filtros por estado (draft, scheduled, published)
+
+- **Configuración de Estrategia**
+  - Configuración de frecuencia de publicación
+  - Distribución semanal de contenido
+  - Horarios preferidos personalizables
+
+### 🚧 En Desarrollo (Fase 5+)
+- Programación automática con APScheduler
 - Publicación directa en Instagram
-- Analytics completo con insights
 - Sistema de colas para generación masiva
-- AI Strategy personalizada por cuenta
+- Webhooks para notificaciones en tiempo real
+- Auto-posting basado en estrategia configurada
 
 Ver roadmap completo en MASTER_PLAN.
 

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo } from 'react';
 
 interface AuthContextType {
   token: string | null;
@@ -52,23 +52,33 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const isAuthenticated = !!token;
 
+  const contextValue = useMemo(
+    () => ({
+      token,
+      login,
+      logout,
+      isAuthenticated,
+      isInstagramConnected,
+      setInstagramConnected,
+      isSyncing,
+      setSyncing,
+      lastSync,
+      setLastSync,
+      syncCompleted,
+      setSyncCompleted,
+    }),
+    [
+      token,
+      isAuthenticated,
+      isInstagramConnected,
+      isSyncing,
+      lastSync,
+      syncCompleted,
+    ]
+  );
+
   return (
-    <AuthContext.Provider
-      value={{
-        token,
-        login,
-        logout,
-        isAuthenticated,
-        isInstagramConnected,
-        setInstagramConnected,
-        isSyncing,
-        setSyncing,
-        lastSync,
-        setLastSync,
-        syncCompleted,
-        setSyncCompleted,
-      }}
-    >
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

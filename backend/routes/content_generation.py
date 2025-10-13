@@ -35,7 +35,11 @@ class ContentGenerationRequest(BaseModel):
     )
     caption_style: Optional[str] = Field(
         default='informative',
-        description="Estilo del caption"
+        description="Estilo del caption (informative, engaging, viral, analytical)"
+    )
+    language: Optional[str] = Field(
+        default='es',
+        description="Idioma del caption: 'es' (español) o 'en' (inglés)"
     )
     auto_publish: bool = Field(
         default=False,
@@ -91,35 +95,48 @@ async def generate_content(
 
         logger.info(f"🎬 Iniciando generación para export: {request.export_id}")
 
-        # 1. Obtener export de PROJECT 1 desde Google Drive
-        drive = get_drive_connector()
-        project1_folder_id = get_project1_folder_id(user_id)
+        # Intentar primero obtener de Google Drive
+        metadata = None
+        is_mock_export = False
+        export_data = None
 
-        if not project1_folder_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Google Drive no configurado para PROJECT 1"
-            )
+        try:
+            # 1. Obtener export de PROJECT 1 desde Google Drive
+            drive = get_drive_connector()
+            project1_folder_id = get_project1_folder_id(user_id)
 
-        # Buscar export por ID
-        exports = drive.list_project1_exports(project1_folder_id)
-        export_data = next(
-            (e for e in exports if e['folder_name'] == request.export_id),
-            None
-        )
+            if project1_folder_id and drive.service:
+                logger.info("📂 Buscando export en Google Drive...")
+                # Buscar export por ID
+                exports = drive.list_project1_exports(project1_folder_id)
+                export_data = next(
+                    (e for e in exports if e['folder_name'] == request.export_id),
+                    None
+                )
 
-        if not export_data:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Export {request.export_id} no encontrado"
-            )
+                if export_data:
+                    metadata = export_data.get('metadata')
+                    if metadata:
+                        logger.info("✅ Export encontrado en Google Drive")
+                    else:
+                        logger.warning("⚠️ Export encontrado pero sin metadata válido")
+                else:
+                    logger.warning(f"⚠️ Export {request.export_id} no encontrado en Google Drive")
+        except Exception as drive_error:
+            logger.warning(f"⚠️ Error accediendo a Google Drive: {str(drive_error)}")
 
-        metadata = export_data.get('metadata')
+        # Si no se encontró en Drive, intentar con datos mock
         if not metadata:
-            raise HTTPException(
-                status_code=400,
-                detail="Export sin metadata.json válido"
-            )
+            logger.info("🎭 Intentando con datos mock...")
+            metadata = get_mock_metadata(request.export_id)
+            if metadata:
+                is_mock_export = True
+                logger.info("✅ Usando datos mock para generación")
+            else:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Export {request.export_id} no encontrado ni en Google Drive ni en datos mock"
+                )
 
         logger.info(
             f"✅ Metadata cargado: {metadata.get('export_type')}"
@@ -141,81 +158,149 @@ async def generate_content(
 
         logger.info(f"✅ Template seleccionado: {template['name']}")
 
-        # 3. Descargar imágenes necesarias
-        # Template base
-        if not template.get('image_url'):
-            raise HTTPException(
-                status_code=400,
-                detail="Template sin imagen base"
+        # 3. Procesar imagen (solo para exports reales, no mock)
+        final_image_bytes = None
+        final_image_url = None
+
+        if not is_mock_export:
+            # Descargar imágenes desde Google Drive
+            main_graphic_name = metadata.get('files', {}).get('main_graphic')
+            logger.info(f"🔍 Buscando gráfico: {main_graphic_name}")
+
+            if not main_graphic_name:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Export sin gráfico principal (main_graphic) en metadata.json"
+                )
+
+            # Buscar archivo en Google Drive
+            logger.info(f"📁 Listando archivos en folder {export_data['folder_id']}...")
+            files_in_folder = drive.list_files(export_data['folder_id'])
+            logger.info(f"📁 Archivos encontrados:")
+            for f in files_in_folder:
+                logger.info(f"   - {f['name']}")
+
+            graphic_file = next(
+                (
+                    f for f in files_in_folder
+                    if f['name'] == main_graphic_name
+                ),
+                None
             )
 
-        # TODO: Descargar template_image desde Supabase Storage
-        # Por ahora simulamos con None
-        template_image_bytes = None
+            if not graphic_file:
+                logger.error(f"❌ Gráfico '{main_graphic_name}' NO encontrado entre los archivos")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Gráfico '{main_graphic_name}' no encontrado en la carpeta. Archivos disponibles: {[f['name'] for f in files_in_folder]}"
+                )
 
-        # Gráfico de PROJECT 1
-        main_graphic_name = metadata.get('files', {}).get('main_graphic')
-        if not main_graphic_name:
-            raise HTTPException(
-                status_code=400,
-                detail="Export sin gráfico principal (main_graphic)"
+            logger.info(f"✅ Gráfico '{main_graphic_name}' encontrado con ID: {graphic_file['id']}")
+
+            # Descargar gráfico
+            import tempfile
+            import os as os_temp
+
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp_path = tmp.name
+
+            drive.download_file(graphic_file['id'], tmp_path)
+
+            with open(tmp_path, 'rb') as f:
+                graphic_image_bytes = f.read()
+
+            os_temp.unlink(tmp_path)
+
+            logger.info(f"✅ Gráfico descargado: {main_graphic_name}")
+
+            # Descargar template desde Supabase Storage
+            template_path = template.get('file_path') or template.get('image_url')
+
+            if not template_path:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Template sin imagen configurada"
+                )
+
+            logger.info(f"🔍 Template path original: {template_path}")
+
+            # Si es URL completa, extraer solo la ruta relativa
+            if template_path.startswith('http'):
+                # Extraer la parte después de '/templates/'
+                if '/templates/' in template_path:
+                    template_path = template_path.split('/templates/')[-1]
+                    logger.info(f"✅ Ruta relativa extraída: {template_path}")
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"URL de template inválida: {template_path}"
+                    )
+
+            # Descargar template desde Supabase Storage
+            logger.info(f"⬇️ Descargando template desde Supabase Storage...")
+            template_response = supabase.storage.from_('templates').download(
+                template_path
             )
+            template_image_bytes = template_response
 
-        # Buscar archivo en Google Drive
-        graphic_file = next(
-            (
-                f for f in drive.list_files(export_data['folder_id'])
-                if f['name'] == main_graphic_name
-            ),
-            None
-        )
+            logger.info(f"✅ Template descargado: {template.get('name')}")
 
-        if not graphic_file:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Gráfico {main_graphic_name} no encontrado"
-            )
+            # Componer imagen final usando ImageComposer
+            image_composer = get_image_composer()
 
-        # Descargar gráfico
-        import tempfile
-        import os
+            # Obtener configuración del template
+            template_config = template.get('layout_config', {})
 
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            tmp_path = tmp.name
-
-        drive.download_file(graphic_file['id'], tmp_path)
-
-        with open(tmp_path, 'rb') as f:
-            graphic_image_bytes = f.read()
-
-        os.unlink(tmp_path)
-
-        logger.info(f"✅ Gráfico descargado: {main_graphic_name}")
-
-        # 4. Componer imagen final
-        # Por ahora solo usamos el gráfico si no hay template
-        if template_image_bytes:
-            composer = get_image_composer()
-            final_image_bytes = composer.compose_post(
+            final_image_bytes = image_composer.compose_post(
                 template_image=template_image_bytes,
                 graphic_image=graphic_image_bytes,
-                template_config=template.get('template_config', {}),
+                template_config=template_config,
                 format_type=request.format_type
             )
+
+            if not final_image_bytes:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Error componiendo imagen final"
+                )
+
+            logger.info("✅ Imagen final compuesta con template + gráfico")
+
+            # NO guardar todavía - solo convertir a base64 para preview
+            import base64
+            final_image_base64 = base64.b64encode(final_image_bytes).decode('utf-8')
+            final_image_url = f"data:image/png;base64,{final_image_base64}"
+
+            logger.info("✅ Imagen convertida a base64 para preview (no guardada aún)")
         else:
-            # Fallback: usar gráfico directo
-            final_image_bytes = graphic_image_bytes
+            # Para exports mock, usar la imagen del template
+            logger.info("🎭 Export mock: usando imagen del template")
 
-        if not final_image_bytes:
-            raise HTTPException(
-                status_code=500,
-                detail="Error componiendo imagen final"
-            )
+            # Obtener URL pública del template desde Supabase Storage
+            # El template puede tener 'file_path' o 'image_url'
+            template_path = template.get('file_path') or template.get('image_url')
 
-        logger.info("✅ Imagen final compuesta")
+            if template_path:
+                # Si el path no incluye el bucket, asumimos que está en 'templates'
+                if not template_path.startswith('http'):
+                    final_image_url = supabase.storage.from_('templates').get_public_url(
+                        template_path
+                    )
+                else:
+                    final_image_url = template_path
 
-        # 5. Generar caption con IA
-        caption_prompt = build_caption_prompt(metadata, request.caption_style)
+                logger.info(f"✅ Usando imagen del template: {template.get('name')}")
+            else:
+                logger.warning("⚠️ Template sin ruta de archivo, usando None")
+                final_image_url = None
+
+        # 4. Generar caption con IA
+        language = request.language if request.language else 'es'
+        caption_style = request.caption_style if request.caption_style else 'informative'
+
+        logger.info(f"🎨 Generando caption - Estilo: {caption_style}, Idioma: {language}")
+
+        caption_prompt = build_caption_prompt(metadata, caption_style, language)
         caption = generate_caption(caption_prompt)
 
         if not caption:
@@ -223,94 +308,29 @@ async def generate_content(
 
         logger.info("✅ Caption generado")
 
-        # 6. Subir imagen a Supabase Storage
-        final_image_path = (
-            f"generated/{user_id}/"
-            f"{request.export_id}_{request.format_type}.png"
-        )
+        # 5. NO crear post todavía - solo devolver datos para preview
+        logger.info("📦 Preparando respuesta con preview (sin guardar en DB)")
 
-        supabase.storage.from_('posts').upload(
-            final_image_path,
-            final_image_bytes,
-            {'content-type': 'image/png'}
-        )
-
-        final_image_url = supabase.storage.from_('posts').get_public_url(
-            final_image_path
-        )
-
-        # 7. Crear post en DB
-        post_data = {
-            'user_id': user_id,
-            'instagram_account_id': request.instagram_account_id,
-            'caption': caption,
-            'image_url': final_image_url,
-            'status': 'draft',
-            'metadata': {
-                'export_id': request.export_id,
-                'export_type': metadata.get('export_type'),
-                'template_id': template['id'],
-                'template_name': template['name'],
-                'format_type': request.format_type,
-                'generation_source': 'project1_auto'
-            }
-        }
-
-        if request.scheduled_time:
-            post_data['scheduled_for'] = request.scheduled_time.isoformat()
-            post_data['status'] = 'scheduled'
-
-        post_result = supabase.table('posts').insert(post_data).execute()
-
-        if not post_result.data:
-            raise HTTPException(
-                status_code=500,
-                detail="Error guardando post"
-            )
-
-        post = post_result.data[0]
-        logger.info(f"✅ Post creado: {post['id']}")
-
-        # 8. Incrementar use_count del template
-        supabase.table('templates').update({
-            'use_count': template['use_count'] + 1
-        }).eq('id', template['id']).execute()
-
-        # 9. Registrar en content_generation_history
-        supabase.table('content_generation_history').insert({
-            'user_id': user_id,
-            'post_id': post['id'],
-            'export_id': request.export_id,
-            'template_id': template['id'],
-            'generation_metadata': {
-                'export_type': metadata.get('export_type'),
-                'format_type': request.format_type,
-                'caption_style': request.caption_style
-            },
-            'status': 'completed'
-        }).execute()
-
-        # 10. Auto-publicar si se solicitó
-        if request.auto_publish and not request.scheduled_time:
-            background_tasks.add_task(
-                publish_to_instagram,
-                post['id'],
-                user_id
-            )
-
+        # Devolver preview SIN guardar en DB (el frontend guardará después)
         return ContentGenerationResponse(
             success=True,
-            message='Contenido generado exitosamente',
-            post_id=post['id'],
-            preview_url=final_image_url,
+            message='Preview generado - usa "Guardar" para almacenar' + (' (modo prueba)' if is_mock_export else ''),
+            post_id=None,  # No hay post_id porque no se guardó todavía
+            preview_url=final_image_url,  # Base64 data URL para preview
             caption=caption,
             template_used={
-                'id': template['id'],
-                'name': template['name']
-            },
+                'id': template.get('id') if template else 0,
+                'name': template.get('name') if template else 'mock_template'
+            } if template else None,
             metadata={
                 'export_id': request.export_id,
-                'export_type': metadata.get('export_type')
+                'export_type': metadata.get('export_type'),
+                'instagram_account_id': request.instagram_account_id,
+                'format_type': request.format_type,
+                'caption_style': request.caption_style,
+                'template_id': template.get('id') if template else None,
+                'is_mock': is_mock_export,
+                'user_id': user_id  # Para cuando se guarde después
             }
         )
 
@@ -406,20 +426,25 @@ def get_project1_folder_id(user_id: str) -> Optional[str]:
     return os.getenv('GOOGLE_DRIVE_PROJECT1_FOLDER_ID')
 
 
-def build_caption_prompt(metadata: dict, style: str) -> str:
+def build_caption_prompt(metadata: dict, style: str, language: str = 'es') -> str:
     """
     Construye prompt para generación de caption basado en metadata.
 
     Args:
         metadata: Metadata del export
         style: Estilo del caption (informative, engaging, viral, etc)
+        language: Idioma del caption ('es' o 'en')
 
     Returns:
         Prompt para el generador de captions
     """
     export_type = metadata.get('export_type')
 
-    base_prompt = f"Genera un caption de Instagram para {export_type}.\n\n"
+    # Texto base según idioma
+    if language == 'en':
+        base_prompt = f"Generate an Instagram caption for {export_type}.\n\n"
+    else:
+        base_prompt = f"Genera un caption de Instagram para {export_type}.\n\n"
 
     # Agregar contexto según tipo
     if export_type == 'player':
@@ -457,17 +482,29 @@ def build_caption_prompt(metadata: dict, style: str) -> str:
         base_prompt += f"Competición: {comp.get('name')}\n"
         base_prompt += f"Jornada: {comp.get('matchday')}\n"
 
-    # Agregar instrucciones de estilo
-    style_instructions = {
-        'informative': 'Usa un tono informativo y profesional.',
-        'engaging': 'Usa un tono engaging y emocionante.',
-        'viral': 'Usa un tono viral y llamativo con emojis.',
-        'analytical': 'Usa un tono analítico y detallado.',
-    }
-
-    base_prompt += f"\nEstilo: {style_instructions.get(style, style)}\n"
-    base_prompt += "Incluye hashtags relevantes.\n"
-    base_prompt += "Máximo 2200 caracteres.\n"
+    # Agregar instrucciones de estilo e idioma
+    if language == 'en':
+        style_instructions = {
+            'informative': 'Use an informative and professional tone.',
+            'engaging': 'Use an engaging and exciting tone.',
+            'viral': 'Use a viral and catchy tone with emojis.',
+            'analytical': 'Use an analytical and detailed tone.',
+        }
+        base_prompt += f"\nStyle: {style_instructions.get(style, style)}\n"
+        base_prompt += "Include relevant hashtags.\n"
+        base_prompt += "Maximum 2200 characters.\n"
+        base_prompt += "\n**IMPORTANT: Write the ENTIRE caption in ENGLISH.**\n"
+    else:
+        style_instructions = {
+            'informative': 'Usa un tono informativo y profesional.',
+            'engaging': 'Usa un tono engaging y emocionante.',
+            'viral': 'Usa un tono viral y llamativo con emojis.',
+            'analytical': 'Usa un tono analítico y detallado.',
+        }
+        base_prompt += f"\nEstilo: {style_instructions.get(style, style)}\n"
+        base_prompt += "Incluye hashtags relevantes.\n"
+        base_prompt += "Máximo 2200 caracteres.\n"
+        base_prompt += "\n**IMPORTANTE: Escribe TODO el caption en ESPAÑOL.**\n"
 
     return base_prompt
 
@@ -495,6 +532,123 @@ def generate_fallback_caption(metadata: dict) -> str:
         return f"🏆 Tabla de {comp} #Standings #Football"
 
     return "⚽ Contenido de fútbol #Football #Stats"
+
+
+def get_mock_metadata(export_id: str) -> Optional[dict]:
+    """
+    Devuelve metadata mock para exports de prueba.
+
+    Args:
+        export_id: ID del export mock (ej: "export_1", "export_player_messi_2025_01")
+
+    Returns:
+        Diccionario con metadata o None si no existe
+    """
+    mock_data = {
+        "export_1": {
+            "export_type": "player",
+            "player": {
+                "name": "Lionel Messi",
+                "position": "Forward",
+                "team": "Inter Miami"
+            },
+            "stats": {
+                "goals": 12,
+                "assists": 9,
+                "shots": 54,
+                "pass_accuracy": "89%",
+                "minutes_played": 1350
+            },
+            "context": "season"
+        },
+        "export_2": {
+            "export_type": "match",
+            "match": {
+                "home_team": {"name": "Barcelona"},
+                "away_team": {"name": "Real Madrid"},
+                "score": "3-1",
+                "status": "finished",
+                "date": "2025-01-14"
+            },
+            "stats": {
+                "possession": {"home": 58, "away": 42},
+                "shots": {"home": 15, "away": 8},
+                "corners": {"home": 7, "away": 3}
+            }
+        },
+        "export_3": {
+            "export_type": "team",
+            "team": {
+                "name": "Manchester City"
+            },
+            "stats": {
+                "wins": 20,
+                "draws": 3,
+                "losses": 2,
+                "goals_scored": 65,
+                "goals_conceded": 18,
+                "points": 63
+            }
+        },
+        "export_player_messi_2025_01": {
+            "export_type": "player",
+            "player": {
+                "name": "Lionel Messi",
+                "position": "Forward",
+                "team": "Inter Miami"
+            },
+            "stats": {
+                "goals": 12,
+                "assists": 9,
+                "shots": 54,
+                "pass_accuracy": "89%",
+                "minutes_played": 1350
+            }
+        },
+        "export_match_barcelona_real_2025_01": {
+            "export_type": "match",
+            "match": {
+                "home_team": {"name": "Barcelona"},
+                "away_team": {"name": "Real Madrid"},
+                "score": "3-1",
+                "status": "finished"
+            },
+            "stats": {
+                "possession": {"home": 58, "away": 42},
+                "shots": {"home": 15, "away": 8}
+            }
+        },
+        "export_team_man_city_2025_01": {
+            "export_type": "team",
+            "team": {
+                "name": "Manchester City"
+            },
+            "stats": {
+                "wins": 20,
+                "draws": 3,
+                "losses": 2,
+                "goals_scored": 65,
+                "goals_conceded": 18
+            }
+        },
+        "export_player_haaland_2025_01": {
+            "export_type": "player",
+            "player": {
+                "name": "Erling Haaland",
+                "position": "Striker",
+                "team": "Manchester City"
+            },
+            "stats": {
+                "goals": 25,
+                "assists": 5,
+                "shots": 78,
+                "shot_accuracy": "67%",
+                "minutes_played": 1800
+            }
+        }
+    }
+
+    return mock_data.get(export_id)
 
 
 async def publish_to_instagram(post_id: int, user_id: str):

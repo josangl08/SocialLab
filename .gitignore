@@ -129,3 +129,19 @@ htmlcov/
 # Archivos de diagnóstico temporal
 diagnostic_output.txt
 debug.log
+
+# Google Drive authentication (NEVER COMMIT)
+token.pickle
+credentials.json
+
+# Temporary exports and testing data
+backend/exports_to_upload/
+backend/exports/
+exports_to_upload/
+
+# Testing/Mock scripts (development only)
+backend/scripts/create_mock_*.py
+backend/scripts/create_sample_*.py
+
+# Diagnostic routes (temporary)
+backend/routes/*_diagnostics.py

@@ -80,3 +80,23 @@
   color: white;
   border-color: var(--primary-color);
 }
+
+/* Added to improve visibility */
+.rbc-month-view .rbc-day-bg.rbc-today {
+  background-color: #eaf2ff; /* Fondo azul claro para toda la celda */
+}
+
+.rbc-off-range-bg {
+  background-color: #f0f2f5; /* Un gris claro para atenuar */
+}
+
+.rbc-off-range .rbc-date-cell {
+  color: #b0b8c4; /* Color de texto más claro para los números */
+  font-weight: 300;
+}
+
+/* Número del día actual */
+.rbc-date-cell.rbc-now {
+  font-weight: 700; /* Negrita */
+  color: #667eea; /* Color azul primario para el número */
+}

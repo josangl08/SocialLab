@@ -27,15 +27,12 @@ const PostList: React.FC<PostListProps> = ({ refresh }) => {
   const [editingPost, setEditingPost] = useState<Post | null>(null); // Estado para la publicación en edición
 
   const fetchPosts = async () => {
-    console.log('PostList: Iniciando fetchPosts...');
     if (!token) {
-      console.log('PostList: Token no presente, no se hará la petición.');
       setError('No hay token de autenticación disponible.');
       setLoading(false);
       return;
     }
 
-    console.log('PostList: Token presente, intentando hacer la petición GET a /posts...');
     try {
       const response = await fetch('http://localhost:8000/posts', {
         method: 'GET',
@@ -45,29 +42,23 @@ const PostList: React.FC<PostListProps> = ({ refresh }) => {
         },
       });
 
-      console.log('PostList: Petición fetch completada. Estado de la respuesta:', response.status);
-
       if (response.ok) {
         const data: Post[] = await response.json();
-        console.log('PostList: Datos recibidos:', data);
         setPosts(data);
       } else {
         const errorData = await response.json();
-        console.error('PostList: Error en la respuesta del servidor:', errorData);
+        console.error('Error cargando posts:', errorData);
         setError('Error al cargar publicaciones: ' + (errorData.detail || 'Error desconocido'));
       }
     } catch (err) {
-      console.error('PostList: Error de red o servidor en fetch:', err);
-      setError('Error de red o servidor: ' + err.message);
+      console.error('Error de red:', err);
+      setError('Error de red o servidor');
     } finally {
       setLoading(false);
-      console.log('PostList: fetchPosts finalizado.');
     }
   };
 
   useEffect(() => {
-    console.log('PostList: useEffect se ha ejecutado.');
-    console.log('PostList: Token actual:', token);
     fetchPosts();
   }, [token, refresh]); // Añadir 'refresh' a las dependencias del useEffect
 
@@ -93,8 +84,8 @@ const PostList: React.FC<PostListProps> = ({ refresh }) => {
         setDeleteMessage('Error al eliminar publicación: ' + (errorData.detail || 'Error desconocido'));
       }
     } catch (err) {
-      setDeleteMessage('Error de red o servidor: ' + err.message);
-      console.error('Error de red o servidor:', err);
+      setDeleteMessage('Error de red o servidor');
+      console.error('Error eliminando post:', err);
     }
   };
 

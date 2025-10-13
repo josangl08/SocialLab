@@ -1,24 +1,83 @@
-import React, { useEffect, useCallback } from 'react';
-import { useLocation } from 'react-router-dom';
-import PostList from '../posts/PostList';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import 'bootstrap-icons/font/bootstrap-icons.css';
 import './Dashboard.css';
 
-const Dashboard: React.FC = () => {
-  const { 
-    isInstagramConnected, 
-    setInstagramConnected, 
-    isSyncing, 
-    setSyncing, 
-    lastSync, 
-    setLastSync, 
-    setSyncCompleted 
-  } = useAuth();
-  const location = useLocation();
+interface DashboardStats {
+  follower_count: number;
+  profile_views: number;
+  reach: number;
+  impressions: number;
+  engagement_rate: number;
+  total_posts: number;
+}
 
-  const checkInstagramStatus = useCallback(async () => {
+interface TopPost {
+  id: string;
+  caption: string;
+  media_url: string;
+  permalink: string;
+  timestamp: string;
+  likes: number;
+  comments: number;
+  engagement: number;
+  impressions: number;
+}
+
+interface EngagementTrendItem {
+  date: string;
+  likes: number;
+  comments: number;
+  engagement: number;
+  posts_count: number;
+}
+
+interface BestPostingTime {
+  hour: string;
+  avg_engagement_rate: number;
+  posts_count: number;
+}
+
+interface ScheduledPost {
+  id: number;
+  content: string;
+  post_type: string;
+  scheduled_at: string | null;
+  status: string;
+}
+
+const Dashboard: React.FC = () => {
+  const {
+    isInstagramConnected,
+    setInstagramConnected,
+    isSyncing,
+    setSyncing,
+    lastSync,
+    setLastSync,
+    setSyncCompleted
+  } = useAuth();
+
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState<boolean>(true);
+  const [stats, setStats] = useState<DashboardStats>({
+    follower_count: 0,
+    profile_views: 0,
+    reach: 0,
+    impressions: 0,
+    engagement_rate: 0,
+    total_posts: 0
+  });
+  const [topPosts, setTopPosts] = useState<TopPost[]>([]);
+  const [engagementTrend, setEngagementTrend] = useState<EngagementTrendItem[]>([]);
+  const [bestTimes, setBestTimes] = useState<BestPostingTime[]>([]);
+  const [scheduledPosts, setScheduledPosts] = useState<ScheduledPost[]>([]);
+  const hasInitialFetched = useRef(false);
+
+  const checkInstagramStatus = useCallback(async (): Promise<boolean> => {
     const token = localStorage.getItem('authToken');
-    if (!token) return;
+    if (!token) return false;
 
     try {
       const response = await fetch('http://localhost:8000/instagram/status', {
@@ -32,11 +91,73 @@ const Dashboard: React.FC = () => {
         if (data.expired) {
           alert('Tu token de Instagram ha expirado. Por favor vuelve a conectar tu cuenta.');
         }
+
+        return data.connected; // ← Retornar el valor
       }
+      return false;
     } catch (error) {
       console.error('Error al verificar estado de Instagram:', error);
+      return false;
     }
   }, [setInstagramConnected]);
+
+  const fetchDashboardStats = useCallback(async (connected: boolean = false) => {
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      // Fetch Instagram analytics overview
+      if (connected) {
+        const instagramResponse = await fetch('http://localhost:8000/api/instagram/analytics/overview', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (instagramResponse.ok) {
+          const data = await instagramResponse.json();
+
+          if (data.success && data.data) {
+            setStats({
+              follower_count: data.data.overview.follower_count || 0,
+              profile_views: data.data.overview.profile_views || 0,
+              reach: data.data.overview.reach || 0,
+              impressions: data.data.overview.impressions || 0,
+              engagement_rate: data.data.overview.engagement_rate || 0,
+              total_posts: data.data.overview.total_posts || 0
+            });
+            setTopPosts(data.data.top_posts || []);
+            setEngagementTrend(data.data.engagement_trend || []);
+            setBestTimes(data.data.best_posting_times || []);
+          }
+        } else {
+          console.error('Error cargando analytics de Instagram:', instagramResponse.status);
+        }
+      }
+
+      // Fetch scheduled posts from local database
+      const postsResponse = await fetch('http://localhost:8000/posts', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (postsResponse.ok) {
+        const posts = await postsResponse.json();
+        const upcoming = (posts || [])
+          .filter((p: any) => p.status === 'scheduled')
+          .slice(0, 5);
+        setScheduledPosts(upcoming);
+      } else {
+        console.error('Error cargando posts');
+      }
+    } catch (error) {
+      console.error('Error cargando dashboard:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []); // Sin dependencias, ahora recibe `connected` como parámetro
 
   const handleSync = useCallback(async () => {
     if (isSyncing || (lastSync && new Date().getTime() - lastSync.getTime() < 5 * 60 * 1000)) {
@@ -54,7 +175,8 @@ const Dashboard: React.FC = () => {
 
       if (response.ok) {
         setLastSync(new Date());
-        setSyncCompleted(prev => prev + 1);
+        setSyncCompleted(0);
+        fetchDashboardStats(true); // Refresh stats after sync (Instagram está conectado)
       } else {
         console.error('Error al sincronizar con Instagram');
         setLastSync(new Date());
@@ -65,12 +187,19 @@ const Dashboard: React.FC = () => {
     } finally {
       setSyncing(false);
     }
-  }, [isSyncing, lastSync, setSyncing, setLastSync, setSyncCompleted]);
+  }, [isSyncing, lastSync, setSyncing, setLastSync, setSyncCompleted, fetchDashboardStats]);
 
   useEffect(() => {
-    // Verificar estado real de Instagram al montar el componente
-    checkInstagramStatus();
-  }, [checkInstagramStatus]);
+    if (hasInitialFetched.current) return;
+    hasInitialFetched.current = true;
+
+    const initDashboard = async () => {
+      const connected = await checkInstagramStatus(); // Obtener el valor
+      await fetchDashboardStats(connected);  // Pasarlo como parámetro
+    };
+
+    initDashboard();
+  }, [checkInstagramStatus, fetchDashboardStats]);
 
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);
@@ -79,12 +208,6 @@ const Dashboard: React.FC = () => {
       handleSync();
     }
   }, [location, setInstagramConnected, handleSync]);
-
-  useEffect(() => {
-    if (isInstagramConnected) {
-      handleSync();
-    }
-  }, [isInstagramConnected, handleSync]);
 
   const handleConnectInstagram = async () => {
     const token = localStorage.getItem('authToken');
@@ -100,30 +223,222 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const formatNumber = (num: number) => {
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+    return num.toString();
+  };
+
   return (
     <div className="dashboard-container">
-      <div className="container">
-        <div className="row justify-content-center">
-          <div className="col-12">
-            <div className="card p-4 shadow-sm dashboard-card">
-              <h2 className="mb-4 text-center text-primary">Bienvenido al Dashboard</h2>
-              <p className="mb-4 text-center text-secondary">Aquí puedes ver tus publicaciones.</p>
+      {/* Header with Stats */}
+      <div className="dashboard-header">
+        <div className="header-top">
+          <h1>Dashboard - SocialLab</h1>
+          <div className="header-actions">
+            {!isInstagramConnected ? (
+              <button className="btn-connect-instagram" onClick={handleConnectInstagram}>
+                <i className="bi bi-instagram me-2"></i>
+                Conectar Instagram
+              </button>
+            ) : (
+              <button
+                className="btn-sync"
+                onClick={handleSync}
+                disabled={isSyncing}
+              >
+                <i className={`bi ${isSyncing ? 'bi-arrow-repeat' : 'bi-arrow-clockwise'} me-2`}></i>
+                {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
+              </button>
+            )}
+          </div>
+        </div>
 
-              {!isInstagramConnected ? (
-                <button className="btn btn-info mb-4" onClick={handleConnectInstagram}>
-                  Conectar Instagram
-                </button>
-              ) : (
-                <button className="btn btn-secondary mb-4" onClick={handleSync} disabled={isSyncing}>
-                  {isSyncing ? 'Sincronizando...' : 'Sincronizar con Instagram'}
-                </button>
-              )}
-
-              <PostList />
+        <div className="dashboard-stats">
+          <div className="stat-card">
+            <div className="stat-icon">
+              <i className="bi bi-people"></i>
+            </div>
+            <div className="stat-content">
+              <span className="stat-value">{formatNumber(stats.follower_count)}</span>
+              <span className="stat-label">Seguidores</span>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon">
+              <i className="bi bi-eye"></i>
+            </div>
+            <div className="stat-content">
+              <span className="stat-value">{formatNumber(stats.profile_views)}</span>
+              <span className="stat-label">Vistas Perfil</span>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon">
+              <i className="bi bi-broadcast"></i>
+            </div>
+            <div className="stat-content">
+              <span className="stat-value">{formatNumber(stats.reach)}</span>
+              <span className="stat-label">Alcance</span>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon">
+              <i className="bi bi-heart"></i>
+            </div>
+            <div className="stat-content">
+              <span className="stat-value">{stats.engagement_rate.toFixed(1)}%</span>
+              <span className="stat-label">Engagement</span>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Main Dashboard Content */}
+      {!isInstagramConnected ? (
+        <div className="dashboard-content">
+          <div className="alert alert-info">
+            <i className="bi bi-info-circle me-2"></i>
+            Conecta tu cuenta de Instagram para ver insights y análisis detallados
+          </div>
+        </div>
+      ) : loading ? (
+        <div className="dashboard-loading">
+          <div className="spinner"></div>
+          <p>Cargando datos de Instagram...</p>
+        </div>
+      ) : (
+        <div className="dashboard-content">
+          {/* Two Column Layout */}
+          <div className="dashboard-grid">
+            {/* Left Column */}
+            <div className="dashboard-column">
+              {/* Engagement Trend */}
+              <div className="dashboard-section">
+                <h3><i className="bi bi-graph-up me-2"></i>Tendencia de Engagement (7 días)</h3>
+                <div className="trend-mini-chart">
+                  {engagementTrend.length > 0 ? (
+                    engagementTrend.map((item, index) => (
+                      <div key={index} className="trend-bar-container">
+                        <div
+                          className="trend-bar"
+                          style={{
+                            height: `${(item.engagement / Math.max(...engagementTrend.map(t => t.engagement))) * 100}%`
+                          }}
+                          title={`${item.date}: ${item.engagement} engagement`}
+                        ></div>
+                        <span className="trend-label">{new Date(item.date).getDate()}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-muted">No hay datos de tendencia disponibles</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Top Post */}
+              <div className="dashboard-section">
+                <h3><i className="bi bi-trophy me-2"></i>Post Destacado</h3>
+                {topPosts.length > 0 ? (
+                  <div className="top-post-card">
+                    {topPosts[0].media_url && (
+                      <img src={topPosts[0].media_url} alt="Top post" className="top-post-image" />
+                    )}
+                    <div className="top-post-content">
+                      <p className="top-post-caption">
+                        {topPosts[0].caption.substring(0, 120)}{topPosts[0].caption.length > 120 ? '...' : ''}
+                      </p>
+                      <div className="top-post-metrics">
+                        <span><i className="bi bi-heart-fill"></i> {formatNumber(topPosts[0].likes)}</span>
+                        <span><i className="bi bi-chat-fill"></i> {formatNumber(topPosts[0].comments)}</span>
+                        <span><i className="bi bi-eye-fill"></i> {formatNumber(topPosts[0].impressions)}</span>
+                      </div>
+                      <a href={topPosts[0].permalink} target="_blank" rel="noopener noreferrer" className="btn-view-post">
+                        Ver en Instagram <i className="bi bi-box-arrow-up-right"></i>
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-muted">No hay posts disponibles</p>
+                )}
+              </div>
+            </div>
+
+            {/* Right Column */}
+            <div className="dashboard-column">
+              {/* Best Posting Time */}
+              <div className="dashboard-section">
+                <h3><i className="bi bi-clock me-2"></i>Mejor Horario para Publicar</h3>
+                {bestTimes.length > 0 ? (
+                  <div className="best-time-highlight">
+                    <div className="best-time-value">{bestTimes[0].hour}</div>
+                    <p className="best-time-label">
+                      {bestTimes[0].avg_engagement_rate.toFixed(1)}% engagement promedio
+                    </p>
+                    <small className="text-muted">Basado en {bestTimes[0].posts_count} posts</small>
+                  </div>
+                ) : (
+                  <p className="text-muted">No hay suficientes datos para análisis</p>
+                )}
+              </div>
+
+              {/* Upcoming Posts */}
+              <div className="dashboard-section">
+                <h3><i className="bi bi-calendar-event me-2"></i>Próximas Publicaciones</h3>
+                {scheduledPosts.length > 0 ? (
+                  <div className="upcoming-posts-list">
+                    {scheduledPosts.map((post) => (
+                      <div key={post.id} className="upcoming-post-item">
+                        <div className="upcoming-post-icon">
+                          <i className="bi bi-instagram"></i>
+                        </div>
+                        <div className="upcoming-post-info">
+                          <p className="upcoming-post-content">
+                            {post.content.substring(0, 60)}{post.content.length > 60 ? '...' : ''}
+                          </p>
+                          <span className="upcoming-post-date">
+                            <i className="bi bi-clock"></i> {post.scheduled_at ? formatDate(post.scheduled_at) : 'Fecha no definida'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-muted">No hay publicaciones programadas</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Actions */}
+          <div className="dashboard-section">
+            <h3><i className="bi bi-lightning me-2"></i>Acciones Rápidas</h3>
+            <div className="quick-actions-grid">
+              <button className="quick-action-btn" onClick={() => navigate('/create-post')}>
+                <i className="bi bi-plus-circle"></i>
+                <span>Crear Post</span>
+              </button>
+              <button className="quick-action-btn" onClick={() => navigate('/generate')}>
+                <i className="bi bi-stars"></i>
+                <span>Generar Contenido</span>
+              </button>
+              <button className="quick-action-btn" onClick={() => navigate('/calendar')}>
+                <i className="bi bi-calendar-event"></i>
+                <span>Ver Calendario</span>
+              </button>
+              <button className="quick-action-btn" onClick={() => navigate('/analytics')}>
+                <i className="bi bi-bar-chart-line"></i>
+                <span>Analytics Completo</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

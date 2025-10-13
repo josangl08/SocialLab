@@ -31,7 +31,6 @@ const Register: React.FC = () => {
       if (response.ok) {
         const data = await response.json();
         setMessage('Registro exitoso! Usuario: ' + data.email + '. Redirigiendo a login...');
-        console.log('Usuario registrado:', data);
         setTimeout(() => {
           navigate('/login'); // Redirigir al login después de un registro exitoso
         }, 2000); // Redirigir después de 2 segundos
@@ -40,7 +39,7 @@ const Register: React.FC = () => {
         setMessage('Error al registrar: ' + (errorData.detail || 'Error desconocido'));
       }
     } catch (error) {
-      setMessage('Error de red o servidor: ' + error.message);
+      setMessage('Error de red o servidor');
       console.error('Error de red o servidor:', error);
     } finally {
       setLoading(false); // Finalizar carga

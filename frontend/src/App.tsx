@@ -5,7 +5,11 @@ import Register from './components/auth/Register';
 import Dashboard from './components/dashboard/Dashboard';
 import UserProfile from './components/user/UserProfile';
 import CreatePost from './components/posts/CreatePost';
-import CalendarView from './components/calendar/CalendarView'; // Importar CalendarView
+import PostList from './components/posts/PostList';
+import PostGenerator from './components/posts/PostGenerator';
+import CalendarView from './components/calendar/CalendarView';
+import Analytics from './components/analytics/Analytics';
+import StrategyConfig from './components/strategy/StrategyConfig';
 import MainLayout from './components/layout/MainLayout';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import './App.css';
@@ -58,6 +62,38 @@ function App() {
             element={
               <ProtectedRoute>
                 <CalendarView />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/posts"
+            element={
+              <ProtectedRoute>
+                <PostList />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/generate"
+            element={
+              <ProtectedRoute>
+                <PostGenerator onPostGenerated={() => { /* Refrescar si es necesario */ }} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/analytics"
+            element={
+              <ProtectedRoute>
+                <Analytics />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/strategy"
+            element={
+              <ProtectedRoute>
+                <StrategyConfig />
               </ProtectedRoute>
             }
           />
