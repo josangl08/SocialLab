@@ -131,16 +131,21 @@ SocialLab/
 │   │
 │   ├── services/                    # Servicios core
 │   │   ├── google_drive_connector.py
-│   │   ├── instagram_insights.py  # 🆕 Instagram Analytics
+│   │   ├── instagram_insights.py
 │   │   ├── template_selector.py
 │   │   ├── template_sync.py
 │   │   ├── image_composer.py
 │   │   ├── caption_generator.py
-│   │   └── project1_sync.py
+│   │   ├── project1_sync.py
+│   │   ├── scheduler/               # 🆕 Sistema de scheduling
+│   │   │   └── post_scheduler.py    # APScheduler + auto-retry
+│   │   └── publisher/               # 🆕 Publicación en Instagram
+│   │       └── instagram_publisher.py
 │   │
 │   ├── routes/                      # API endpoints
 │   │   ├── content_generation.py
-│   │   ├── instagram_insights_routes.py  # 🆕 Analytics API
+│   │   ├── instagram_insights_routes.py
+│   │   ├── scheduler_routes.py      # 🆕 Scheduling API
 │   │   └── drive_routes.py
 │   │
 │   ├── auth/                        # Autenticación
@@ -204,8 +209,9 @@ Ver `backend/migrations/README.md` para documentación completa de migraciones.
 4. **004_add_media_product_type.sql** - Tipo de contenido (FEED, REELS, STORY)
 5. **005_add_scheduled_publish_time.sql** - Programación de posts
 6. **006_add_missing_ids_and_schema.sql** - Schema completo (17 tablas)
-7. **007_add_instagram_accounts_rls_policies.sql** 🆕 - Row Level Security para Instagram accounts
-8. **008_fix_posts_bucket_policies.sql** 🆕 - Políticas de storage para posts
+7. **007_add_instagram_accounts_rls_policies.sql** - Row Level Security para Instagram accounts
+8. **008_fix_posts_bucket_policies.sql** - Políticas de storage para posts
+9. **009_create_scheduled_jobs_table.sql** 🆕 - Tabla para gestión de jobs programados (APScheduler)
 
 Ejecutar en Supabase SQL Editor en orden o usar `python scripts/apply_migrations.py`
 
@@ -252,12 +258,20 @@ Ejecutar en Supabase SQL Editor en orden o usar `python scripts/apply_migrations
   - Distribución semanal de contenido
   - Horarios preferidos personalizables
 
-### 🚧 En Desarrollo (Fase 5+)
-- Programación automática con APScheduler
-- Publicación directa en Instagram
+- **Scheduling y Automatización** 🆕
+  - Programación automática con APScheduler
+  - Publicación directa en Instagram (Feed, Reels, Stories)
+  - Sistema de reintentos con backoff exponencial (3 intentos)
+  - Auto-detección de posts huérfanos (recuperación post-restart)
+  - Persistencia de jobs en PostgreSQL
+  - API completa para gestión de trabajos programados
+  - Manejo correcto de zonas horarias (UTC)
+
+### 🚧 En Desarrollo (Fase 6+)
 - Sistema de colas para generación masiva
 - Webhooks para notificaciones en tiempo real
 - Auto-posting basado en estrategia configurada
+- Sistema de templates dinámicos
 
 Ver roadmap completo en MASTER_PLAN.
 

@@ -84,12 +84,41 @@ app = FastAPI(
     version="0.1.0"
 )
 
+# --- Lifecycle Events ---
+@app.on_event("startup")
+async def startup_event():
+    """Inicializa servicios al arrancar la aplicación."""
+    logger.info("🚀 Iniciando SocialLab API...")
+
+    # Inicializar el scheduler (singleton pattern)
+    try:
+        from services.scheduler.post_scheduler import PostScheduler
+        scheduler = PostScheduler()
+        logger.info("✅ PostScheduler inicializado correctamente")
+    except Exception as e:
+        logger.error(f"❌ Error al inicializar PostScheduler: {e}")
+        # No lanzar excepción para permitir que la app arranque sin scheduler
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cierra servicios al apagar la aplicación."""
+    logger.info("🛑 Apagando SocialLab API...")
+
+    try:
+        from services.scheduler.post_scheduler import PostScheduler
+        scheduler = PostScheduler()
+        scheduler.shutdown(wait=True)
+        logger.info("✅ PostScheduler cerrado correctamente")
+    except Exception as e:
+        logger.error(f"❌ Error al cerrar PostScheduler: {e}")
+
 # Importar routers
 from routes.templates import router as templates_router
 from routes.content_generation import router as content_router
 from routes.template_sync_routes import router as template_sync_router
 from routes.instagram_insights_routes import router as instagram_insights_router
 from routes.drive_routes import router as drive_router
+from routes.scheduler_routes import router as scheduler_router
 
 # Registrar routers
 app.include_router(templates_router)
@@ -97,6 +126,7 @@ app.include_router(content_router)
 app.include_router(template_sync_router)
 app.include_router(instagram_insights_router)
 app.include_router(drive_router)
+app.include_router(scheduler_router)
 
 # Configuración de CORS
 app.add_middleware(
@@ -1071,7 +1101,7 @@ async def schedule_instagram_post(
         update_response = (
             supabase.table('posts')
             .update({
-                'scheduled_publish_time': scheduled_time.isoformat(),
+                'scheduled_at': scheduled_time.isoformat(),
                 'status': 'scheduled'
             })
             .eq('id', post_id)
@@ -1105,8 +1135,8 @@ async def get_scheduled_posts(current_user: User = Depends(get_current_user)):
             .select('*')
             .eq('user_id', current_user.id)
             .eq('status', 'scheduled')
-            .not_.is_('scheduled_publish_time', 'null')
-            .order('scheduled_publish_time', desc=False)
+            .not_.is_('scheduled_at', 'null')
+            .order('scheduled_at', desc=False)
             .execute()
         )
 

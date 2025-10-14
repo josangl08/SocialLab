@@ -6299,14 +6299,14 @@ export default StrategyConfig;
 
 ---
 
-## FASE 5: Automatización y Scheduling (Días 32-38)
+## FASE 5: Automatización y Scheduling (Días 32-38) ✅ COMPLETADA
 
 ### Objetivo
 Implementar sistema de programación automática de posts con APScheduler y opcionalmente n8n para flujos avanzados.
 
 ### 27. Sistema de Scheduling con APScheduler (Opción Simple)
 
-**[ ] 27.1 Servicio PostScheduler**
+**[x] 27.1 Servicio PostScheduler**
 
 Ubicación: `backend/services/scheduler/post_scheduler.py`
 
@@ -6594,7 +6594,7 @@ class PostScheduler:
         logger.info("PostScheduler shut down")
 ```
 
-**[ ] 27.2 Endpoints de Scheduling**
+**[x] 27.2 Endpoints de Scheduling**
 
 En `backend/main.py`:
 
@@ -7069,19 +7069,35 @@ async def suggest_post_time(
 
 ### Checklist de Validación Fase 5
 
-- [ ] APScheduler configurado e inicializado
-- [ ] PostScheduler implementado con retry logic
-- [ ] Endpoints de scheduling funcionan
-- [ ] Jobs persisten en PostgreSQL
-- [ ] Sistema restaura jobs pendientes al reiniciar
-- [ ] BestTimeAnalyzer analiza datos históricos
-- [ ] Sugerencias de horarios son precisas
+- [x] APScheduler configurado e inicializado
+- [x] PostScheduler implementado con retry logic
+- [x] Endpoints de scheduling funcionan
+- [x] Jobs persisten en PostgreSQL
+- [x] Sistema restaura jobs pendientes al reiniciar
+- [x] BestTimeAnalyzer analiza datos históricos
+- [x] Sugerencias de horarios son precisas
 - [ ] n8n opcional configurado (si se usa)
-- [ ] Tests de scheduling pasan
-- [ ] Commit y push
+- [x] Tests de scheduling pasan
+- [x] Commit y push
 
 ### Entregable Fase 5
 ✅ Sistema completo de automatización y scheduling con análisis inteligente de horarios
+
+### Entregable Fase 5
+✅ **COMPLETADA** - Sistema de scheduling y automatización completo
+
+**Funcionalidades implementadas:**
+- ✅ PostScheduler con APScheduler y persistencia en PostgreSQL
+- ✅ Sistema de reintentos con backoff exponencial (5min, 15min, 30min)
+- ✅ Auto-detección de posts huérfanos al reiniciar servidor
+- ✅ API completa de scheduling (7 endpoints)
+- ✅ Publicación directa en Instagram con InstagramPublisher
+- ✅ Manejo correcto de zonas horarias (UTC)
+- ✅ Migración 009 para tabla scheduled_jobs
+- ✅ Tests end-to-end confirmados (post publicado en Instagram)
+
+**Nota:** n8n (tarea 28.1) no fue implementado por ser opcional para automatización avanzada.
+
 
 ---
 
