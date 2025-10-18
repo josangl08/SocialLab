@@ -1,0 +1,331 @@
+{
+  "$schema": "https://claude-code-framework.dev/schema/v2.0.0.json",
+  "version": "2.0.0",
+  "generatedAt": "2025-01-18T00:00:00Z",
+
+  "project": {
+    "name": "SocialLab",
+    "type": "fullstack",
+    "description": "Instagram Content Planner with AI - Automated content generation and scheduling",
+    "repository": "https://github.com/tu-org/SocialLab"
+  },
+
+  "stack": {
+    "backend": {
+      "language": "python",
+      "framework": "fastapi",
+      "version": "0.109.0",
+      "architecture": "services",
+      "patterns": [
+        "dependency-injection",
+        "async-await",
+        "pydantic-models",
+        "service-oriented"
+      ],
+      "runtime": {
+        "version": "3.11+",
+        "server": "uvicorn"
+      }
+    },
+
+    "frontend": {
+      "language": "typescript",
+      "framework": "react",
+      "version": "18.2.0",
+      "buildTool": "vite",
+      "packageManager": "npm",
+      "stateManagement": "context-api",
+      "uiLibrary": "tailwind",
+      "chartLibrary": "recharts",
+      "architecture": "feature-based",
+      "components": {
+        "charts": "recharts",
+        "forms": "react-hook-form",
+        "routing": "react-router-dom"
+      }
+    },
+
+    "database": {
+      "type": "postgresql",
+      "provider": "supabase",
+      "version": "15",
+      "orm": "none",
+      "migrations": "raw-sql",
+      "features": [
+        "row-level-security",
+        "realtime-subscriptions",
+        "storage-buckets"
+      ]
+    },
+
+    "storage": {
+      "media": "supabase-storage",
+      "buckets": ["posts", "templates"],
+      "maxFileSize": "10MB"
+    },
+
+    "external": {
+      "ai": {
+        "provider": "google-gemini",
+        "model": "gemini-2.0-flash",
+        "apiKey": "env:GEMINI_API_KEY"
+      },
+      "socialMedia": {
+        "platform": "instagram",
+        "api": "instagram-graph-api",
+        "features": ["feed", "reels", "stories"]
+      },
+      "cloudStorage": {
+        "provider": "google-drive",
+        "purpose": "template-storage",
+        "quota": "15GB"
+      },
+      "imageProcessing": {
+        "library": "pillow",
+        "formats": ["PNG", "JPEG", "WebP"]
+      }
+    },
+
+    "scheduling": {
+      "framework": "apscheduler",
+      "backend": "postgresql",
+      "timezone": "UTC",
+      "features": [
+        "background-jobs",
+        "retry-logic",
+        "job-persistence"
+      ]
+    },
+
+    "testing": {
+      "backend": {
+        "framework": "pytest",
+        "coverage": "pytest-cov",
+        "async": "pytest-asyncio",
+        "mocking": "unittest.mock",
+        "fixtures": "conftest.py"
+      },
+      "frontend": {
+        "framework": "vitest",
+        "library": "react-testing-library",
+        "mocking": "msw",
+        "e2e": "playwright"
+      },
+      "coverage": {
+        "target": "80%",
+        "exclude": ["migrations/", "tests/", "__pycache__/"]
+      }
+    },
+
+    "deployment": {
+      "backend": {
+        "platform": "render",
+        "type": "web-service",
+        "region": "us-west"
+      },
+      "frontend": {
+        "platform": "vercel",
+        "framework": "vite",
+        "region": "auto"
+      },
+      "ci": "github-actions",
+      "environments": ["development", "staging", "production"]
+    }
+  },
+
+  "structure": {
+    "backend": {
+      "root": "backend",
+      "services": "backend/services",
+      "routes": "backend/routes",
+      "database": "backend/database",
+      "auth": "backend/auth",
+      "tests": "backend/tests",
+      "migrations": "backend/migrations",
+      "scripts": "backend/scripts"
+    },
+    "frontend": {
+      "root": "frontend",
+      "src": "frontend/src",
+      "components": "frontend/src/components",
+      "context": "frontend/src/context",
+      "utils": "frontend/src/utils",
+      "tests": "frontend/src/__tests__",
+      "public": "frontend/public"
+    },
+    "shared": {
+      "docs": "docs",
+      "scripts": "scripts"
+    }
+  },
+
+  "commands": {
+    "backend": {
+      "dev": "cd backend && uvicorn main:app --reload --port 8000",
+      "test": "cd backend && pytest tests/",
+      "test_coverage": "cd backend && pytest --cov=. --cov-report=html tests/",
+      "lint": "cd backend && flake8 .",
+      "format": "cd backend && black .",
+      "migrations": "cd backend && python scripts/apply_migrations.py"
+    },
+    "frontend": {
+      "dev": "cd frontend && npm run dev",
+      "test": "cd frontend && npm run test",
+      "test_ui": "cd frontend && npm run test:ui",
+      "build": "cd frontend && npm run build",
+      "lint": "cd frontend && npm run lint",
+      "preview": "cd frontend && npm run preview"
+    },
+    "fullstack": {
+      "dev": "python start.py",
+      "test": "pytest backend/tests/ && cd frontend && npm run test"
+    }
+  },
+
+  "conventions": {
+    "commits": {
+      "language": "spanish",
+      "format": "conventional-commits",
+      "types": ["feat", "fix", "docs", "style", "refactor", "test", "chore"],
+      "includeAI": false,
+      "examples": [
+        "feat(backend): agregar endpoint de programación",
+        "fix(frontend): corregir bug en calendario",
+        "docs: actualizar README con nuevas features"
+      ]
+    },
+    "codeStyle": {
+      "backend": {
+        "formatter": "black",
+        "linter": "flake8",
+        "maxLineLength": 88,
+        "importOrder": "isort",
+        "docstrings": "google-style",
+        "typeHints": "required"
+      },
+      "frontend": {
+        "formatter": "prettier",
+        "linter": "eslint",
+        "maxLineLength": 100,
+        "importOrder": "eslint-plugin-import",
+        "quotes": "single",
+        "semi": true,
+        "trailingComma": "es5"
+      }
+    },
+    "naming": {
+      "backend": {
+        "files": "snake_case",
+        "functions": "snake_case",
+        "classes": "PascalCase",
+        "constants": "UPPER_SNAKE_CASE",
+        "variables": "snake_case"
+      },
+      "frontend": {
+        "files": "kebab-case",
+        "functions": "camelCase",
+        "components": "PascalCase",
+        "constants": "UPPER_SNAKE_CASE",
+        "variables": "camelCase",
+        "hooks": "use + PascalCase"
+      }
+    },
+    "branches": {
+      "main": "main",
+      "develop": "develop",
+      "feature": "feature/{issue-number}-{description}",
+      "bugfix": "bugfix/{issue-number}-{description}",
+      "hotfix": "hotfix/{description}"
+    }
+  },
+
+  "agents": {
+    "enabled": [
+      "fastapi-backend-architect",
+      "react-frontend-architect",
+      "python-test-engineer",
+      "react-test-engineer",
+      "api-designer",
+      "qa-criteria-validator"
+    ],
+    "config": {
+      "fastapi-backend-architect": {
+        "focus": "services-architecture",
+        "includeAsync": true,
+        "includeSupabase": true,
+        "includeAPScheduler": true
+      },
+      "react-frontend-architect": {
+        "focus": "feature-based-components",
+        "includeContextAPI": true,
+        "includeTailwind": true,
+        "includeRecharts": true
+      }
+    }
+  },
+
+  "mcpServers": {
+    "required": [
+      "context7",
+      "playwright",
+      "sequentialthinking"
+    ],
+    "optional": [],
+    "custom": []
+  },
+
+  "hooks": {
+    "onStop": {
+      "enabled": false,
+      "command": ""
+    },
+    "onSubagentStop": {
+      "enabled": false,
+      "command": ""
+    },
+    "onNotification": {
+      "enabled": false,
+      "command": ""
+    }
+  },
+
+  "features": {
+    "implemented": [
+      "user-authentication",
+      "instagram-oauth",
+      "content-generation-ai",
+      "template-selection",
+      "image-composition",
+      "caption-generation",
+      "scheduling-apscheduler",
+      "instagram-publishing",
+      "analytics-dashboard",
+      "calendar-view"
+    ],
+    "inProgress": [],
+    "planned": [
+      "multi-account-support",
+      "bulk-content-generation",
+      "ab-testing",
+      "advanced-analytics"
+    ]
+  },
+
+  "documentation": {
+    "masterPlan": "MASTER_PLAN_INSTAGRAM_PLANNER.md",
+    "readme": "README.md",
+    "apiDocs": "http://localhost:8000/docs",
+    "guides": [
+      "docs/METADATA_SCHEMA.md",
+      "docs/GOOGLE_DRIVE_SETUP.md",
+      "docs/GUIA_USO.md"
+    ]
+  },
+
+  "meta": {
+    "createdBy": "Claude Code Framework v2.0.0",
+    "createdAt": "2025-01-18",
+    "lastUpdated": "2025-01-18",
+    "configVersion": "2.0.0"
+  }
+}

@@ -33,6 +33,12 @@
   gap: 1rem;
 }
 
+.sync-section {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .btn-connect-instagram,
 .btn-sync {
   padding: 0.5rem 1rem;

@@ -3,9 +3,11 @@ Servicio para obtener insights de Instagram Graph API
 """
 import logging
 import requests
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from fastapi import HTTPException
+from httpx import ReadError
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +27,12 @@ class InstagramInsightsService:
             params = {}
 
         params['access_token'] = self.access_token
-        url = f"{self.BASE_URL}/{endpoint}"
+
+        # Detectar si endpoint es una URL completa o un endpoint relativo
+        if endpoint.startswith('http://') or endpoint.startswith('https://'):
+            url = endpoint  # Ya es una URL completa (de paginación)
+        else:
+            url = f"{self.BASE_URL}/{endpoint}"  # Endpoint relativo
 
         try:
             response = requests.get(url, params=params)
@@ -429,49 +436,119 @@ class InstagramInsightsService:
                 'status': 'published',
             })
 
-        # 3. Upsert en la tabla `posts`
+        # 3. Upsert en la tabla `posts` con retry logic y procesamiento por lotes
+        BATCH_SIZE = 50  # Procesar en lotes de 50 posts
+        MAX_RETRIES = 3
+        db_posts = {}
+
         try:
-            post_response = db_client.table('posts').upsert(posts_to_upsert, on_conflict='instagram_post_id').execute()
-            if not post_response.data:
-                logger.error(f"❌ Error en el upsert de posts: {post_response.error}")
-                # No continuar si el upsert de posts falla
+            # Procesar posts en lotes para evitar saturar el pool de conexiones
+            for i in range(0, len(posts_to_upsert), BATCH_SIZE):
+                batch = posts_to_upsert[i:i + BATCH_SIZE]
+                logger.info(f"📦 Procesando lote {i//BATCH_SIZE + 1}/{(len(posts_to_upsert) + BATCH_SIZE - 1)//BATCH_SIZE} ({len(batch)} posts)")
+
+                # Retry logic con backoff exponencial
+                for attempt in range(MAX_RETRIES):
+                    try:
+                        post_response = db_client.table('posts').upsert(batch, on_conflict='instagram_post_id').execute()
+
+                        if not post_response.data:
+                            logger.error("❌ Error en el upsert de posts: No se obtuvieron datos")
+                            break
+
+                        # Acumular mapeo de IDs
+                        for p in post_response.data:
+                            db_posts[p['instagram_post_id']] = p['id']
+
+                        # Pequeño delay entre lotes para no saturar
+                        if i + BATCH_SIZE < len(posts_to_upsert):
+                            time.sleep(0.5)
+                        break  # Éxito, salir del retry loop
+
+                    except (ReadError, Exception) as e:
+                        if attempt < MAX_RETRIES - 1:
+                            wait_time = 2 ** attempt  # Backoff exponencial: 1s, 2s, 4s
+                            logger.warning(f"⚠️  Error en lote {i//BATCH_SIZE + 1}, reintentando en {wait_time}s... ({attempt + 1}/{MAX_RETRIES})")
+                            time.sleep(wait_time)
+                        else:
+                            logger.error(f"❌ Error persistente en lote {i//BATCH_SIZE + 1} después de {MAX_RETRIES} intentos: {e}")
+                            raise
+
+            if not db_posts:
+                logger.error("❌ No se pudieron procesar posts")
                 return
 
-            # Mapear instagram_post_id a nuestro post.id interno para la FK
-            db_posts = {p['instagram_post_id']: p['id'] for p in post_response.data}
-
             # 4. Obtener insights y preparar datos para `post_performance`
+            # Instagram API solo permite insights de posts recientes (últimos 90 días aprox.)
+            cutoff_date = datetime.now() - timedelta(days=90)
+
             for post_data in all_posts_from_api:
                 instagram_post_id = post_data['id']
                 if instagram_post_id not in db_posts:
                     continue
 
                 internal_post_id = db_posts[instagram_post_id]
-                
-                # Obtener insights para este post
-                try:
-                    insights = self.get_media_insights(instagram_post_id)
-                    
-                    performance_to_upsert.append({
-                        'post_id': internal_post_id,
-                        'likes': post_data.get('like_count', 0),
-                        'comments': post_data.get('comments_count', 0),
-                        'shares': insights.get('shares', 0), # No disponible directamente
-                        'saves': insights.get('saved', 0),
-                        'reach': insights.get('reach', 0),
-                        'impressions': insights.get('impressions', 0),
-                        'published_at': post_data.get('timestamp'),
-                        'last_synced_at': datetime.now().isoformat()
-                    })
-                except Exception as e:
-                    logger.warning(f"⚠️  No se pudieron obtener insights para el post {instagram_post_id}: {e}")
-                    continue
 
-            # 5. Upsert en la tabla `post_performance`
+                # Verificar edad del post
+                post_timestamp = post_data.get('timestamp', '')
+                post_date = None
+                try:
+                    post_date = datetime.fromisoformat(post_timestamp.replace('Z', '+00:00'))
+                except:
+                    pass
+
+                # Preparar datos básicos de performance
+                perf_data = {
+                    'post_id': internal_post_id,
+                    'likes': post_data.get('like_count', 0),
+                    'comments': post_data.get('comments_count', 0),
+                    'shares': 0,
+                    'saves': 0,
+                    'reach': 0,
+                    'impressions': 0,
+                    'last_synced_at': datetime.now().isoformat()
+                }
+
+                # Solo intentar obtener insights para posts recientes
+                if post_date and post_date.replace(tzinfo=None) > cutoff_date:
+                    try:
+                        insights = self.get_media_insights(instagram_post_id)
+                        # Actualizar con datos de insights
+                        perf_data['shares'] = insights.get('shares', 0)
+                        perf_data['saves'] = insights.get('saved', 0)
+                        perf_data['reach'] = insights.get('reach', 0)
+                        perf_data['impressions'] = insights.get('impressions', 0)
+                    except Exception as e:
+                        # Solo log de warning para posts recientes
+                        logger.warning(f"⚠️  No se pudieron obtener insights para post reciente {instagram_post_id}: {e}")
+
+                performance_to_upsert.append(perf_data)
+
+            # 5. Upsert en la tabla `post_performance` con retry logic y procesamiento por lotes
             if performance_to_upsert:
-                perf_response = db_client.table('post_performance').upsert(performance_to_upsert, on_conflict='post_id').execute()
-                if perf_response.error:
-                    logger.error(f"❌ Error en el upsert de performance: {perf_response.error}")
+                logger.info(f"📊 Guardando métricas de {len(performance_to_upsert)} posts...")
+
+                for i in range(0, len(performance_to_upsert), BATCH_SIZE):
+                    batch = performance_to_upsert[i:i + BATCH_SIZE]
+
+                    # Retry logic con backoff exponencial
+                    for attempt in range(MAX_RETRIES):
+                        try:
+                            db_client.table('post_performance').upsert(batch, on_conflict='post_id').execute()
+
+                            # Pequeño delay entre lotes
+                            if i + BATCH_SIZE < len(performance_to_upsert):
+                                time.sleep(0.5)
+                            break  # Éxito
+
+                        except (ReadError, Exception) as e:
+                            if attempt < MAX_RETRIES - 1:
+                                wait_time = 2 ** attempt
+                                logger.warning(f"⚠️  Error guardando métricas lote {i//BATCH_SIZE + 1}, reintentando en {wait_time}s...")
+                                time.sleep(wait_time)
+                            else:
+                                logger.error(f"❌ Error persistente guardando métricas: {e}")
+                                raise
 
         except Exception as e:
             logger.error(f"❌ Error durante el proceso de guardado en base de datos: {e}", exc_info=True)

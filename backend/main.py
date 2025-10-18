@@ -84,6 +84,75 @@ app = FastAPI(
     version="0.1.0"
 )
 
+
+# --- Función de Sincronización Automática de Métricas ---
+def sync_all_accounts_metrics():
+    """
+    Job que se ejecuta cada hora para sincronizar métricas
+    de todas las cuentas de Instagram activas.
+    """
+    logger.info("⏰ Iniciando sincronización automática de métricas...")
+
+    try:
+        from services.instagram_insights import InstagramInsightsService
+
+        # Obtener todas las cuentas activas
+        accounts = supabase.table('instagram_accounts')\
+            .select('id, user_id, long_lived_access_token, '
+                    'instagram_business_account_id')\
+            .eq('is_active', True)\
+            .execute()
+
+        if not accounts.data:
+            logger.info("No hay cuentas activas para sincronizar")
+            return
+
+        synced_count = 0
+        failed_count = 0
+
+        for account in accounts.data:
+            try:
+                # Crear servicio de Instagram para esta cuenta
+                instagram_service = InstagramInsightsService(
+                    access_token=account['long_lived_access_token'],
+                    instagram_account_id=account[
+                        'instagram_business_account_id'
+                    ]
+                )
+
+                # Sincronizar posts y métricas
+                instagram_service.sync_posts_to_database(
+                    db_client=supabase,
+                    user_id=account['user_id'],
+                    instagram_account_id_db=account['id']
+                )
+
+                # Actualizar timestamp de última sincronización
+                supabase.table('instagram_accounts')\
+                    .update({'last_sync_at': datetime.utcnow().isoformat()})\
+                    .eq('id', account['id'])\
+                    .execute()
+
+                synced_count += 1
+                logger.info(
+                    f"✅ Cuenta {account['id']} sincronizada correctamente"
+                )
+
+            except Exception as e:
+                logger.error(
+                    f"❌ Error sincronizando cuenta {account['id']}: {e}"
+                )
+                failed_count += 1
+
+        logger.info(
+            f"📊 Sincronización completada: "
+            f"{synced_count} exitosas, {failed_count} fallidas"
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Error en sync_all_accounts_metrics: {e}")
+
+
 # --- Lifecycle Events ---
 @app.on_event("startup")
 async def startup_event():
@@ -98,6 +167,29 @@ async def startup_event():
     except Exception as e:
         logger.error(f"❌ Error al inicializar PostScheduler: {e}")
         # No lanzar excepción para permitir que la app arranque sin scheduler
+
+    # Inicializar cron job para sincronización de métricas
+    try:
+        from apscheduler.triggers.cron import CronTrigger
+        from services.scheduler.post_scheduler import PostScheduler
+
+        # Agregar job al scheduler usando la función del módulo
+        scheduler = PostScheduler()
+        scheduler.scheduler.add_job(
+            sync_all_accounts_metrics,
+            trigger=CronTrigger(hour='*'),  # Cada hora
+            id='sync_instagram_metrics',
+            replace_existing=True,
+            max_instances=1  # Solo una instancia a la vez
+        )
+
+        logger.info(
+            "✅ Cron job de sincronización de métricas configurado "
+            "(ejecuta cada hora)"
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Error configurando cron job de métricas: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -119,6 +211,7 @@ from routes.template_sync_routes import router as template_sync_router
 from routes.instagram_insights_routes import router as instagram_insights_router
 from routes.drive_routes import router as drive_router
 from routes.scheduler_routes import router as scheduler_router
+from routes.posts_routes import router as posts_router
 
 # Registrar routers
 app.include_router(templates_router)
@@ -127,6 +220,7 @@ app.include_router(template_sync_router)
 app.include_router(instagram_insights_router)
 app.include_router(drive_router)
 app.include_router(scheduler_router)
+app.include_router(posts_router)
 
 # Configuración de CORS
 app.add_middleware(
@@ -560,7 +654,7 @@ async def instagram_sync(current_user: User = Depends(get_current_user)):
 
     try:
         # 1. Obtener el token de acceso del usuario
-        response = supabase.table('instagram_accounts').select('long_lived_access_token, instagram_business_account_id').eq('user_id', current_user.id).single().execute()
+        response = supabase.table('instagram_accounts').select('id, long_lived_access_token, instagram_business_account_id').eq('user_id', current_user.id).single().execute()
 
         if not response.data or not response.data.get('long_lived_access_token'):
             raise HTTPException(
@@ -568,6 +662,7 @@ async def instagram_sync(current_user: User = Depends(get_current_user)):
                 detail="No se encontraron credenciales de Instagram para este usuario."
             )
 
+        account_id = response.data['id']
         access_token = response.data['long_lived_access_token']
         stored_ig_id = response.data.get('instagram_business_account_id')
 
@@ -633,9 +728,9 @@ async def instagram_sync(current_user: User = Depends(get_current_user)):
                 'content': item.get('caption', ''),
                 'media_url': item.get('media_url'),
                 'post_type': post_type,
-                'media_product_type': media_product_type,
                 'status': 'published',
-                'publication_date': item.get('timestamp')
+                'publication_date': item.get('timestamp'),
+                'instagram_account_id': account_id
             }
             posts_to_upsert.append(post_data)
 
@@ -645,12 +740,30 @@ async def instagram_sync(current_user: User = Depends(get_current_user)):
             on_conflict='instagram_post_id'
         ).execute()
 
+        # 7. Obtener datos del perfil de Instagram (followers, username, etc.)
+        profile_url = f"https://graph.facebook.com/v19.0/{instagram_user_id}?fields=followers_count,media_count,follows_count,name,username,profile_picture_url&access_token={access_token}"
+        profile_response = requests.get(profile_url)
+        profile_response.raise_for_status()
+        profile_data = profile_response.json()
+
+        # 8. Actualizar instagram_accounts con datos del perfil
+        supabase.table('instagram_accounts').update({
+            'followers_count': profile_data.get('followers_count', 0),
+            'username': profile_data.get('username', ''),
+            'account_name': profile_data.get('name', ''),
+            'profile_picture_url': profile_data.get('profile_picture_url', ''),
+            'last_sync_at': datetime.utcnow().isoformat()
+        }).eq('id', account_id).execute()
+
         logger.info(f"✅ Sincronización completada: {len(posts_to_upsert)} publicaciones procesadas")
+        logger.info(f"✅ Datos del perfil actualizados: @{profile_data.get('username', 'N/A')}, {profile_data.get('followers_count', 0)} seguidores")
 
         return {
             "status": "ok",
             "message": f"Sincronizadas {len(posts_to_upsert)} publicaciones.",
-            "posts_synced": len(posts_to_upsert)
+            "posts_synced": len(posts_to_upsert),
+            "profile_updated": True,
+            "followers_count": profile_data.get('followers_count', 0)
         }
 
     except requests.exceptions.RequestException as e:

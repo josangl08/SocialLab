@@ -100,6 +100,12 @@ coverage/
 *.py,cover
 htmlcov/
 
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+.auth/
+
 # ============================================
 # Temporary files
 # ============================================
@@ -145,3 +151,11 @@ backend/scripts/create_sample_*.py
 
 # Diagnostic routes (temporary)
 backend/routes/*_diagnostics.py
+
+# Temporary test/debug scripts
+backend/test_*.py
+backend/check_*.py
+
+# Claude Code sessions (opcional - descomentar si no quieres commitear)
+# .claude/sessions/
+# .claude/doc/

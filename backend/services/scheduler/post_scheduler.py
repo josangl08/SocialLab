@@ -84,7 +84,7 @@ def publish_post_job(post_id: int) -> None:
             media_url=post_data['media_url'],
             caption=post_data.get('content', ''),
             instagram_account_id=instagram_account_id,
-            post_type=post_data.get('media_product_type', 'FEED'),
+            post_type=post_data.get('post_type', 'FEED'),
             video_url=post_data.get('video_url')
         )
 

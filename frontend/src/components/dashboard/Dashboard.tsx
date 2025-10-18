@@ -47,6 +47,17 @@ interface ScheduledPost {
   status: string;
 }
 
+interface AnalyticsData {
+  success: boolean;
+  data: {
+    overview: DashboardStats;
+    top_posts: TopPost[];
+    engagement_trend: EngagementTrendItem[];
+    best_posting_times: BestPostingTime[];
+  };
+  last_sync_at: string | null;
+}
+
 const Dashboard: React.FC = () => {
   const {
     isInstagramConnected,
@@ -73,6 +84,7 @@ const Dashboard: React.FC = () => {
   const [engagementTrend, setEngagementTrend] = useState<EngagementTrendItem[]>([]);
   const [bestTimes, setBestTimes] = useState<BestPostingTime[]>([]);
   const [scheduledPosts, setScheduledPosts] = useState<ScheduledPost[]>([]);
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const hasInitialFetched = useRef(false);
 
   const checkInstagramStatus = useCallback(async (): Promise<boolean> => {
@@ -111,9 +123,9 @@ const Dashboard: React.FC = () => {
     try {
       setLoading(true);
 
-      // Fetch Instagram analytics overview
+      // Fetch Instagram analytics overview (from cache - fast!)
       if (connected) {
-        const instagramResponse = await fetch('http://localhost:8000/api/instagram/analytics/overview', {
+        const instagramResponse = await fetch('http://localhost:8000/api/instagram/analytics/cached-overview', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
 
@@ -132,6 +144,7 @@ const Dashboard: React.FC = () => {
             setTopPosts(data.data.top_posts || []);
             setEngagementTrend(data.data.engagement_trend || []);
             setBestTimes(data.data.best_posting_times || []);
+            setLastSyncAt(data.last_sync_at); // Guardar timestamp de última sincronización
           }
         } else {
           console.error('Error cargando analytics de Instagram:', instagramResponse.status);
@@ -169,16 +182,32 @@ const Dashboard: React.FC = () => {
 
     setSyncing(true);
     try {
-      const response = await fetch(`http://localhost:8000/instagram/sync`, {
+      // 1. Sincronizar posts básicos + datos del perfil (followers, username, etc.)
+      const postsResponse = await fetch(`http://localhost:8000/instagram/sync`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
-      if (response.ok) {
+      if (!postsResponse.ok) {
+        console.error('Error al sincronizar posts de Instagram');
+        setLastSync(new Date());
+        return;
+      }
+
+      // 2. Sincronizar métricas de performance (likes, comments, reach, etc.)
+      const metricsResponse = await fetch(`http://localhost:8000/api/instagram/sync`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (metricsResponse.ok) {
         setLastSync(new Date());
         setSyncCompleted(0);
-        fetchDashboardStats(true); // Refresh stats after sync (Instagram está conectado)
+        // Esperar un momento para que el background task procese los datos
+        setTimeout(() => {
+          fetchDashboardStats(true); // Refresh stats after sync
+        }, 2000);
       } else {
-        console.error('Error al sincronizar con Instagram');
+        console.error('Error al sincronizar métricas de Instagram');
         setLastSync(new Date());
       }
     } catch (error) {
@@ -234,6 +263,25 @@ const Dashboard: React.FC = () => {
     return num.toString();
   };
 
+  const formatTimeAgo = (dateStr: string | null): string => {
+    if (!dateStr) return 'Nunca';
+
+    const now = new Date();
+    const syncDate = new Date(dateStr);
+    const diffMs = now.getTime() - syncDate.getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffMins < 1) return 'Hace unos segundos';
+    if (diffMins === 1) return 'Hace 1 minuto';
+    if (diffMins < 60) return `Hace ${diffMins} minutos`;
+    if (diffHours === 1) return 'Hace 1 hora';
+    if (diffHours < 24) return `Hace ${diffHours} horas`;
+    if (diffDays === 1) return 'Hace 1 día';
+    return `Hace ${diffDays} días`;
+  };
+
   return (
     <div className="dashboard-container">
       {/* Header with Stats */}
@@ -247,14 +295,21 @@ const Dashboard: React.FC = () => {
                 Conectar Instagram
               </button>
             ) : (
-              <button
-                className="btn-sync"
-                onClick={handleSync}
-                disabled={isSyncing}
-              >
-                <i className={`bi ${isSyncing ? 'bi-arrow-repeat' : 'bi-arrow-clockwise'} me-2`}></i>
-                {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
-              </button>
+              <div className="sync-section">
+                {lastSyncAt && (
+                  <small className="text-muted" style={{ marginRight: '12px' }}>
+                    <i className="bi bi-clock-history"></i> {formatTimeAgo(lastSyncAt)}
+                  </small>
+                )}
+                <button
+                  className="btn-sync"
+                  onClick={handleSync}
+                  disabled={isSyncing}
+                >
+                  <i className={`bi ${isSyncing ? 'bi-arrow-repeat' : 'bi-arrow-clockwise'} me-2`}></i>
+                  {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -320,7 +375,7 @@ const Dashboard: React.FC = () => {
             <div className="dashboard-column">
               {/* Engagement Trend */}
               <div className="dashboard-section">
-                <h3><i className="bi bi-graph-up me-2"></i>Tendencia de Engagement (7 días)</h3>
+                <h3><i className="bi bi-graph-up me-2"></i>Tendencia de Engagement (último año)</h3>
                 <div className="trend-mini-chart">
                   {engagementTrend.length > 0 ? (
                     engagementTrend.map((item, index) => (

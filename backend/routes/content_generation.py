@@ -668,7 +668,7 @@ async def publish_to_instagram(post_id: int, user_id: str):
         # Actualizar estado
         supabase.table('posts').update({
             'status': 'published',
-            'published_at': datetime.now().isoformat()
+            'publication_date': datetime.now().isoformat()
         }).eq('id', post_id).execute()
 
         logger.info(f"✅ Post {post_id} publicado exitosamente")

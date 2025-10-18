@@ -26,6 +26,12 @@ interface AnalyticsData {
     time: string;
     avg_engagement: number;
   }>;
+  insights?: Array<{
+    type: string;
+    title: string;
+    description: string;
+    icon: string;
+  }>;
 }
 
 const Analytics: React.FC = () => {
@@ -57,54 +63,39 @@ const Analytics: React.FC = () => {
 
     setLoading(true);
     try {
-
       // Determinar días según el rango
       const daysMap: { [key: string]: number } = {
         '7days': 7,
         '30days': 30,
         '90days': 90,
-        'all': 90
+        'all': 3650  // 10 años de historia
       };
-      const days = daysMap[timeRange] || 7;
+      const days = daysMap[timeRange] || 365;  // Default: 1 año
 
-      // Fetch top posts
-      const topPostsResponse = await fetch(`http://localhost:8000/api/instagram/posts/top?limit=10`, {
+      // Usar un solo endpoint con parámetro days
+      const response = await fetch(`http://localhost:8000/api/instagram/analytics/cached-overview?days=${days}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
-      // Fetch engagement trend
-      const trendResponse = await fetch(`http://localhost:8000/api/instagram/analytics/engagement-trend?days=${days}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      // Fetch best posting times
-      const bestTimesResponse = await fetch(`http://localhost:8000/api/instagram/analytics/best-times?days_back=${days}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (!topPostsResponse.ok || !trendResponse.ok || !bestTimesResponse.ok) {
+      if (!response.ok) {
         throw new Error('Error fetching Instagram analytics');
       }
 
-      const topPostsData = await topPostsResponse.json();
-      const trendData = await trendResponse.json();
-      const bestTimesData = await bestTimesResponse.json();
+      const data = await response.json();
 
-      // Calcular totales
-      const totalLikes = topPostsData.data?.reduce((sum: number, post: any) => sum + (post.likes || 0), 0) || 0;
-      const totalComments = topPostsData.data?.reduce((sum: number, post: any) => sum + (post.comments || 0), 0) || 0;
-      const totalEngagement = topPostsData.data?.reduce((sum: number, post: any) => sum + (post.engagement || 0), 0) || 0;
-      const totalImpressions = topPostsData.data?.reduce((sum: number, post: any) => sum + (post.impressions || 1), 0) || 1;
-      const avgEngagementRate = totalImpressions > 0 ? (totalEngagement / totalImpressions * 100) : 0;
+      if (!data.success || !data.data) {
+        throw new Error('No data available');
+      }
 
+      // Mapear datos del backend al formato del frontend
       const formattedData: AnalyticsData = {
         overview: {
-          total_posts: topPostsData.count || 0,
-          total_likes: totalLikes,
-          total_comments: totalComments,
-          engagement_rate: parseFloat(avgEngagementRate.toFixed(2))
+          total_posts: data.data.overview.total_posts || 0,
+          total_likes: data.data.overview.total_interactions || 0,
+          total_comments: 0, // Se incluye en total_interactions
+          engagement_rate: data.data.overview.engagement_rate || 0
         },
-        top_posts: (topPostsData.data || []).slice(0, 3).map((post: any) => ({
+        top_posts: (data.data.top_posts || []).map((post: any) => ({
           id: post.id,
           content: post.caption || 'Sin descripción',
           media_url: post.media_url || '',
@@ -112,15 +103,16 @@ const Analytics: React.FC = () => {
           comments: post.comments || 0,
           date: post.timestamp || new Date().toISOString()
         })),
-        engagement_trend: (trendData.data || []).map((item: any) => ({
+        engagement_trend: (data.data.engagement_trend || []).map((item: any) => ({
           date: item.date,
           likes: item.likes || 0,
           comments: item.comments || 0
         })),
-        best_posting_times: (bestTimesData.data || []).slice(0, 4).map((item: any) => ({
+        best_posting_times: (data.data.best_posting_times || []).map((item: any) => ({
           time: item.hour || '00:00',
           avg_engagement: item.avg_engagement_rate || 0
-        }))
+        })),
+        insights: data.data.insights || []
       };
 
       setAnalytics(formattedData);
@@ -283,26 +275,19 @@ const Analytics: React.FC = () => {
         </div>
       </div>
 
-      {/* Insights Box */}
-      <div className="insights-box">
-        <h4><i className="bi bi-lightbulb me-2"></i>Insights Clave</h4>
-        <ul>
-          <li>
-            <strong>Mejor día:</strong> Los posts del martes obtienen 23% más engagement
-          </li>
-          <li>
-            <strong>Horario óptimo:</strong> 18:00 es tu hora pico con 5.1% de engagement
-          </li>
-          <li>
-            <strong>Tipo de contenido:</strong> Posts con estadísticas de jugadores tienen
-            mayor interacción
-          </li>
-          <li>
-            <strong>Recomendación:</strong> Aumenta la frecuencia de publicación en horario
-            de tarde (17:00 - 21:00)
-          </li>
-        </ul>
-      </div>
+      {/* Insights Box - Dinámicos */}
+      {analytics.insights && analytics.insights.length > 0 && (
+        <div className="insights-box">
+          <h4><i className="bi bi-lightbulb me-2"></i>Insights Clave</h4>
+          <ul>
+            {analytics.insights.map((insight, index) => (
+              <li key={index}>
+                <strong>{insight.title}:</strong> {insight.description}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 };
