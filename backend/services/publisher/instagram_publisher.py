@@ -37,7 +37,8 @@ class InstagramPublisher:
     - Feed posts (single image)
     - Reels (video content)
     - Stories (ephemeral content)
-    - Carousel albums (multiple images)
+    - Carousel albums (2-10 images)
+    - URL accessibility verification
     - Retry logic with exponential backoff
     """
 
@@ -53,6 +54,60 @@ class InstagramPublisher:
         self.container_check_interval = 5  # seconds
         self.max_container_checks = 12  # 60 seconds total
 
+    def verify_media_url_accessibility(
+        self,
+        url: str,
+        timeout: int = 10
+    ) -> bool:
+        """
+        Verifica que una URL de media sea públicamente accesible.
+
+        Args:
+            url: URL de la imagen o video a verificar
+            timeout: Timeout en segundos para la petición (default: 10s)
+
+        Returns:
+            bool: True si la URL es accesible, False en caso contrario
+
+        Raises:
+            InstagramPublishError: Si la URL no es accesible o no es válida
+        """
+        try:
+            # Hacer HEAD request para verificar accesibilidad sin descargar
+            response = requests.head(url, timeout=timeout, allow_redirects=True)
+
+            # Verificar status code 200
+            if response.status_code != 200:
+                raise InstagramPublishError(
+                    f"URL no accesible. Status code: {response.status_code}"
+                )
+
+            # Verificar content-type (debe ser imagen o video)
+            content_type = response.headers.get('Content-Type', '').lower()
+            valid_types = ['image/', 'video/']
+
+            if not any(content_type.startswith(t) for t in valid_types):
+                raise InstagramPublishError(
+                    f"Content-Type inválido: {content_type}. "
+                    f"Debe ser imagen o video."
+                )
+
+            logger.info(
+                f"URL verificada exitosamente: {url} "
+                f"(Content-Type: {content_type})"
+            )
+            return True
+
+        except requests.Timeout:
+            raise InstagramPublishError(
+                f"Timeout al verificar URL: {url}. "
+                f"La URL tardó más de {timeout}s en responder."
+            )
+        except RequestException as e:
+            raise InstagramPublishError(
+                f"Error al verificar URL: {url}. Error: {str(e)}"
+            )
+
     def publish_post(
         self,
         media_url: str,
@@ -60,7 +115,9 @@ class InstagramPublisher:
         instagram_account_id: int,
         post_type: str = 'FEED',
         video_url: Optional[str] = None,
-        cover_url: Optional[str] = None
+        cover_url: Optional[str] = None,
+        is_carousel: bool = False,
+        carousel_children: Optional[List[str]] = None
     ) -> Dict:
         """
         Publishes a post to Instagram.
@@ -72,6 +129,8 @@ class InstagramPublisher:
             post_type: FEED, REELS, or STORY
             video_url: Public URL of video (for Reels)
             cover_url: Cover image URL (for Reels)
+            is_carousel: If True, publish as carousel album
+            carousel_children: List of image URLs for carousel (2-10 images)
 
         Returns:
             {
@@ -94,8 +153,38 @@ class InstagramPublisher:
             access_token = account['access_token']
             ig_user_id = account['instagram_user_id']
 
+            # Verify media URLs are publicly accessible
+            if is_carousel:
+                # Verify all carousel images
+                if not carousel_children or len(carousel_children) < 2:
+                    raise InstagramPublishError(
+                        "Carousel requires at least 2 images"
+                    )
+                if len(carousel_children) > 10:
+                    raise InstagramPublishError(
+                        "Carousel supports maximum 10 images"
+                    )
+                for image_url in carousel_children:
+                    self.verify_media_url_accessibility(image_url)
+            elif post_type == 'REELS':
+                # Verify video URL
+                self.verify_media_url_accessibility(video_url)
+                # Verify cover URL if provided
+                if cover_url:
+                    self.verify_media_url_accessibility(cover_url)
+            else:
+                # Verify media URL for FEED and STORY
+                self.verify_media_url_accessibility(media_url)
+
             # Route to appropriate publishing method
-            if post_type == 'REELS':
+            if is_carousel:
+                return self._publish_carousel(
+                    ig_user_id,
+                    access_token,
+                    carousel_children,
+                    caption
+                )
+            elif post_type == 'REELS':
                 if not video_url:
                     raise InstagramPublishError(
                         "video_url required for REELS"
@@ -290,6 +379,83 @@ class InstagramPublisher:
         return {
             'id': media_id,
             'media_type': 'STORIES'
+        }
+
+    def _publish_carousel(
+        self,
+        ig_user_id: str,
+        access_token: str,
+        image_urls: List[str],
+        caption: str
+    ) -> Dict:
+        """
+        Publishes a carousel album (multiple images).
+
+        Args:
+            ig_user_id: Instagram Business Account ID
+            access_token: Instagram API access token
+            image_urls: List of public URLs for carousel images (2-10)
+            caption: Caption text for the carousel
+
+        Returns:
+            Dict with 'id' and 'permalink'
+        """
+        logger.info(
+            f"Publishing carousel to IG user {ig_user_id} "
+            f"with {len(image_urls)} images"
+        )
+
+        # Step 1: Create containers for each image
+        children_ids = []
+
+        for idx, image_url in enumerate(image_urls):
+            container_url = f"{self.base_url}/{ig_user_id}/media"
+
+            params = {
+                'image_url': image_url,
+                'is_carousel_item': True,
+                'access_token': access_token
+            }
+
+            logger.info(f"Creating carousel item {idx + 1}/{len(image_urls)}")
+            response = requests.post(container_url, data=params, timeout=30)
+            response.raise_for_status()
+            children_ids.append(response.json()['id'])
+
+        logger.info(f"Created {len(children_ids)} carousel items")
+
+        # Step 2: Create carousel container
+        carousel_url = f"{self.base_url}/{ig_user_id}/media"
+
+        carousel_params = {
+            'media_type': 'CAROUSEL',
+            'caption': caption,
+            'children': ','.join(children_ids),
+            'access_token': access_token
+        }
+
+        logger.info("Creating carousel container")
+        response = requests.post(carousel_url, data=carousel_params, timeout=30)
+        response.raise_for_status()
+        carousel_id = response.json()['id']
+
+        # Step 3: Publish carousel (wait briefly for processing)
+        time.sleep(3)
+
+        media_id = self._publish_container(
+            ig_user_id,
+            access_token,
+            carousel_id
+        )
+
+        logger.info(f"Successfully published carousel: {media_id}")
+
+        # Get permalink
+        permalink = self._get_media_permalink(media_id, access_token)
+
+        return {
+            'id': media_id,
+            'permalink': permalink
         }
 
     def _create_media_container(

@@ -73,7 +73,7 @@ const Analytics: React.FC = () => {
       const days = daysMap[timeRange] || 365;  // Default: 1 año
 
       // Usar un solo endpoint con parámetro days
-      const response = await fetch(`http://localhost:8000/api/instagram/analytics/cached-overview?days=${days}`, {
+      const response = await fetch(`http://localhost:8000/api/analytics/cached-overview?days=${days}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 

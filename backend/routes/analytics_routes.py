@@ -1,5 +1,11 @@
 """
-Rutas para obtener insights de Instagram
+Analytics Routes
+
+Endpoints para gestión de métricas y sincronización de analytics
+de Instagram según especificación del Master Plan.
+
+Author: SocialLab
+Date: 2025-01-19
 """
 import logging
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
@@ -13,7 +19,7 @@ from services.instagram_insights import InstagramInsightsService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/instagram", tags=["Instagram Insights"])
+router = APIRouter(prefix="/api/analytics", tags=["Analytics"])
 
 
 def get_instagram_service(current_user: dict = Depends(get_current_user)) -> InstagramInsightsService:
@@ -62,13 +68,116 @@ def get_instagram_service(current_user: dict = Depends(get_current_user)) -> Ins
             detail=f"Error al configurar el servicio de Instagram: {str(e)}"
         )
 
-@router.post("/sync", summary="Sincronizar Posts y Métricas de Instagram")
-async def sync_instagram_data(
+@router.post(
+    "/sync/{instagram_account_id}",
+    summary="Sincronizar Posts y Métricas de Cuenta Instagram"
+)
+async def sync_instagram_analytics(
+    instagram_account_id: int,
     background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user),
     instagram_service: InstagramInsightsService = Depends(get_instagram_service)
 ):
     """
+    Inicia sincronización de posts y métricas de una cuenta Instagram específica.
+
+    Este endpoint permite sincronizar cualquier cuenta Instagram especificada
+    por su ID, con validación de permisos del usuario actual.
+
+    Args:
+        instagram_account_id: ID de la cuenta Instagram en la base de datos
+        background_tasks: FastAPI background tasks
+        current_user: Usuario autenticado actual
+        instagram_service: Servicio de Instagram Insights
+
+    Returns:
+        {
+            "message": "Mensaje de confirmación",
+            "instagram_account_id": ID de la cuenta sincronizada
+        }
+
+    Raises:
+        HTTPException 403: Si el usuario no tiene permisos
+        HTTPException 404: Si la cuenta no existe
+        HTTPException 500: Error interno
+    """
+    try:
+        # Verificar que la cuenta existe y pertenece al usuario
+        result = supabase.table('instagram_accounts').select(
+            'id, user_id, is_active'
+        ).eq('id', instagram_account_id).single().execute()
+
+        if not result.data:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Cuenta Instagram {instagram_account_id} no encontrada"
+            )
+
+        account = result.data
+
+        # Verificar permisos: el usuario debe ser dueño de la cuenta
+        if account['user_id'] != current_user['id']:
+            raise HTTPException(
+                status_code=403,
+                detail="No tienes permiso para sincronizar esta cuenta"
+            )
+
+        # Verificar que la cuenta esté activa
+        if not account.get('is_active', True):
+            raise HTTPException(
+                status_code=400,
+                detail="La cuenta Instagram está inactiva"
+            )
+
+        # Añadir tarea de sincronización en segundo plano
+        background_tasks.add_task(
+            instagram_service.sync_posts_to_database,
+            db_client=supabase,
+            user_id=current_user['id'],
+            instagram_account_id_db=instagram_account_id
+        )
+
+        logger.info(
+            f"Iniciada sincronización para cuenta Instagram "
+            f"{instagram_account_id} (user: {current_user['id']})"
+        )
+
+        return {
+            "message": (
+                "La sincronización de posts y métricas de Instagram "
+                "ha comenzado en segundo plano. "
+                "Los datos se actualizarán en breve."
+            ),
+            "instagram_account_id": instagram_account_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error al iniciar sincronización para cuenta "
+            f"{instagram_account_id}: {e}",
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error interno al iniciar la sincronización: {str(e)}"
+        )
+
+
+@router.post(
+    "/sync",
+    summary="[DEPRECATED] Sincronizar Posts y Métricas de Instagram",
+    deprecated=True
+)
+async def sync_instagram_data_deprecated(
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user),
+    instagram_service: InstagramInsightsService = Depends(get_instagram_service)
+):
+    """
+    **DEPRECATED**: Usar /sync/{instagram_account_id} en su lugar.
+
     Inicia un proceso en segundo plano para sincronizar todos los posts y sus métricas
     de rendimiento desde la API de Instagram a la base de datos local.
     """
@@ -145,7 +254,7 @@ async def get_recent_posts(
             detail=f"Error al obtener posts recientes: {str(e)}"
         )
 
-@router.get("/analytics/cached-overview")
+@router.get("/cached-overview")
 async def get_cached_analytics_overview(
     days: int = 365,
     current_user: dict = Depends(get_current_user)
@@ -195,28 +304,54 @@ async def get_cached_analytics_overview(
 
         # --- 1. Obtener posts desde DB para el rango de días especificado ---
         from datetime import datetime, timedelta
-        cutoff_date = datetime.utcnow() - timedelta(days=days)
 
-        posts_result = supabase.table('posts')\
+        # Construir query base
+        query = supabase.table('posts')\
             .select(
                 'id, content, media_url, '
                 'publication_date, instagram_post_id, post_type, '
                 'post_performance(likes, comments, saves, reach, impressions)'
             )\
             .eq('instagram_account_id', instagram_account_id)\
-            .eq('status', 'published')\
-            .gte('publication_date', cutoff_date.isoformat())\
-            .order('publication_date', desc=True)\
-            .execute()
+            .eq('status', 'published')
+
+        # Solo aplicar filtro de fecha si NO es "all" (3650 días)
+        # Si es "all", traer TODOS los posts desde el inicio de la cuenta
+        if days < 3650:
+            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            query = query.gte('publication_date', cutoff_date.isoformat())
+            logger.info(
+                f"📊 Obteniendo posts de los últimos {days} días "
+                f"(desde {cutoff_date.strftime('%Y-%m-%d')})"
+            )
+        else:
+            logger.info("📊 Obteniendo TODOS los posts (sin filtro de fecha)")
+
+        # Ejecutar query
+        posts_result = query.order('publication_date', desc=True).execute()
 
         posts = posts_result.data or []
 
         # Filtrar posts None y posts sin datos válidos
         posts = [p for p in posts if p is not None]
 
-        logger.info(f"📊 Obtenidos {len(posts)} posts de los últimos {days} días para cuenta {instagram_account_id}")
-        if len(posts) == 0:
-            logger.warning(f"⚠️  No se encontraron posts. Cutoff date: {cutoff_date.isoformat()}")
+        if days < 3650:
+            logger.info(
+                f"📊 Obtenidos {len(posts)} posts de los últimos {days} días "
+                f"para cuenta {instagram_account_id}"
+            )
+            if len(posts) == 0:
+                logger.warning(
+                    f"⚠️  No se encontraron posts desde "
+                    f"{cutoff_date.strftime('%Y-%m-%d')}"
+                )
+        else:
+            logger.info(
+                f"📊 Obtenidos {len(posts)} posts TOTALES "
+                f"(desde inicio de cuenta {instagram_account_id})"
+            )
+            if len(posts) == 0:
+                logger.warning("⚠️  No se encontraron posts en la base de datos")
 
         # --- 2. Calcular métricas agregadas ---
         total_posts = len(posts)

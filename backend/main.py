@@ -96,21 +96,31 @@ def sync_all_accounts_metrics():
     try:
         from services.instagram_insights import InstagramInsightsService
 
-        # Obtener todas las cuentas activas
-        accounts = supabase.table('instagram_accounts')\
+        # Obtener todas las cuentas activas (is_active = true o NULL)
+        # NULL para compatibilidad con cuentas antiguas sin el campo
+        all_accounts = supabase.table('instagram_accounts')\
             .select('id, user_id, long_lived_access_token, '
-                    'instagram_business_account_id')\
-            .eq('is_active', True)\
+                    'instagram_business_account_id, is_active')\
             .execute()
 
-        if not accounts.data:
+        # Filtrar solo activas (True o NULL)
+        accounts_data = [
+            acc for acc in (all_accounts.data or [])
+            if acc.get('is_active') is not False
+        ]
+
+        if not accounts_data:
             logger.info("No hay cuentas activas para sincronizar")
             return
+
+        logger.info(
+            f"📋 Encontradas {len(accounts_data)} cuentas activas para sincronizar"
+        )
 
         synced_count = 0
         failed_count = 0
 
-        for account in accounts.data:
+        for account in accounts_data:
             try:
                 # Crear servicio de Instagram para esta cuenta
                 instagram_service = InstagramInsightsService(
@@ -208,7 +218,7 @@ async def shutdown_event():
 from routes.templates import router as templates_router
 from routes.content_generation import router as content_router
 from routes.template_sync_routes import router as template_sync_router
-from routes.instagram_insights_routes import router as instagram_insights_router
+from routes.analytics_routes import router as analytics_router
 from routes.drive_routes import router as drive_router
 from routes.scheduler_routes import router as scheduler_router
 from routes.posts_routes import router as posts_router
@@ -217,7 +227,7 @@ from routes.posts_routes import router as posts_router
 app.include_router(templates_router)
 app.include_router(content_router)
 app.include_router(template_sync_router)
-app.include_router(instagram_insights_router)
+app.include_router(analytics_router)
 app.include_router(drive_router)
 app.include_router(scheduler_router)
 app.include_router(posts_router)
@@ -695,17 +705,50 @@ async def instagram_sync(current_user: User = Depends(get_current_user)):
 
         instagram_user_id = ig_account_data['instagram_business_account']['id']
 
-        # 4. Obtener las publicaciones de la cuenta de Instagram
-        media_url = f"https://graph.facebook.com/v19.0/{instagram_user_id}/media?fields=id,caption,media_type,media_url,timestamp,permalink,media_product_type&access_token={access_token}"
-        media_response = requests.get(media_url)
-        media_response.raise_for_status()
-        media_data = media_response.json().get('data', [])
+        # 4. Obtener TODAS las publicaciones con paginación
+        all_media = []
+        next_url = f"https://graph.facebook.com/v19.0/{instagram_user_id}/media?fields=id,caption,media_type,media_url,timestamp,permalink,media_product_type&limit=100&access_token={access_token}"
+
+        logger.info("📦 Obteniendo posts de Instagram API con paginación...")
+        page_count = 0
+
+        while next_url:
+            media_response = requests.get(next_url)
+            media_response.raise_for_status()
+            response_json = media_response.json()
+
+            page_data = response_json.get('data', [])
+            all_media.extend(page_data)
+            page_count += 1
+
+            logger.info(
+                f"📄 Página {page_count}: {len(page_data)} posts "
+                f"(Total acumulado: {len(all_media)})"
+            )
+
+            # Obtener siguiente página si existe
+            next_url = response_json.get('paging', {}).get('next')
+
+            # Seguridad: limitar a 50 páginas (5000 posts máx)
+            if page_count >= 50:
+                logger.warning(
+                    "⚠️  Alcanzado límite de 50 páginas, "
+                    "deteniendo paginación"
+                )
+                break
+
+        media_data = all_media
 
         if not media_data:
             return {
                 "status": "ok",
                 "message": "No se encontraron publicaciones en Instagram. Verifica que tu cuenta tenga posts publicados."
             }
+
+        logger.info(
+            f"✅ Paginación completada: {len(media_data)} posts totales "
+            f"obtenidos en {page_count} páginas"
+        )
 
         # 5. Preparar los datos para el upsert en Supabase
         posts_to_upsert = []
@@ -804,7 +847,7 @@ async def instagram_status(current_user: User = Depends(get_current_user)):
     """
     try:
         response = supabase.table('instagram_accounts').select(
-            'instagram_business_account_id, expires_at, created_at'
+            'id, instagram_business_account_id, expires_at, created_at'
         ).eq('user_id', current_user.id).single().execute()
 
         if not response.data:
@@ -832,6 +875,7 @@ async def instagram_status(current_user: User = Depends(get_current_user)):
 
         return {
             "connected": True,
+            "instagram_account_id": response.data.get('id'),
             "instagram_business_account_id": response.data.get('instagram_business_account_id'),
             "expires_at": expires_at_str,
             "created_at": created_at_str

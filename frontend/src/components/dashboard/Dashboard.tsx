@@ -85,6 +85,7 @@ const Dashboard: React.FC = () => {
   const [bestTimes, setBestTimes] = useState<BestPostingTime[]>([]);
   const [scheduledPosts, setScheduledPosts] = useState<ScheduledPost[]>([]);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+  const [instagramAccountId, setInstagramAccountId] = useState<number | null>(null);
   const hasInitialFetched = useRef(false);
 
   const checkInstagramStatus = useCallback(async (): Promise<boolean> => {
@@ -99,6 +100,11 @@ const Dashboard: React.FC = () => {
       if (response.ok) {
         const data = await response.json();
         setInstagramConnected(data.connected);
+
+        // Guardar instagram_account_id para usarlo en sync
+        if (data.instagram_account_id) {
+          setInstagramAccountId(data.instagram_account_id);
+        }
 
         if (data.expired) {
           alert('Tu token de Instagram ha expirado. Por favor vuelve a conectar tu cuenta.');
@@ -125,7 +131,7 @@ const Dashboard: React.FC = () => {
 
       // Fetch Instagram analytics overview (from cache - fast!)
       if (connected) {
-        const instagramResponse = await fetch('http://localhost:8000/api/instagram/analytics/cached-overview', {
+        const instagramResponse = await fetch('http://localhost:8000/api/analytics/cached-overview', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
 
@@ -178,7 +184,7 @@ const Dashboard: React.FC = () => {
     }
 
     const token = localStorage.getItem('authToken');
-    if (!token) return;
+    if (!token || !instagramAccountId) return;
 
     setSyncing(true);
     try {
@@ -194,7 +200,7 @@ const Dashboard: React.FC = () => {
       }
 
       // 2. Sincronizar métricas de performance (likes, comments, reach, etc.)
-      const metricsResponse = await fetch(`http://localhost:8000/api/instagram/sync`, {
+      const metricsResponse = await fetch(`http://localhost:8000/api/analytics/sync/${instagramAccountId}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -216,7 +222,7 @@ const Dashboard: React.FC = () => {
     } finally {
       setSyncing(false);
     }
-  }, [isSyncing, lastSync, setSyncing, setLastSync, setSyncCompleted, fetchDashboardStats]);
+  }, [isSyncing, lastSync, setSyncing, setLastSync, setSyncCompleted, fetchDashboardStats, instagramAccountId]);
 
   useEffect(() => {
     if (hasInitialFetched.current) return;
