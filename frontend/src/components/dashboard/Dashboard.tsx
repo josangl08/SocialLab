@@ -129,9 +129,9 @@ const Dashboard: React.FC = () => {
     try {
       setLoading(true);
 
-      // Fetch Instagram analytics overview (from cache - fast!)
+      // Fetch Instagram analytics overview (all time - from cache, fast!)
       if (connected) {
-        const instagramResponse = await fetch('http://localhost:8000/api/analytics/cached-overview', {
+        const instagramResponse = await fetch('http://localhost:8000/api/analytics/overview?days=3650', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
 
