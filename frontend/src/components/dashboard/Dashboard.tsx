@@ -1,14 +1,22 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 import './Dashboard.css';
+
+// Import new analytics components
+import { KPICard } from '../analytics/cards/KPICard';
+import { FollowerGrowthChart } from '../analytics/charts/FollowerGrowthChart';
+import { DemographicsChart } from '../analytics/charts/DemographicsChart';
+import { ActivityHeatmap } from '../analytics/charts/ActivityHeatmap';
+import { TopLocations } from '../analytics/charts/TopLocations';
 
 interface DashboardStats {
   follower_count: number;
   profile_views: number;
   reach: number;
   impressions: number;
+  avg_interactions_per_post: number;
   engagement_rate: number;
   total_posts: number;
 }
@@ -35,8 +43,35 @@ interface EngagementTrendItem {
 
 interface BestPostingTime {
   hour: string;
-  avg_engagement_rate: number;
+  score: number;
+  online_followers: number;
+  avg_engagement: number;
   posts_count: number;
+}
+
+interface FollowerGrowthData {
+  date: string;
+  follower_count: number;
+  change: number;
+}
+
+interface LocationData {
+  country_code?: string;
+  city_name?: string;
+  audience_count: number;
+  percentage: number;
+}
+
+interface AudienceData {
+  follower_growth: FollowerGrowthData[];
+  demographics: {
+    audience_gender_age: Record<string, number>;
+  };
+  online_hours: Record<string, number>;
+  top_locations: {
+    countries: LocationData[];
+    cities: LocationData[];
+  };
 }
 
 interface ScheduledPost {
@@ -51,6 +86,7 @@ interface AnalyticsData {
   success: boolean;
   data: {
     overview: DashboardStats;
+    audience: AudienceData;
     top_posts: TopPost[];
     engagement_trend: EngagementTrendItem[];
     best_posting_times: BestPostingTime[];
@@ -70,13 +106,13 @@ const Dashboard: React.FC = () => {
   } = useAuth();
 
   const location = useLocation();
-  const navigate = useNavigate();
   const [loading, setLoading] = useState<boolean>(true);
   const [stats, setStats] = useState<DashboardStats>({
     follower_count: 0,
     profile_views: 0,
     reach: 0,
     impressions: 0,
+    avg_interactions_per_post: 0,
     engagement_rate: 0,
     total_posts: 0
   });
@@ -87,6 +123,14 @@ const Dashboard: React.FC = () => {
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [instagramAccountId, setInstagramAccountId] = useState<number | null>(null);
   const hasInitialFetched = useRef(false);
+
+  // New audience analytics state
+  const [audienceData, setAudienceData] = useState<AudienceData>({
+    follower_growth: [],
+    demographics: { audience_gender_age: {} },
+    online_hours: {},
+    top_locations: { countries: [], cities: [] }
+  });
 
   const checkInstagramStatus = useCallback(async (): Promise<boolean> => {
     const token = localStorage.getItem('authToken');
@@ -144,13 +188,24 @@ const Dashboard: React.FC = () => {
               profile_views: data.data.overview.profile_views || 0,
               reach: data.data.overview.reach || 0,
               impressions: data.data.overview.impressions || 0,
+              avg_interactions_per_post: data.data.overview.avg_interactions_per_post || 0,
               engagement_rate: data.data.overview.engagement_rate || 0,
               total_posts: data.data.overview.total_posts || 0
             });
             setTopPosts(data.data.top_posts || []);
             setEngagementTrend(data.data.engagement_trend || []);
             setBestTimes(data.data.best_posting_times || []);
-            setLastSyncAt(data.last_sync_at); // Guardar timestamp de última sincronización
+            setLastSyncAt(data.last_sync_at);
+
+            // Set audience data
+            if (data.data.audience) {
+              setAudienceData({
+                follower_growth: data.data.audience.follower_growth || [],
+                demographics: data.data.audience.demographics || { audience_gender_age: {} },
+                online_hours: data.data.audience.online_hours || {},
+                top_locations: data.data.audience.top_locations || { countries: [], cities: [] }
+              });
+            }
           }
         } else {
           console.error('Error cargando analytics de Instagram:', instagramResponse.status);
@@ -303,7 +358,7 @@ const Dashboard: React.FC = () => {
             ) : (
               <div className="sync-section">
                 {lastSyncAt && (
-                  <small className="text-muted" style={{ marginRight: '12px' }}>
+                  <small className="dashboard-small-text" style={{ marginRight: '12px' }}>
                     <i className="bi bi-clock-history"></i> {formatTimeAgo(lastSyncAt)}
                   </small>
                 )}
@@ -320,43 +375,50 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        <div className="dashboard-stats">
-          <div className="stat-card">
-            <div className="stat-icon">
-              <i className="bi bi-people"></i>
-            </div>
-            <div className="stat-content">
-              <span className="stat-value">{formatNumber(stats.follower_count)}</span>
-              <span className="stat-label">Seguidores</span>
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon">
-              <i className="bi bi-eye"></i>
-            </div>
-            <div className="stat-content">
-              <span className="stat-value">{formatNumber(stats.profile_views)}</span>
-              <span className="stat-label">Vistas Perfil</span>
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon">
-              <i className="bi bi-broadcast"></i>
-            </div>
-            <div className="stat-content">
-              <span className="stat-value">{formatNumber(stats.reach)}</span>
-              <span className="stat-label">Alcance</span>
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon">
-              <i className="bi bi-heart"></i>
-            </div>
-            <div className="stat-content">
-              <span className="stat-value">{stats.engagement_rate.toFixed(1)}%</span>
-              <span className="stat-label">Engagement</span>
-            </div>
-          </div>
+        {/* KPI Cards Grid */}
+        <div className="kpi-grid">
+          <KPICard
+            title="Seguidores"
+            value={formatNumber(stats.follower_count)}
+            icon="bi-people"
+            color="primary"
+            loading={loading}
+          />
+          <KPICard
+            title="Vistas Perfil"
+            value={formatNumber(stats.profile_views)}
+            icon="bi-eye"
+            color="info"
+            loading={loading}
+          />
+          <KPICard
+            title="Alcance"
+            value={formatNumber(stats.reach)}
+            icon="bi-broadcast"
+            color="purple"
+            loading={loading}
+          />
+          <KPICard
+            title="Engagement"
+            value={`${stats.engagement_rate.toFixed(1)}%`}
+            icon="bi-heart"
+            color="danger"
+            loading={loading}
+          />
+          <KPICard
+            title="Avg. Interacciones"
+            value={formatNumber(stats.avg_interactions_per_post)}
+            icon="bi-chat-dots"
+            color="success"
+            loading={loading}
+          />
+          <KPICard
+            title="Total Posts"
+            value={stats.total_posts}
+            icon="bi-grid-3x3"
+            color="warning"
+            loading={loading}
+          />
         </div>
       </div>
 
@@ -375,36 +437,71 @@ const Dashboard: React.FC = () => {
         </div>
       ) : (
         <div className="dashboard-content">
-          {/* Two Column Layout */}
-          <div className="dashboard-grid">
-            {/* Left Column */}
-            <div className="dashboard-column">
-              {/* Engagement Trend */}
-              <div className="dashboard-section">
-                <h3><i className="bi bi-graph-up me-2"></i>Tendencia de Engagement (último año)</h3>
-                <div className="trend-mini-chart">
-                  {engagementTrend.length > 0 ? (
-                    engagementTrend.map((item, index) => (
-                      <div key={index} className="trend-bar-container">
-                        <div
-                          className="trend-bar"
-                          style={{
-                            height: `${(item.engagement / Math.max(...engagementTrend.map(t => t.engagement))) * 100}%`
-                          }}
-                          title={`${item.date}: ${item.engagement} engagement`}
-                        ></div>
-                        <span className="trend-label">{new Date(item.date).getDate()}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-muted">No hay datos de tendencia disponibles</p>
-                  )}
-                </div>
-              </div>
+          {/* Section 1: Follower Growth */}
+          <div className="analytics-section">
+            <div className="section-header">
+              <h3><i className="bi bi-graph-up-arrow me-2"></i>Crecimiento de Seguidores</h3>
+            </div>
+            <div className="section-content">
+              <FollowerGrowthChart
+                data={audienceData.follower_growth}
+                loading={loading}
+              />
+            </div>
+          </div>
 
-              {/* Top Post */}
-              <div className="dashboard-section">
+          {/* Section 2: Audience Analytics - Two Columns */}
+          <div className="analytics-section-row">
+            {/* Demographics */}
+            <div className="analytics-section">
+              <div className="section-header">
+                <h3><i className="bi bi-people me-2"></i>Demografía de Audiencia</h3>
+              </div>
+              <div className="section-content">
+                <DemographicsChart
+                  data={audienceData.demographics}
+                  loading={loading}
+                />
+              </div>
+            </div>
+
+            {/* Top Locations */}
+            <div className="analytics-section">
+              <div className="section-header">
+                <h3><i className="bi bi-geo-alt me-2"></i>Ubicaciones Principales</h3>
+              </div>
+              <div className="section-content">
+                <TopLocations
+                  countries={audienceData.top_locations.countries}
+                  cities={audienceData.top_locations.cities}
+                  loading={loading}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: Activity Heatmap */}
+          <div className="analytics-section">
+            <div className="section-header">
+              <h3><i className="bi bi-clock-history me-2"></i>Actividad de Seguidores</h3>
+            </div>
+            <div className="section-content">
+              <ActivityHeatmap
+                onlineHours={audienceData.online_hours}
+                bestPostingTimes={bestTimes}
+                loading={loading}
+              />
+            </div>
+          </div>
+
+          {/* Section 4: Top Posts & Scheduled - Two Columns */}
+          <div className="analytics-section-row">
+            {/* Top Post */}
+            <div className="analytics-section">
+              <div className="section-header">
                 <h3><i className="bi bi-trophy me-2"></i>Post Destacado</h3>
+              </div>
+              <div className="section-content">
                 {topPosts.length > 0 ? (
                   <div className="top-post-card">
                     {topPosts[0].media_url && (
@@ -425,32 +522,17 @@ const Dashboard: React.FC = () => {
                     </div>
                   </div>
                 ) : (
-                  <p className="text-muted">No hay posts disponibles</p>
+                  <p className="dashboard-empty-state">No hay posts disponibles</p>
                 )}
               </div>
             </div>
 
-            {/* Right Column */}
-            <div className="dashboard-column">
-              {/* Best Posting Time */}
-              <div className="dashboard-section">
-                <h3><i className="bi bi-clock me-2"></i>Mejor Horario para Publicar</h3>
-                {bestTimes.length > 0 ? (
-                  <div className="best-time-highlight">
-                    <div className="best-time-value">{bestTimes[0].hour}</div>
-                    <p className="best-time-label">
-                      {bestTimes[0].avg_engagement_rate.toFixed(1)}% engagement promedio
-                    </p>
-                    <small className="text-muted">Basado en {bestTimes[0].posts_count} posts</small>
-                  </div>
-                ) : (
-                  <p className="text-muted">No hay suficientes datos para análisis</p>
-                )}
-              </div>
-
-              {/* Upcoming Posts */}
-              <div className="dashboard-section">
+            {/* Upcoming Posts */}
+            <div className="analytics-section">
+              <div className="section-header">
                 <h3><i className="bi bi-calendar-event me-2"></i>Próximas Publicaciones</h3>
+              </div>
+              <div className="section-content">
                 {scheduledPosts.length > 0 ? (
                   <div className="upcoming-posts-list">
                     {scheduledPosts.map((post) => (
@@ -470,32 +552,9 @@ const Dashboard: React.FC = () => {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-muted">No hay publicaciones programadas</p>
+                  <p className="dashboard-empty-state">No hay publicaciones programadas</p>
                 )}
               </div>
-            </div>
-          </div>
-
-          {/* Quick Actions */}
-          <div className="dashboard-section">
-            <h3><i className="bi bi-lightning me-2"></i>Acciones Rápidas</h3>
-            <div className="quick-actions-grid">
-              <button className="quick-action-btn" onClick={() => navigate('/create-post')}>
-                <i className="bi bi-plus-circle"></i>
-                <span>Crear Post</span>
-              </button>
-              <button className="quick-action-btn" onClick={() => navigate('/generate')}>
-                <i className="bi bi-stars"></i>
-                <span>Generar Contenido</span>
-              </button>
-              <button className="quick-action-btn" onClick={() => navigate('/calendar')}>
-                <i className="bi bi-calendar-event"></i>
-                <span>Ver Calendario</span>
-              </button>
-              <button className="quick-action-btn" onClick={() => navigate('/analytics')}>
-                <i className="bi bi-bar-chart-line"></i>
-                <span>Analytics Completo</span>
-              </button>
             </div>
           </div>
         </div>

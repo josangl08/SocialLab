@@ -8,6 +8,7 @@ Author: SocialLab
 Date: 2025-01-19
 """
 import logging
+import json
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from datetime import datetime
 from typing import Dict, List
@@ -21,7 +22,6 @@ from services.analytics import AnalyticsService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analytics", tags=["Analytics"])
-
 
 def get_instagram_service(current_user: dict = Depends(get_current_user)) -> InstagramInsightsService:
     """
@@ -68,6 +68,147 @@ def get_instagram_service(current_user: dict = Depends(get_current_user)) -> Ins
             status_code=500,
             detail=f"Error al configurar el servicio de Instagram: {str(e)}"
         )
+
+def full_sync_account(instagram_service, db_client, user_id, instagram_account_id_db):
+    """
+    Realiza una sincronización completa: métricas de cuenta, audiencia y posts.
+
+    Guarda datos en:
+    - instagram_accounts (métricas básicas)
+    - instagram_account_snapshots (snapshot diario)
+    - audience_demographics (demografía)
+    - online_followers_data (actividad por hora)
+    - posts + post_performance (contenido)
+    """
+    today = datetime.utcnow().date()
+
+    # 1. Sincronizar métricas principales de la cuenta (15+ métricas)
+    logger.info(f"🔄 Sincronizando métricas de cuenta {instagram_account_id_db}")
+    try:
+        # Obtener datos básicos del perfil + métricas (usa rango de últimos 7 días por defecto)
+        account_insights = instagram_service.get_account_insights(days_back=7)
+
+        # Log para debug: ver qué métricas obtuvimos
+        logger.info(f"📊 Métricas obtenidas: "
+                   f"followers={account_insights.get('follower_count')}, "
+                   f"reach={account_insights.get('reach')}, "
+                   f"profile_views={account_insights.get('profile_views')}, "
+                   f"interactions={account_insights.get('total_interactions')}")
+
+        # Actualizar tabla principal instagram_accounts
+        update_data = {
+            "followers_count": account_insights.get("follower_count", 0),
+            "reach": account_insights.get("reach", 0),
+            "profile_views": account_insights.get("profile_views", 0),
+            "username": account_insights.get("username", ""),
+            "account_name": account_insights.get("name", ""),
+            "profile_picture_url": account_insights.get("profile_picture_url", ""),
+            "last_sync_at": datetime.now().isoformat(),
+        }
+        db_client.table("instagram_accounts").update(update_data).eq("id", instagram_account_id_db).execute()
+        logger.info(f"✅ Cuenta {instagram_account_id_db} actualizada")
+
+        # Guardar snapshot diario en instagram_account_snapshots
+        # NOTA: impressions NO existe en account-level insights de Instagram API
+        # account_insights viene de get_account_insights() que incluye perfil + métricas
+        snapshot_data = {
+            "instagram_account_id": instagram_account_id_db,
+            "date": today.isoformat(),
+            "follower_count": account_insights.get("follower_count", 0),  # Del perfil
+            "following_count": 0,  # No disponible en API básica
+            "media_count": account_insights.get("media_count", 0),  # Del perfil
+            "reach": account_insights.get("reach", 0),  # De insights
+            "impressions": 0,  # No disponible en account-level (solo media-level)
+            "profile_views": account_insights.get("profile_views", 0),  # De insights (últimos 7 días)
+            "website_clicks": 0,  # No incluida en get_account_insights básico
+            "email_contacts": 0,  # Requiere configuración especial
+            "phone_call_clicks": 0,  # Requiere configuración especial
+            "text_message_clicks": 0,  # Requiere configuración especial
+            "get_directions_clicks": 0  # Requiere configuración especial
+        }
+        # Delete + Insert para evitar problemas con upsert en múltiples columnas
+        db_client.table("instagram_account_snapshots").delete().match({
+            'instagram_account_id': instagram_account_id_db,
+            'date': today.isoformat()
+        }).execute()
+
+        result = db_client.table("instagram_account_snapshots").insert(snapshot_data).execute()
+        logger.info(f"✅ Snapshot diario guardado: {snapshot_data['date']}")
+
+    except Exception as e:
+        logger.error(f"❌ Error sincronizando métricas de cuenta {instagram_account_id_db}: {e}")
+
+    # 2. Sincronizar datos de audiencia (demografía + actividad)
+    logger.info(f"🔄 Sincronizando datos de audiencia para cuenta {instagram_account_id_db}")
+    try:
+        audience_insights = instagram_service.get_audience_insights()
+        logger.info(f"📊 DEBUG audience_insights retornado: {audience_insights}")
+
+        # Guardar demografía en audience_demographics
+        if audience_insights.get('demographics'):
+            demographics_to_upsert = []
+            for metric_type, data in audience_insights['demographics'].items():
+                logger.info(f"📊 DEBUG {metric_type}: {len(data) if isinstance(data, dict) else 0} entradas")
+                # Solo guardar si hay datos reales (no dict vacío)
+                if data and len(data) > 0:
+                    demographics_to_upsert.append({
+                        'instagram_account_id': instagram_account_id_db,
+                        'sync_date': today.isoformat(),
+                        'metric_type': metric_type,
+                        'data': data
+                    })
+                else:
+                    logger.warning(f"⚠️  {metric_type} está vacío, omitiendo...")
+
+            if demographics_to_upsert:
+                # Buscar el constraint único correcto para demographics
+                # Por simplicidad, hacer delete + insert individual por cada metric_type
+                for demo_data in demographics_to_upsert:
+                    # Eliminar registro anterior si existe
+                    db_client.table('audience_demographics').delete().match({
+                        'instagram_account_id': demo_data['instagram_account_id'],
+                        'metric_type': demo_data['metric_type']
+                    }).execute()
+                    # Insertar nuevo registro
+                    db_client.table('audience_demographics').insert(demo_data).execute()
+                logger.info(f"✅ Datos demográficos actualizados ({len(demographics_to_upsert)} métricas)")
+
+        # Guardar actividad de seguidores en online_followers_data
+        # Solo guardar si hay datos reales (no dict vacío {})
+        online_hours = audience_insights.get('online_hours')
+        if online_hours and len(online_hours) > 0:
+            # Delete + Insert para evitar problemas con upsert
+            db_client.table('online_followers_data').delete().match({
+                'instagram_account_id': instagram_account_id_db,
+                'sync_date': today.isoformat()
+            }).execute()
+
+            online_data = {
+                'instagram_account_id': instagram_account_id_db,
+                'sync_date': today.isoformat(),
+                'hour_data': online_hours  # Supabase maneja JSONB automáticamente
+            }
+            db_client.table('online_followers_data').insert(online_data).execute()
+            logger.info(f"✅ Actividad de seguidores actualizada ({len(online_hours)} horas)")
+        else:
+            logger.warning(f"⚠️  No hay datos de actividad de seguidores disponibles aún")
+
+    except Exception as e:
+        logger.error(f"❌ Error sincronizando datos de audiencia: {e}")
+
+    # 3. Sincronizar posts y su performance
+    logger.info(f"🔄 Sincronizando posts para cuenta {instagram_account_id_db}")
+    try:
+        instagram_service.sync_posts_to_database(
+            db_client=db_client,
+            user_id=user_id,
+            instagram_account_id_db=instagram_account_id_db
+        )
+        logger.info(f"✅ Posts sincronizados correctamente")
+    except Exception as e:
+        logger.error(f"❌ Error sincronizando posts: {e}")
+
+    logger.info(f"✅ Sincronización completa finalizada para cuenta {instagram_account_id_db}")
 
 @router.post(
     "/sync/{instagram_account_id}",
@@ -132,7 +273,8 @@ async def sync_instagram_analytics(
 
         # Añadir tarea de sincronización en segundo plano
         background_tasks.add_task(
-            instagram_service.sync_posts_to_database,
+            full_sync_account,
+            instagram_service=instagram_service,
             db_client=supabase,
             user_id=current_user['id'],
             instagram_account_id_db=instagram_account_id
@@ -259,7 +401,8 @@ async def get_recent_posts(
 async def get_analytics_overview(
     days: int = 365,
     compare: bool = False,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    instagram_service: InstagramInsightsService = Depends(get_instagram_service)
 ) -> Dict:
     """
     Obtener análisis completo de métricas desde la base de datos (OPTIMIZADO).
@@ -295,8 +438,11 @@ async def get_analytics_overview(
     - last_sync_at: Timestamp de última sincronización
     """
     try:
-        # Inicializar servicio de analytics
-        analytics_service = AnalyticsService(db_client=supabase)
+        # Inicializar servicio de analytics con el servicio de Instagram inyectado
+        analytics_service = AnalyticsService(
+            db_client=supabase,
+            instagram_service=instagram_service
+        )
 
         # Obtener análisis completo
         result = analytics_service.get_comprehensive_analytics(
@@ -321,3 +467,4 @@ async def get_analytics_overview(
             status_code=500,
             detail=f"Error al obtener analytics: {str(e)}"
         )
+

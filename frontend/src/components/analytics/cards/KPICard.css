@@ -1,0 +1,203 @@
+/* KPICard Component Styles */
+
+.kpi-card {
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 12px;
+  transition: transform 0.2s, box-shadow 0.2s;
+  min-height: 140px;
+  position: relative;
+  overflow: hidden;
+}
+
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  opacity: 0.1;
+  background: radial-gradient(circle at top right, rgba(255,255,255,0.3) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.kpi-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+}
+
+/* Card Background Gradients - High contrast colors */
+.kpi-card.kpi-card-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+}
+
+.kpi-card.kpi-card-success {
+  background: linear-gradient(135deg, #059669 0%, #0891b2 100%) !important;
+}
+
+.kpi-card.kpi-card-warning {
+  background: linear-gradient(135deg, #fbbf24 0%, #10b981 100%) !important;
+}
+
+.kpi-card.kpi-card-info {
+  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%) !important;
+}
+
+.kpi-card.kpi-card-purple {
+  background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%) !important;
+}
+
+.kpi-card.kpi-card-danger {
+  background: linear-gradient(135deg, #ef4444 0%, #f97316 100%) !important;
+}
+
+/* Icon Styles */
+.kpi-icon {
+  font-size: 40px;
+  color: white;
+  opacity: 0.95;
+  margin-bottom: 4px;
+}
+
+/* Content Styles */
+.kpi-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  z-index: 1;
+  position: relative;
+}
+
+.kpi-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.kpi-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: white;
+  margin: 0;
+  line-height: 1;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Change Indicator */
+.kpi-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  backdrop-filter: blur(4px);
+}
+
+.kpi-change i {
+  font-size: 11px;
+}
+
+/* Comparison */
+.kpi-comparison {
+  margin-top: 4px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.comparison-label {
+  margin-right: 4px;
+}
+
+.comparison-value {
+  font-weight: 600;
+  color: white;
+}
+
+/* Loading Skeleton */
+.kpi-skeleton {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.skeleton-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(90deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.1) 100%);
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+}
+
+.skeleton-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.skeleton-title {
+  height: 13px;
+  width: 60%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.1) 100%);
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+}
+
+.skeleton-value {
+  height: 32px;
+  width: 50%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.1) 100%);
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+  animation-delay: 0.1s;
+}
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .kpi-card {
+    padding: 20px;
+    min-height: 120px;
+  }
+
+  .kpi-icon {
+    font-size: 32px;
+  }
+
+  .kpi-value {
+    font-size: 26px;
+  }
+
+  .kpi-title {
+    font-size: 12px;
+  }
+}

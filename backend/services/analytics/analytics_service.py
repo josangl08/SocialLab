@@ -8,9 +8,11 @@ Author: SocialLab
 Date: 2025-01-19
 """
 import logging
+import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from collections import defaultdict
+from database.supabase_client import retry_on_network_error
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +34,16 @@ class AnalyticsService:
     - Más simple para el cliente
     """
 
-    def __init__(self, db_client):
+    def __init__(self, db_client, instagram_service=None):
         """
         Inicializar servicio de analytics.
 
         Args:
             db_client: Cliente de Supabase para consultas a BD
+            instagram_service: Servicio para interactuar con la API de Instagram
         """
         self.db = db_client
+        self.instagram_service = instagram_service
 
     def get_comprehensive_analytics(
         self,
@@ -85,7 +89,7 @@ class AnalyticsService:
         # 3. Calcular todas las métricas
         overview = self._calculate_overview(
             posts,
-            account_info['follower_count'],
+            account_info,
             compare
         )
 
@@ -103,10 +107,18 @@ class AnalyticsService:
         # 7. Tendencias temporales
         engagement_trend = self._calculate_trends(posts, days)
 
-        # 8. Mejores horarios
-        best_posting_times = self._analyze_best_times(posts)
+        # 8. Analizar datos de audiencia (PRIMERO para obtener online_hours)
+        audience = self._analyze_audience(instagram_account_id, days)
 
-        # 9. Insights y recomendaciones
+        # 9. Mejores horarios con algoritmo avanzado (actividad + performance histórico)
+        # Score = (online_followers * 0.4) + (engagement_rate * 0.6)
+        best_posting_times = self._calculate_best_posting_times(
+            instagram_account_id,
+            audience.get('online_hours', {}),
+            days
+        )
+
+        # 10. Insights y recomendaciones
         insights = self._generate_insights(
             posts,
             best_posting_times,
@@ -119,6 +131,7 @@ class AnalyticsService:
             'last_sync_at': account_info['last_sync_at'],
             'data': {
                 'overview': overview,
+                'audience': audience,
                 'by_content_type': by_content_type,
                 'top_posts': top_posts,
                 'engagement_trend': engagement_trend,
@@ -142,16 +155,19 @@ class AnalyticsService:
         Returns:
             Dict con información de la cuenta
         """
-        query = self.db.table('instagram_accounts').select(
-            'id, instagram_business_account_id, last_sync_at, '
-            'followers_count, username, account_name'
-        ).eq('user_id', user_id).eq('is_active', True)
+        def _execute_query():
+            query = self.db.table('instagram_accounts').select(
+                'id, instagram_business_account_id, last_sync_at, '
+                'followers_count, username, account_name, reach, profile_views'
+            ).eq('user_id', user_id).eq('is_active', True)
 
-        # Si se proporciona instagram_account_id, filtrar por él
-        if instagram_account_id is not None:
-            query = query.eq('id', instagram_account_id)
+            # Si se proporciona instagram_account_id, filtrar por él
+            if instagram_account_id is not None:
+                query = query.eq('id', instagram_account_id)
 
-        result = query.single().execute()
+            return query.single().execute()
+
+        result = retry_on_network_error(_execute_query)
 
         if not result.data:
             raise ValueError("No hay cuenta de Instagram conectada")
@@ -164,7 +180,9 @@ class AnalyticsService:
             'last_sync_at': result.data.get('last_sync_at'),
             'follower_count': result.data.get('followers_count', 0),
             'username': result.data.get('username'),
-            'account_name': result.data.get('account_name')
+            'account_name': result.data.get('account_name'),
+            'reach': result.data.get('reach', 0),
+            'profile_views': result.data.get('profile_views', 0)
         }
 
     def _get_posts_from_db(
@@ -185,7 +203,7 @@ class AnalyticsService:
         query = self.db.table('posts').select(
             'id, content, media_url, publication_date, '
             'instagram_post_id, post_type, '
-            'post_performance(likes, comments, saves, reach, impressions)'
+            'post_performance(likes, comments, saves, reach, impressions, total_interactions)'
         ).eq('instagram_account_id', instagram_account_id).eq(
             'status', 'published'
         )
@@ -214,7 +232,7 @@ class AnalyticsService:
     def _calculate_overview(
         self,
         posts: List[Dict],
-        follower_count: int,
+        account_info: Dict,
         include_growth: bool = False
     ) -> Dict:
         """
@@ -222,45 +240,55 @@ class AnalyticsService:
 
         Args:
             posts: Lista de posts
-            follower_count: Número de seguidores
+            account_info: Diccionario con datos de la cuenta (incluye reach, profile_views)
             include_growth: Si True, prepara estructura para growth
 
         Returns:
             Dict con métricas agregadas
         """
         total_posts = len(posts)
-        total_likes = sum(
-            (p.get('post_performance') or {}).get('likes', 0) for p in posts
-        )
-        total_comments = sum(
-            (p.get('post_performance') or {}).get('comments', 0) for p in posts
-        )
-        total_reach = sum(
-            (p.get('post_performance') or {}).get('reach', 0) for p in posts
-        )
-        total_impressions = sum(
-            (p.get('post_performance') or {}).get('impressions', 0)
-            for p in posts
+
+        # Obtener métricas a nivel de cuenta desde la BD (ya sincronizadas)
+        # NOTA: Estas métricas vienen del último sync almacenado en instagram_accounts
+        reach = account_info.get('reach', 0)
+        profile_views = account_info.get('profile_views', 0)
+
+        # Calcular total de interacciones
+        total_interactions = sum(
+            (p.get('post_performance') or {}).get('total_interactions', 0) for p in posts
         )
 
-        # Calcular engagement rate promedio
+        # Calcular impressions totales sumando las de todos los posts
+        # NOTA: impressions no existe a nivel de cuenta, solo a nivel de post
+        total_impressions = sum(
+            (p.get('post_performance') or {}).get('impressions', 0) for p in posts
+        )
+
+        # Calcular promedio de interacciones por post
+        avg_interactions_per_post = total_interactions / total_posts if total_posts > 0 else 0
+
+        # Calcular engagement rate usando OPCIÓN 2 (estándar de industria):
+        # (interactions promedio por post) / (followers) * 100
+        # Esto responde: "¿Qué % de mis followers interactúa en promedio con cada post?"
         avg_engagement_rate = 0
-        if total_posts > 0:
-            total_engagement = total_likes + total_comments
-            base_followers = follower_count if follower_count > 0 else 1000
-            avg_engagement_rate = (
-                total_engagement / total_posts / base_followers
-            ) * 100
+        if total_posts > 0 and account_info['follower_count'] > 0:
+            avg_engagement_rate = (avg_interactions_per_post / account_info['follower_count']) * 100
+
+        logger.info(
+            f"📊 Overview calculado: {total_posts} posts, "
+            f"{avg_interactions_per_post:.1f} interactions/post, "
+            f"engagement_rate={avg_engagement_rate:.2f}%"
+        )
 
         overview = {
             'total_posts': total_posts,
-            'follower_count': follower_count,
-            'profile_views': 0,  # Instagram API no proporciona este dato
-            'reach': total_reach,
+            'follower_count': account_info['follower_count'],
+            'profile_views': profile_views,
+            'reach': reach,
             'impressions': total_impressions,
+            'avg_interactions_per_post': round(avg_interactions_per_post, 1),
             'engagement_rate': round(avg_engagement_rate, 2),
-            'accounts_engaged': 0,
-            'total_interactions': total_likes + total_comments
+            'total_interactions': total_interactions
         }
 
         # Preparar estructura para growth si se solicita
@@ -342,6 +370,286 @@ class AnalyticsService:
                 prev_total_likes + prev_total_comments
             )
         }
+
+    def _analyze_audience(self, instagram_account_id: int, days: int) -> Dict:
+        """
+        Analiza y formatea los datos de audiencia desde la BD.
+
+        Args:
+            instagram_account_id: ID de la cuenta
+            days: Días hacia atrás para análisis
+
+        Returns:
+            Dict con:
+                - follower_growth: Array de {date, follower_count, change}
+                - demographics: Dict con audience_gender_age, audience_country, etc.
+                - online_hours: Dict con {hour: count}
+                - top_locations: Array de top países/ciudades
+        """
+        audience_data = {
+            "follower_growth": [],
+            "demographics": {},
+            "online_hours": {},
+            "top_locations": {
+                "countries": [],
+                "cities": []
+            }
+        }
+
+        # 1. Crecimiento de seguidores (snapshots diarios)
+        cutoff_date = datetime.utcnow().date() - timedelta(days=days)
+        try:
+            growth_result = self.db.table('instagram_account_snapshots').select(
+                'date, follower_count'
+            ).eq(
+                'instagram_account_id', instagram_account_id
+            ).gte(
+                'date', cutoff_date.isoformat()
+            ).order('date', desc=False).execute()
+
+            if growth_result.data:
+                # Calcular cambios día a día
+                snapshots = growth_result.data
+                for i, snapshot in enumerate(snapshots):
+                    change = 0
+                    if i > 0:
+                        change = snapshot['follower_count'] - snapshots[i-1]['follower_count']
+
+                    audience_data["follower_growth"].append({
+                        'date': snapshot['date'],
+                        'follower_count': snapshot['follower_count'],
+                        'change': change
+                    })
+
+        except Exception as e:
+            logger.warning(f"No se pudo obtener el crecimiento de seguidores: {e}")
+
+        # 2. Datos demográficos (audience_demographics table)
+        try:
+            demo_result = self.db.table('audience_demographics').select(
+                'metric_type, data, sync_date'
+            ).eq('instagram_account_id', instagram_account_id).execute()
+
+            if demo_result.data:
+                for row in demo_result.data:
+                    metric_type = row['metric_type']
+                    data = row['data']
+
+                    # Asegurar que los datos sean un diccionario
+                    if isinstance(data, str):
+                        try:
+                            data = json.loads(data)
+                        except json.JSONDecodeError:
+                            logger.warning(f"No se pudo decodificar el JSON para {metric_type}")
+                            data = {}
+
+                    audience_data["demographics"][metric_type] = data
+
+                    # DEBUG: Ver qué datos tenemos para gender_age
+                    if metric_type == 'audience_gender_age':
+                        logger.info(f"📊 DEBUG audience_gender_age desde BD (primeras 5 keys): {list(data.keys())[:5] if data else 'vacío'}")
+
+                    # Extraer top países y ciudades para vista rápida
+                    if metric_type == 'audience_country' and data:
+                        # Calcular total para porcentajes
+                        total_audience = sum(data.values())
+
+                        countries = []
+                        for code, count in data.items():
+                            percentage = (count / total_audience * 100) if total_audience > 0 else 0
+                            countries.append({
+                                'country_code': code,
+                                'audience_count': count,
+                                'percentage': percentage
+                            })
+                        countries.sort(key=lambda x: x['audience_count'], reverse=True)
+                        audience_data["top_locations"]["countries"] = countries[:5]
+
+                    elif metric_type == 'audience_city' and data:
+                        # Calcular total para porcentajes
+                        total_audience = sum(data.values())
+
+                        cities = []
+                        for city_name, count in data.items():
+                            percentage = (count / total_audience * 100) if total_audience > 0 else 0
+                            cities.append({
+                                'city_name': city_name,
+                                'audience_count': count,
+                                'percentage': percentage
+                            })
+                        cities.sort(key=lambda x: x['audience_count'], reverse=True)
+                        audience_data["top_locations"]["cities"] = cities[:5]
+
+        except Exception as e:
+            logger.warning(f"No se pudieron obtener datos demográficos: {e}")
+
+        # 3. Horas de actividad (online_followers_data más reciente)
+        try:
+            online_result = self.db.table('online_followers_data').select(
+                'hour_data, sync_date'
+            ).eq(
+                'instagram_account_id', instagram_account_id
+            ).order('sync_date', desc=True).limit(1).maybe_single().execute()
+
+            if online_result and online_result.data and online_result.data.get('hour_data'):
+                audience_data["online_hours"] = online_result.data['hour_data']
+
+        except Exception as e:
+            logger.warning(f"No se pudieron obtener las horas de actividad: {e}")
+
+        return audience_data
+
+    def get_audience_detailed(
+        self,
+        instagram_account_id: int,
+        days: int = 30
+    ) -> Dict:
+        """
+        Obtiene análisis COMPLETO de audiencia para Dashboard Avanzado.
+
+        Este método retorna:
+        - Crecimiento histórico de seguidores
+        - Demografía completa (género/edad, países, ciudades, idiomas)
+        - Actividad por hora (online_followers)
+        - Mejores horarios para publicar (combinando actividad + performance)
+        - Top ubicaciones
+
+        Args:
+            instagram_account_id: ID de cuenta
+            days: Días hacia atrás para análisis
+
+        Returns:
+            Dict con datos completos de audiencia
+        """
+        # Obtener datos base
+        audience = self._analyze_audience(instagram_account_id, days)
+
+        # Calcular mejores horarios (combinando actividad + performance histórico)
+        best_times = self._calculate_best_posting_times(
+            instagram_account_id,
+            audience.get('online_hours', {}),
+            days
+        )
+
+        audience['best_posting_times'] = best_times
+
+        return audience
+
+    def _calculate_best_posting_times(
+        self,
+        instagram_account_id: int,
+        online_hours: Dict,
+        days: int
+    ) -> list:
+        """
+        Calcula los mejores momentos para publicar combinando:
+        1. Cuándo están online los seguidores (online_hours)
+        2. Cuándo han tenido mejor performance los posts históricos
+
+        Algoritmo: Score = (online_normalized * 0.4) + (engagement_rate * 0.6)
+
+        Args:
+            instagram_account_id: ID de cuenta
+            online_hours: Dict con {hour: count} de seguidores online
+            days: Días hacia atrás para performance histórico
+
+        Returns:
+            Lista de top 5 horarios con score combinado
+        """
+        recommendations = []
+
+        # 1. Obtener performance histórico por hora
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+
+        try:
+            # Query para obtener engagement promedio por hora del día
+            posts = self._get_posts_from_db(instagram_account_id, days)
+
+            # Agrupar por hora
+            hourly_performance = {}
+            for post in posts:
+                try:
+                    pub_date = post.get('publication_date')
+                    if not pub_date:
+                        continue
+
+                    post_date = datetime.fromisoformat(
+                        pub_date.replace('Z', '+00:00')
+                    )
+                    hour = post_date.hour
+
+                    perf = post.get('post_performance') or {}
+                    likes = perf.get('likes', 0)
+                    comments = perf.get('comments', 0)
+                    reach = perf.get('reach', 0)
+
+                    # Calcular engagement rate
+                    engagement_rate = 0
+                    if reach > 0:
+                        engagement_rate = ((likes + comments) / reach) * 100
+
+                    if hour not in hourly_performance:
+                        hourly_performance[hour] = {
+                            'total_engagement': 0,
+                            'count': 0
+                        }
+
+                    hourly_performance[hour]['total_engagement'] += engagement_rate
+                    hourly_performance[hour]['count'] += 1
+
+                except Exception:
+                    continue
+
+            # Calcular promedios
+            for hour in hourly_performance:
+                count = hourly_performance[hour]['count']
+                if count > 0:
+                    hourly_performance[hour]['avg_engagement'] = (
+                        hourly_performance[hour]['total_engagement'] / count
+                    )
+
+        except Exception as e:
+            logger.warning(f"Error calculando performance por hora: {e}")
+            hourly_performance = {}
+
+        # 2. Combinar online_followers con performance histórico
+        if not online_hours:
+            online_hours = {}
+
+        # Normalizar online followers (0-100)
+        max_online = max(online_hours.values()) if online_hours else 1
+        online_hours_normalized = {
+            str(h): (count / max_online) * 100
+            for h, count in online_hours.items()
+        }
+
+        # Calcular score combinado para cada hora (0-23)
+        for hour in range(24):
+            hour_str = str(hour)
+
+            # Score de actividad (0-100)
+            online_score = online_hours_normalized.get(hour_str, 0)
+
+            # Score de performance (0-100)
+            engagement_score = 0
+            if hour in hourly_performance:
+                engagement_score = hourly_performance[hour].get('avg_engagement', 0)
+
+            # Score combinado: 40% actividad + 60% performance
+            combined_score = (online_score * 0.4) + (engagement_score * 0.6)
+
+            recommendations.append({
+                'hour': f"{hour:02d}:00",
+                'day_of_week': None,  # TODO: Analizar por día de semana también
+                'score': round(combined_score, 1),
+                'online_followers': online_hours.get(hour_str, 0),
+                'avg_engagement': round(engagement_score, 1),
+                'posts_count': hourly_performance.get(hour, {}).get('count', 0)
+            })
+
+        # Ordenar por score y retornar top 5
+        recommendations.sort(key=lambda x: x['score'], reverse=True)
+        return recommendations[:5]
 
     def _analyze_by_content_type(self, posts: List[Dict]) -> Dict:
         """
@@ -630,8 +938,8 @@ class AnalyticsService:
                 "title": "Horario óptimo",
                 "description": (
                     f"{best_hour['hour']} es tu hora pico con "
-                    f"{best_hour['avg_engagement_rate']:.0f} "
-                    f"interacciones promedio"
+                    f"{best_hour['avg_engagement']:.1f}% "
+                    f"engagement promedio y {best_hour['online_followers']} seguidores online"
                 ),
                 "icon": "clock"
             })
@@ -690,9 +998,10 @@ class AnalyticsService:
                 'overview': {
                     'total_posts': 0,
                     'follower_count': account_info['follower_count'],
-                    'profile_views': 0,
-                    'reach': 0,
+                    'profile_views': account_info.get('profile_views', 0),
+                    'reach': account_info.get('reach', 0),
                     'impressions': 0,
+                    'avg_interactions_per_post': 0,
                     'engagement_rate': 0,
                     'accounts_engaged': 0,
                     'total_interactions': 0

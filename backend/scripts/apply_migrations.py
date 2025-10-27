@@ -52,7 +52,7 @@ class MigrationRunner:
         self.supabase_url = os.environ.get("SUPABASE_URL")
         self.supabase_key = os.environ.get("SUPABASE_KEY")
         self.supabase: Client = None
-        self.migrations_dir = Path(__file__).parent / "migrations"
+        self.migrations_dir = Path(__file__).parent.parent / "migrations"
 
     def connect(self):
         """Conecta a Supabase."""

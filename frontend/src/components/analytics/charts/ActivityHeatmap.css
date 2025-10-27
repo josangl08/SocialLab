@@ -1,0 +1,205 @@
+/* Activity Heatmap Styles */
+
+.activity-heatmap {
+  padding: 20px;
+}
+
+.heatmap-legend {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.legend-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+.legend-star {
+  font-size: 16px;
+}
+
+/* Heatmap Grid */
+.heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.heatmap-cell {
+  aspect-ratio: 1;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.heatmap-cell:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  opacity: 1 !important;
+  z-index: 10;
+}
+
+.cell-hour {
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.cell-value {
+  font-size: 10px;
+  color: white;
+  margin-top: 4px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+/* Best Times List */
+.best-times-list {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.best-times-list h4 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 16px 0;
+}
+
+.best-times-items {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.best-time-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #f9fafb;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.best-time-item:hover {
+  background: #f3f4f6;
+}
+
+.best-time-rank {
+  font-size: 20px;
+  min-width: 32px;
+  text-align: center;
+}
+
+.best-time-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.best-time-hour {
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.best-time-stats {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.best-time-stats .stat {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.best-time-stats .stat strong {
+  color: #111827;
+  font-weight: 600;
+}
+
+/* Loading and Empty States */
+.chart-loading,
+.chart-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  color: #6b7280;
+}
+
+.chart-loading .spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid #f3f4f6;
+  border-top-color: #8b5cf6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.chart-empty p,
+.chart-loading p {
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .heatmap-grid {
+    grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
+    gap: 4px;
+  }
+
+  .cell-hour {
+    font-size: 10px;
+  }
+
+  .cell-value {
+    font-size: 8px;
+  }
+
+  .best-times-list h4 {
+    font-size: 14px;
+  }
+
+  .best-time-hour {
+    font-size: 14px;
+  }
+
+  .best-time-stats {
+    gap: 8px;
+  }
+
+  .best-time-stats .stat {
+    font-size: 11px;
+  }
+}

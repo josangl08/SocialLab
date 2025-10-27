@@ -971,8 +971,8 @@ async def generate_ai_post_content(
     """
     # Lista de modelos de Gemini en orden de preferencia (del más potente al más ligero)
     PREFERRED_GEMINI_MODELS = [
-        'gemini-1.5-pro-latest',
-        'gemini-1.5-flash-latest',
+        'gemini-2.5-pro',
+        'gemini-2.5-flash',
         # Puedes añadir más modelos aquí si es necesario
     ]
 

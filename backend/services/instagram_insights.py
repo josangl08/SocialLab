@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class InstagramInsightsService:
     """Servicio para interactuar con Instagram Graph API y obtener insights"""
 
-    BASE_URL = "https://graph.facebook.com/v19.0"
+    BASE_URL = "https://graph.facebook.com/v24.0"
 
     def __init__(self, access_token: str, instagram_account_id: str):
         self.access_token = access_token
@@ -28,11 +28,10 @@ class InstagramInsightsService:
 
         params['access_token'] = self.access_token
 
-        # Detectar si endpoint es una URL completa o un endpoint relativo
         if endpoint.startswith('http://') or endpoint.startswith('https://'):
-            url = endpoint  # Ya es una URL completa (de paginación)
+            url = endpoint
         else:
-            url = f"{self.BASE_URL}/{endpoint}"  # Endpoint relativo
+            url = f"{self.BASE_URL}/{endpoint}"
 
         try:
             response = requests.get(url, params=params)
@@ -46,157 +45,279 @@ class InstagramInsightsService:
                 detail=f"Error al obtener datos de Instagram: {str(e)}"
             )
 
-    def get_account_insights(self, period: str = "day", metrics: List[str] = None) -> Dict:
+    def get_account_insights(self, period: str = "day", days_back: int = 7) -> Dict:
         """
-        Obtener insights de la cuenta de Instagram
+        Obtiene insights básicos de la cuenta, separando las llamadas por
+        compatibilidad de métricas para mayor robustez.
 
         Args:
-            period: 'day', 'week', 'days_28'
-            metrics: Lista de métricas a obtener
+            period: Período por defecto (ignorado, se usan los períodos correctos)
+            days_back: Días hacia atrás para métricas diarias (default: 7)
 
         Returns:
-            Dict con los insights
+            Dict con métricas básicas de la cuenta
         """
         insights = {}
 
-        valid_period_metrics = [
-            'reach',
-            'accounts_engaged',
-            'total_interactions',
-        ]
-
-        if metrics is None:
-            metrics = valid_period_metrics
-        else:
-            metrics = [m for m in metrics if m in valid_period_metrics]
-
-        # Métricas que no son compatibles con 'days_28'
-        # Estas métricas solo soportan 'day' period
-        days_28_incompatible = ['reach', 'accounts_engaged', 'total_interactions']
-        
-        compatible_metrics = []
-        incompatible_metrics_to_fetch = []
-
-        if period == 'days_28':
-            for metric in metrics:
-                if metric in days_28_incompatible:
-                    incompatible_metrics_to_fetch.append(metric)
-                else:
-                    compatible_metrics.append(metric)
-        else:
-            compatible_metrics = metrics
-
-        # 1. Petición para métricas incompatibles con 'days_28', usando 'day'
-        if incompatible_metrics_to_fetch:
-            try:
-                metrics_str = ','.join(incompatible_metrics_to_fetch)
-                endpoint = f"{self.instagram_account_id}/insights"
-                params = {
-                    'metric': metrics_str,
-                    'period': 'day',  # Usar período compatible
-                    'metric_type': 'total_value'
-                }
-                data = self._make_request(endpoint, params)
-                for item in data.get('data', []):
-                    metric_name = item.get('name')
-                    values = item.get('values', [])
-                    if values:
-                        insights[metric_name] = values[-1].get('value', 0)
-            except HTTPException as e:
-                logger.warning(f"⚠️  No se pudieron obtener métricas ('day'): {e.detail}")
-
-        # 2. Petición para métricas compatibles con el período original
-        if compatible_metrics:
-            try:
-                metrics_str = ','.join(compatible_metrics)
-                endpoint = f"{self.instagram_account_id}/insights"
-                params = {
-                    'metric': metrics_str,
-                    'period': period,
-                    'metric_type': 'total_value'
-                }
-                data = self._make_request(endpoint, params)
-                for item in data.get('data', []):
-                    metric_name = item.get('name')
-                    values = item.get('values', [])
-                    if values:
-                        insights[metric_name] = values[-1].get('value', 0)
-            except HTTPException as e:
-                logger.warning(f"⚠️  No se pudieron obtener métricas ('{period}'): {e.detail}")
-
-        # Obtener datos del perfil (campos que no requieren periodo)
+        # 1. Obtener datos básicos del perfil
         try:
             profile_endpoint = f"{self.instagram_account_id}"
-            profile_params = {
-                'fields': 'followers_count,media_count,follows_count,name,username,profile_picture_url'
-            }
+            profile_params = {'fields': 'followers_count,media_count,name,username,profile_picture_url'}
             profile_data = self._make_request(profile_endpoint, profile_params)
-            insights['follower_count'] = profile_data.get('followers_count', 0)
-            insights['media_count'] = profile_data.get('media_count', 0)
-            insights['follows_count'] = profile_data.get('follows_count', 0)
+            insights.update({
+                'follower_count': profile_data.get('followers_count', 0),
+                'media_count': profile_data.get('media_count', 0),
+                'name': profile_data.get('name', ''),
+                'username': profile_data.get('username', ''),
+                'profile_picture_url': profile_data.get('profile_picture_url', '')
+            })
         except Exception as e:
             logger.warning(f"⚠️  No se pudieron obtener datos del perfil: {e}")
-            insights['follower_count'] = 0
-            insights['media_count'] = 0
 
-        # Nota: profile_views no está disponible como campo del perfil
-        # y no acepta el parámetro period en insights
-        # Por lo tanto, lo establecemos en 0 para evitar errores en el frontend
-        if 'profile_views' not in insights:
-            insights['profile_views'] = 0
+        endpoint = f"{self.instagram_account_id}/insights"
+
+        # Calcular rango de fechas para métricas diarias
+        until_date = datetime.now()
+        since_date = until_date - timedelta(days=days_back)
+
+        # 2. Métricas con period=day y metric_type=total_value
+        day_metrics = ['profile_views', 'total_interactions']
+        try:
+            request_params = {
+                'metric': ",".join(day_metrics),
+                'period': 'day',
+                'metric_type': 'total_value',
+                'since': int(since_date.timestamp()),
+                'until': int(until_date.timestamp())
+            }
+            data = self._make_request(endpoint, request_params)
+            for item in data.get('data', []):
+                metric_name = item.get('name')
+                # Con metric_type=total_value, la API retorna 'total_value' no 'values'
+                if item.get('total_value'):
+                    total = item['total_value'].get('value', 0)
+                    insights[metric_name] = total
+                elif item.get('values'):
+                    # Fallback: Si retorna array de valores, sumarlos
+                    total = sum(v.get('value', 0) for v in item['values'])
+                    insights[metric_name] = total
+        except Exception as e:
+            logger.warning(f"⚠️  No se pudieron obtener métricas diarias ({','.join(day_metrics)}): {e}")
+
+        # 3. Métrica 'reach' con period=days_28
+        try:
+            request_params = {
+                'metric': 'reach',
+                'period': 'days_28'
+            }
+            data = self._make_request(endpoint, request_params)
+            if data.get('data') and data['data'][0].get('values'):
+                 insights['reach'] = data['data'][0]['values'][0].get('value', 0)
+        except Exception as e:
+            logger.warning(f"⚠️  No se pudo obtener la métrica 'reach': {e}")
+
+
+        # Asegurar que todas las claves esperadas existan para evitar KeyErrors
+        expected_metrics = [
+            'follower_count', 'media_count', 'name', 'username', 'profile_picture_url',
+            'profile_views', 'total_interactions', 'reach'
+        ]
+        for key in expected_metrics:
+            if key not in insights:
+                # Asignar un valor por defecto apropiado
+                if any(k in key for k in ['count', 'views', 'reach', 'interactions']):
+                    insights[key] = 0
+                else:
+                    insights[key] = ''
+
+        logger.info(
+            f"✅ Métricas de cuenta obtenidas: followers={insights.get('follower_count')}, "
+            f"reach={insights.get('reach')}, profile_views={insights.get('profile_views')}"
+        )
 
         return insights
 
-    def get_media_list(self, limit: int = 25) -> List[Dict]:
+    def get_account_insights_detailed(
+        self,
+        period: str = "days_28",
+        metrics: List[str] = None,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None
+    ) -> Dict:
         """
-        Obtener lista de posts publicados
+        Obtiene métricas detalladas de la cuenta de forma robusta,
+        utilizando la configuración correcta para cada métrica.
 
         Args:
-            limit: Número de posts a obtener (default 25, max 100 por petición)
-            NOTA: Instagram Graph API usa paginación. Este método obtiene solo
-            la primera página de resultados.
+            period: Período por defecto (ignorado, cada métrica usa su período óptimo)
+            metrics: Lista de métricas a obtener
+            since: Fecha inicio para métricas que soportan rangos (opcional)
+            until: Fecha fin para métricas que soportan rangos (opcional)
 
         Returns:
-            Lista de posts con información básica
+            Dict con métricas de la cuenta
         """
+        if metrics is None:
+            metrics = ['reach', 'profile_views', 'total_interactions', 'website_clicks']
+
+        # Configuración validada para cada métrica
+        # NOTA: impressions NO existe para account-level insights, solo para media-level
+        metric_configs = {
+            'reach': {'period': 'days_28'},
+            'profile_views': {'period': 'day', 'metric_type': 'total_value'},
+            'total_interactions': {'period': 'day', 'metric_type': 'total_value'},
+            'website_clicks': {'period': 'day', 'metric_type': 'total_value'},
+            'follower_count': {'period': 'day'}
+        }
+
+        insights = {}
+        endpoint = f"{self.instagram_account_id}/insights"
+
+        for metric in metrics:
+            if metric not in metric_configs:
+                logger.warning(f"⚠️  Métrica '{metric}' no soportada o sin configuración válida.")
+                insights[metric] = 0
+                continue
+
+            try:
+                params = {'metric': metric, **metric_configs[metric]}
+
+                # Añadir since/until para métricas que los soportan
+                if since and until and params.get('period') == 'day':
+                    params['since'] = int(since.timestamp())
+                    params['until'] = int(until.timestamp())
+
+                data = self._make_request(endpoint, params)
+
+                if data.get('data') and data['data'][0].get('values'):
+                    metric_data = data['data'][0]['values']
+                    # Las métricas con 'total_value' o 'day' suelen devolver un solo valor relevante al final
+                    if params.get('metric_type') == 'total_value' or params.get('period') == 'day':
+                        # Si hay múltiples valores (por rango de fechas), sumarlos
+                        if len(metric_data) > 1:
+                            insights[metric] = sum(d.get('value', 0) for d in metric_data)
+                        else:
+                            insights[metric] = metric_data[-1].get('value', 0)
+                    else:
+                        # Para métricas como 'reach' o 'impressions' que pueden devolver
+                        # un array, sumamos todos los valores si es necesario.
+                        # En este caso, 'days_28' para reach/impressions ya da un total.
+                        insights[metric] = metric_data[0].get('value', 0)
+                else:
+                    insights[metric] = 0
+
+            except Exception as e:
+                logger.warning(f"⚠️  No se pudo obtener la métrica '{metric}': {e}")
+                insights[metric] = 0
+
+        return insights
+
+    def get_audience_insights(self) -> Dict:
+        """
+        Obtiene datos demográficos y de actividad de la audiencia, usando
+        los endpoints y parámetros correctos validados con el script de diagnóstico.
+        """
+        audience_data = {
+            'demographics': {},
+            'online_hours': {}
+        }
+        endpoint = f"{self.instagram_account_id}/insights"
+
+        # 1. Demografía de audiencia con breakdowns
+        demographic_breakdowns = {
+            'audience_city': 'city',
+            'audience_country': 'country',
+            'audience_gender_age': 'gender,age'
+        }
+
+        for friendly_name, breakdown in demographic_breakdowns.items():
+            try:
+                params = {
+                    'metric': 'follower_demographics',
+                    'period': 'lifetime',
+                    'breakdown': breakdown,
+                    'metric_type': 'total_value'
+                }
+                data = self._make_request(endpoint, params)
+                logger.info(f"📊 DEBUG API Response para {friendly_name}: {data}")
+
+                # Con metric_type=total_value, la API retorna estructura con 'breakdowns'
+                if data.get('data') and len(data['data']) > 0:
+                    item = data['data'][0]
+
+                    # La estructura real es: total_value.breakdowns[0].results
+                    if item.get('total_value') and item['total_value'].get('breakdowns'):
+                        breakdowns = item['total_value']['breakdowns']
+                        if breakdowns and len(breakdowns) > 0:
+                            results = breakdowns[0].get('results', [])
+
+                            # Convertir array de results a diccionario
+                            parsed_data = {}
+                            for result in results:
+                                try:
+                                    dimension_values = result.get('dimension_values', [])
+                                    # Asegurar que todos los valores son strings
+                                    # Para gender_age usar punto, para otros usar coma
+                                    if friendly_name == 'audience_gender_age':
+                                        # Formato: "F.18-24" (punto sin espacios)
+                                        key = '.'.join(str(v) for v in dimension_values)
+                                    else:
+                                        # Formato: "London, England" (coma con espacio)
+                                        key = ', '.join(str(v) for v in dimension_values)
+
+                                    value = result.get('value', 0)
+                                    parsed_data[key] = value
+                                except Exception as parse_error:
+                                    logger.warning(f"Error parseando resultado individual: {parse_error}")
+                                    continue
+
+                            audience_data['demographics'][friendly_name] = parsed_data
+                        else:
+                            audience_data['demographics'][friendly_name] = {}
+                    else:
+                        audience_data['demographics'][friendly_name] = {}
+                else:
+                    audience_data['demographics'][friendly_name] = {}
+
+                logger.info(f"📊 {friendly_name}: {len(audience_data['demographics'][friendly_name])} entradas")
+            except Exception as e:
+                logger.warning(f"⚠️  No se pudo obtener {friendly_name}: {e}")
+                audience_data['demographics'][friendly_name] = {}
+
+        # 2. Horas de actividad de seguidores
+        try:
+            params = {'metric': 'online_followers', 'period': 'lifetime'}
+            data = self._make_request(endpoint, params)
+            logger.info(f"📊 DEBUG API Response para online_followers: {data}")
+
+            if data.get('data') and len(data['data']) > 0:
+                item = data['data'][0]
+                # online_followers devuelve 'values' (array) no total_value
+                if item.get('values'):
+                    audience_data['online_hours'] = item['values'][0].get('value', {})
+                    logger.info(f"📊 online_followers: {len(audience_data['online_hours'])} horas")
+                else:
+                    logger.warning(f"⚠️  online_followers estructura: {item.keys()}")
+        except Exception as e:
+            logger.warning(f"⚠️  No se pudieron obtener datos de actividad de seguidores: {e}")
+
+        return audience_data
+
+    def get_media_list(self, limit: int = 25) -> List[Dict]:
         endpoint = f"{self.instagram_account_id}/media"
         params = {
             'fields': 'id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count',
-            'limit': min(limit, 100)  # Instagram API max is 100 per request
+            'limit': min(limit, 100)
         }
-
         data = self._make_request(endpoint, params)
-        posts = data.get('data', [])
-        return posts
+        return data.get('data', [])
 
     def get_media_insights(self, media_id: str) -> Dict:
-        """
-        Obtener insights de un post específico
-
-        Args:
-            media_id: ID del post de Instagram
-
-        Returns:
-            Dict con métricas del post
-        """
         endpoint = f"{media_id}/insights"
-
-        # Métricas válidas según Instagram Graph API oficial
-        # Docs: https://developers.facebook.com/docs/instagram-platform/reference/instagram-media/insights/
-        metrics = [
-            'reach',          # Unique accounts that viewed the media
-            'saved',          # Number of saves
-            'total_interactions',  # Sum of likes, comments, saves, shares
-            'views'           # Total views (for videos/reels)
-        ]
-
-        params = {
-            'metric': ','.join(metrics)
-        }
-
+        metrics = ['reach', 'saved', 'total_interactions', 'views']
+        params = {'metric': ','.join(metrics)}
         data = self._make_request(endpoint, params)
 
-        # Formatear respuesta
         insights = {}
         for item in data.get('data', []):
             metric_name = item.get('name')
@@ -204,17 +325,155 @@ class InstagramInsightsService:
             if values:
                 insights[metric_name] = values[0].get('value', 0)
 
-        # Mapear total_interactions a engagement para compatibilidad
         if 'total_interactions' in insights:
             insights['engagement'] = insights['total_interactions']
-
-        # Mapear views a impressions para compatibilidad (aproximación)
         if 'views' in insights and 'impressions' not in insights:
             insights['impressions'] = insights['views']
         elif 'reach' in insights and 'impressions' not in insights:
             insights['impressions'] = insights['reach']
 
         return insights
+
+    def _get_all_media_paginated(self) -> List[Dict]:
+        all_media = []
+        endpoint = f"{self.instagram_account_id}/media"
+        params = {
+            'fields': 'id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count',
+            'limit': 100
+        }
+        while endpoint:
+            try:
+                data = self._make_request(endpoint, params if not all_media else {})
+                media = data.get('data', [])
+                all_media.extend(media)
+                endpoint = data.get('paging', {}).get('next')
+                params = {}
+            except Exception as e:
+                logger.error(f"❌ Error durante la paginación de media: {e}")
+                break
+        return all_media
+
+    def sync_posts_to_database(self, db_client, user_id: str, instagram_account_id_db: int):
+        logger.info("🚀 Iniciando sincronización de posts...")
+        all_posts_from_api = self._get_all_media_paginated()
+        if not all_posts_from_api:
+            logger.warning("⚠️  No se encontraron posts en la API para sincronizar.")
+            return
+
+        posts_to_upsert = []
+        for post_data in all_posts_from_api:
+            posts_to_upsert.append({
+                'user_id': user_id,
+                'instagram_account_id': instagram_account_id_db,
+                'instagram_post_id': post_data['id'],
+                'content': post_data.get('caption', ''),
+                'media_url': post_data.get('media_url'),
+                'post_type': post_data.get('media_type'),
+                'publication_date': post_data.get('timestamp'),
+                'status': 'published',
+            })
+
+        BATCH_SIZE = 50
+        MAX_RETRIES = 3
+        db_posts = {}
+        try:
+            for i in range(0, len(posts_to_upsert), BATCH_SIZE):
+                batch = posts_to_upsert[i:i + BATCH_SIZE]
+                logger.info(f"📦 Procesando lote de posts {i//BATCH_SIZE + 1}/{(len(posts_to_upsert) + BATCH_SIZE - 1)//BATCH_SIZE}")
+                for attempt in range(MAX_RETRIES):
+                    try:
+                        post_response = db_client.table('posts').upsert(batch, on_conflict='instagram_post_id').execute()
+                        if post_response.data:
+                            for p in post_response.data:
+                                db_posts[p['instagram_post_id']] = p['id']
+                            time.sleep(0.5)
+                            break
+                    except (ReadError, Exception) as e:
+                        if attempt < MAX_RETRIES - 1:
+                            wait_time = 2 ** attempt
+                            logger.warning(f"⚠️  Error en lote de posts, reintentando en {wait_time}s...")
+                            time.sleep(wait_time)
+                        else:
+                            raise
+            if not db_posts:
+                logger.error("❌ No se pudieron procesar posts")
+                return
+
+            performance_to_upsert = []
+            cutoff_date = datetime.now() - timedelta(days=90)
+            recent_posts_count = 0
+            posts_with_insights = 0
+
+            for post_data in all_posts_from_api:
+                instagram_post_id = post_data['id']
+                if instagram_post_id not in db_posts: continue
+                internal_post_id = db_posts[instagram_post_id]
+                post_date = datetime.fromisoformat(post_data.get('timestamp', '').replace('Z', '+00:00')) if post_data.get('timestamp') else None
+
+                likes = post_data.get('like_count', 0)
+                comments = post_data.get('comments_count', 0)
+                shares = 0
+                saves = 0
+
+                perf_data = {
+                    'post_id': internal_post_id,
+                    'likes': likes,
+                    'comments': comments,
+                    'last_synced_at': datetime.now().isoformat()
+                }
+
+                if post_date and post_date.replace(tzinfo=None) > cutoff_date:
+                    recent_posts_count += 1
+                    try:
+                        insights = self.get_media_insights(instagram_post_id)
+                        shares = insights.get('shares', 0)
+                        saves = insights.get('saved', 0)
+                        impressions = insights.get('impressions', 0)
+                        reach = insights.get('reach', 0)
+
+                        perf_data.update({
+                            'shares': shares,
+                            'saves': saves,
+                            'reach': reach,
+                            'impressions': impressions
+                        })
+
+                        if impressions > 0 or reach > 0:
+                            posts_with_insights += 1
+                    except Exception as e:
+                        logger.warning(f"⚠️  No se pudieron obtener insights para post reciente {instagram_post_id}: {e}")
+
+                # Calcular total_interactions = likes + comments + shares + saves
+                total_interactions = likes + comments + shares + saves
+                perf_data['total_interactions'] = total_interactions
+                performance_to_upsert.append(perf_data)
+
+            logger.info(
+                f"📊 Posts analizados: {len(all_posts_from_api)} total, "
+                f"{recent_posts_count} recientes (<90 días), "
+                f"{posts_with_insights} con insights disponibles"
+            )
+
+            if performance_to_upsert:
+                logger.info(f"📊 Guardando métricas de {len(performance_to_upsert)} posts...")
+                for i in range(0, len(performance_to_upsert), BATCH_SIZE):
+                    batch = performance_to_upsert[i:i + BATCH_SIZE]
+                    for attempt in range(MAX_RETRIES):
+                        try:
+                            db_client.table('post_performance').upsert(batch, on_conflict='post_id').execute()
+                            time.sleep(0.5)
+                            break
+                        except (ReadError, Exception) as e:
+                            if attempt < MAX_RETRIES - 1:
+                                wait_time = 2 ** attempt
+                                logger.warning(f"⚠️  Error guardando métricas, reintentando en {wait_time}s...")
+                                time.sleep(wait_time)
+                            else:
+                                raise
+        except Exception as e:
+            logger.error(f"❌ Error durante el guardado en BD: {e}", exc_info=True)
+
+        logger.info(f"✅ Sincronización de posts completada: {len(posts_to_upsert)} posts procesados")
 
     def get_top_posts(self, limit: int = 10) -> List[Dict]:
         """
@@ -378,179 +637,3 @@ class InstagramInsightsService:
         trend = sorted(daily_engagement.values(), key=lambda x: x['date'])
 
         return trend
-
-    def _get_all_media_paginated(self) -> List[Dict]:
-        """
-        Obtiene toda la media de una cuenta, manejando paginación.
-        """
-        all_media = []
-        endpoint = f"{self.instagram_account_id}/media"
-        params = {
-            'fields': 'id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count',
-            'limit': 100  # Usar el límite máximo por página
-        }
-
-        while endpoint:
-            try:
-                data = self._make_request(endpoint, params if not all_media else {})
-                media = data.get('data', [])
-                all_media.extend(media)
-                
-                # Obtener la URL de la siguiente página
-                endpoint = data.get('paging', {}).get('next')
-                # Los parámetros ya vienen en la URL de paginación
-                params = {}
-
-            except Exception as e:
-                logger.error(f"❌ Error durante la paginación de media: {e}")
-                break # Salir del bucle en caso de error
-        return all_media
-
-    def sync_posts_to_database(self, db_client, user_id: str, instagram_account_id_db: int):
-        """
-        Sincroniza todos los posts y su performance desde Instagram a la BD de Supabase.
-        """
-        logger.info("🚀 Iniciando sincronización con Instagram...")
-        
-        # 1. Obtener todos los posts de la API de Instagram
-        all_posts_from_api = self._get_all_media_paginated()
-
-        if not all_posts_from_api:
-            logger.warning("⚠️  No se encontraron posts en la API para sincronizar.")
-            return
-
-        # 2. Preparar los datos para las tablas `posts` y `post_performance`
-        posts_to_upsert = []
-        performance_to_upsert = []
-
-        for post_data in all_posts_from_api:
-            # Datos para la tabla `posts`
-            posts_to_upsert.append({
-                'user_id': user_id,
-                'instagram_account_id': instagram_account_id_db,
-                'instagram_post_id': post_data['id'],
-                'content': post_data.get('caption', ''),
-                'media_url': post_data.get('media_url'),
-                'post_type': post_data.get('media_type'),
-                'publication_date': post_data.get('timestamp'),
-                'status': 'published',
-            })
-
-        # 3. Upsert en la tabla `posts` con retry logic y procesamiento por lotes
-        BATCH_SIZE = 50  # Procesar en lotes de 50 posts
-        MAX_RETRIES = 3
-        db_posts = {}
-
-        try:
-            # Procesar posts en lotes para evitar saturar el pool de conexiones
-            for i in range(0, len(posts_to_upsert), BATCH_SIZE):
-                batch = posts_to_upsert[i:i + BATCH_SIZE]
-                logger.info(f"📦 Procesando lote {i//BATCH_SIZE + 1}/{(len(posts_to_upsert) + BATCH_SIZE - 1)//BATCH_SIZE} ({len(batch)} posts)")
-
-                # Retry logic con backoff exponencial
-                for attempt in range(MAX_RETRIES):
-                    try:
-                        post_response = db_client.table('posts').upsert(batch, on_conflict='instagram_post_id').execute()
-
-                        if not post_response.data:
-                            logger.error("❌ Error en el upsert de posts: No se obtuvieron datos")
-                            break
-
-                        # Acumular mapeo de IDs
-                        for p in post_response.data:
-                            db_posts[p['instagram_post_id']] = p['id']
-
-                        # Pequeño delay entre lotes para no saturar
-                        if i + BATCH_SIZE < len(posts_to_upsert):
-                            time.sleep(0.5)
-                        break  # Éxito, salir del retry loop
-
-                    except (ReadError, Exception) as e:
-                        if attempt < MAX_RETRIES - 1:
-                            wait_time = 2 ** attempt  # Backoff exponencial: 1s, 2s, 4s
-                            logger.warning(f"⚠️  Error en lote {i//BATCH_SIZE + 1}, reintentando en {wait_time}s... ({attempt + 1}/{MAX_RETRIES})")
-                            time.sleep(wait_time)
-                        else:
-                            logger.error(f"❌ Error persistente en lote {i//BATCH_SIZE + 1} después de {MAX_RETRIES} intentos: {e}")
-                            raise
-
-            if not db_posts:
-                logger.error("❌ No se pudieron procesar posts")
-                return
-
-            # 4. Obtener insights y preparar datos para `post_performance`
-            # Instagram API solo permite insights de posts recientes (últimos 90 días aprox.)
-            cutoff_date = datetime.now() - timedelta(days=90)
-
-            for post_data in all_posts_from_api:
-                instagram_post_id = post_data['id']
-                if instagram_post_id not in db_posts:
-                    continue
-
-                internal_post_id = db_posts[instagram_post_id]
-
-                # Verificar edad del post
-                post_timestamp = post_data.get('timestamp', '')
-                post_date = None
-                try:
-                    post_date = datetime.fromisoformat(post_timestamp.replace('Z', '+00:00'))
-                except:
-                    pass
-
-                # Preparar datos básicos de performance
-                perf_data = {
-                    'post_id': internal_post_id,
-                    'likes': post_data.get('like_count', 0),
-                    'comments': post_data.get('comments_count', 0),
-                    'shares': 0,
-                    'saves': 0,
-                    'reach': 0,
-                    'impressions': 0,
-                    'last_synced_at': datetime.now().isoformat()
-                }
-
-                # Solo intentar obtener insights para posts recientes
-                if post_date and post_date.replace(tzinfo=None) > cutoff_date:
-                    try:
-                        insights = self.get_media_insights(instagram_post_id)
-                        # Actualizar con datos de insights
-                        perf_data['shares'] = insights.get('shares', 0)
-                        perf_data['saves'] = insights.get('saved', 0)
-                        perf_data['reach'] = insights.get('reach', 0)
-                        perf_data['impressions'] = insights.get('impressions', 0)
-                    except Exception as e:
-                        # Solo log de warning para posts recientes
-                        logger.warning(f"⚠️  No se pudieron obtener insights para post reciente {instagram_post_id}: {e}")
-
-                performance_to_upsert.append(perf_data)
-
-            # 5. Upsert en la tabla `post_performance` con retry logic y procesamiento por lotes
-            if performance_to_upsert:
-                logger.info(f"📊 Guardando métricas de {len(performance_to_upsert)} posts...")
-
-                for i in range(0, len(performance_to_upsert), BATCH_SIZE):
-                    batch = performance_to_upsert[i:i + BATCH_SIZE]
-
-                    # Retry logic con backoff exponencial
-                    for attempt in range(MAX_RETRIES):
-                        try:
-                            db_client.table('post_performance').upsert(batch, on_conflict='post_id').execute()
-
-                            # Pequeño delay entre lotes
-                            if i + BATCH_SIZE < len(performance_to_upsert):
-                                time.sleep(0.5)
-                            break  # Éxito
-
-                        except (ReadError, Exception) as e:
-                            if attempt < MAX_RETRIES - 1:
-                                wait_time = 2 ** attempt
-                                logger.warning(f"⚠️  Error guardando métricas lote {i//BATCH_SIZE + 1}, reintentando en {wait_time}s...")
-                                time.sleep(wait_time)
-                            else:
-                                logger.error(f"❌ Error persistente guardando métricas: {e}")
-                                raise
-
-        except Exception as e:
-            logger.error(f"❌ Error durante el proceso de guardado en base de datos: {e}", exc_info=True)
-
-        logger.info(f"✅ Sincronización completada: {len(posts_to_upsert)} posts procesados")

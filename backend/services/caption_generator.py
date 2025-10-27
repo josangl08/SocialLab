@@ -27,7 +27,7 @@ class CaptionGeneratorService:
         # Configurar Gemini
         genai.configure(api_key=api_key)
         # Usar Gemini 2.0 Flash (rápido y gratuito)
-        self.model = genai.GenerativeModel('gemini-2.0-flash')
+        self.model = genai.GenerativeModel('gemini-2.5-flash')
 
         logger.info("✅ Gemini AI configurado correctamente")
 
@@ -246,7 +246,7 @@ def get_caption_generator() -> CaptionGeneratorService:
 
 def generate_caption(
     prompt: str,
-    model_name: str = 'gemini-2.0-flash'
+    model_name: str = 'gemini-2.5-flash'
 ) -> Optional[str]:
     """
     Función helper para generar caption con prompt directo.
