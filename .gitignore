@@ -157,5 +157,7 @@ backend/test_*.py
 backend/check_*.py
 
 # Claude Code sessions (opcional - descomentar si no quieres commitear)
+.claude/
+CLAUDE.md
 # .claude/sessions/
 # .claude/doc/
