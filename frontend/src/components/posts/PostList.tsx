@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext'; // Ruta corregida
 import EditPostForm from './EditPostForm';
-import './PostList.css';
 
 interface Post {
   id: number;

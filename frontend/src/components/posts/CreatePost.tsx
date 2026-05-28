@@ -1,6 +1,5 @@
 import React, { useState, FormEvent } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import './CreatePost.css';
 
 interface CreatePostProps {
   onPostCreated: () => void;
