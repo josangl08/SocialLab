@@ -18,8 +18,9 @@ async def create_post(
     content: str = Form(...),
     post_type: str = Form(...),
     status: str = Form(...),
-    scheduled_at: datetime | None = Form(None),
-    media_file: UploadFile | None = File(None),
+    scheduled_at: Optional[datetime] = Form(None),
+    media_file: Optional[UploadFile] = File(None),
+    instagram_account_id: Optional[int] = Form(None),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -52,7 +53,8 @@ async def create_post(
             'media_url': media_url,
             'post_type': post_type,
             'status': status,
-            'scheduled_at': scheduled_at.isoformat() if scheduled_at else None
+            'scheduled_at': scheduled_at.isoformat() if scheduled_at else None,
+            'instagram_account_id': instagram_account_id
         }).execute()
 
         if response.data:
@@ -87,8 +89,9 @@ async def update_post(
     content: str = Form(...),
     post_type: str = Form(...),
     status: str = Form(...),
-    scheduled_at: datetime | None = Form(None),
-    media_file: UploadFile | None = File(None),
+    scheduled_at: Optional[datetime] = Form(None),
+    media_file: Optional[UploadFile] = File(None),
+    instagram_account_id: Optional[int] = Form(None),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -130,7 +133,8 @@ async def update_post(
             'media_url': media_url,
             'post_type': post_type,
             'status': status,
-            'scheduled_at': scheduled_at.isoformat() if scheduled_at else None
+            'scheduled_at': scheduled_at.isoformat() if scheduled_at else None,
+            'instagram_account_id': instagram_account_id
         }
         
         response = supabase.table('posts').update(update_data).eq('id', post_id).execute()

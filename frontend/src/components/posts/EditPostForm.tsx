@@ -10,6 +10,7 @@ interface Post {
   status: string;
   scheduled_at: string | null;
   created_at: string;
+  instagram_account_id?: number | null;
 }
 
 interface EditPostFormProps {
@@ -31,6 +32,38 @@ const EditPostForm: React.FC<EditPostFormProps> = ({ post, onSave, onCancel }) =
   );
   const [message, setMessage] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false); // Nuevo estado de carga
+
+  interface InstagramAccount {
+    id: number;
+    username: string;
+    account_name: string;
+  }
+
+  // --- Estados de cuenta de Instagram ---
+  const [instagramAccounts, setInstagramAccounts] = useState<InstagramAccount[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(
+    post.instagram_account_id ? post.instagram_account_id.toString() : ''
+  );
+
+  useEffect(() => {
+    const fetchAccounts = async () => {
+      if (!token) return;
+      try {
+        const response = await fetch('http://localhost:8000/instagram/accounts', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setInstagramAccounts(data);
+        }
+      } catch (err) {
+        console.error('Error fetching Instagram accounts:', err);
+      }
+    };
+    fetchAccounts();
+  }, [token]);
 
   const formatErrorMessage = (errorData: any) => {
     if (errorData && Array.isArray(errorData.detail)) {
@@ -88,6 +121,9 @@ const EditPostForm: React.FC<EditPostFormProps> = ({ post, onSave, onCancel }) =
     } else if (currentMediaUrl) {
       // Si no se sube un nuevo archivo pero hay uno existente, no hacemos nada
       // El backend mantendrá el media_url existente si media_file no se envía
+    }
+    if (selectedAccountId) {
+      formData.append('instagram_account_id', selectedAccountId);
     }
 
     try {
@@ -180,6 +216,23 @@ const EditPostForm: React.FC<EditPostFormProps> = ({ post, onSave, onCancel }) =
           >
             <option value="draft">Borrador</option>
             <option value="scheduled">Programado</option>
+          </select>
+        </div>
+        <div className="mb-3">
+          <label htmlFor="instagramAccountIdEdit" className="form-label">Cuenta de Instagram</label>
+          <select
+            className="form-select"
+            id="instagramAccountIdEdit"
+            value={selectedAccountId}
+            onChange={(e) => setSelectedAccountId(e.target.value)}
+            disabled={loading}
+          >
+            <option value="">-- Seleccionar Cuenta de Instagram --</option>
+            {instagramAccounts.map((acc) => (
+              <option key={acc.id} value={acc.id}>
+                {acc.account_name || acc.username} ({acc.username})
+              </option>
+            ))}
           </select>
         </div>
         <div className="mb-3">

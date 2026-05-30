@@ -22,6 +22,7 @@ class PostBase(BaseModel):
     post_type: str  # "post", "reel", "story", "image", "video"
     status: Literal["draft", "scheduled", "published", "failed"] = "draft"
     scheduled_at: Optional[datetime] = None
+    instagram_account_id: Optional[int] = None
 
 class PostCreate(PostBase):
     pass

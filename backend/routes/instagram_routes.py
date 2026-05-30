@@ -1,7 +1,9 @@
+from __future__ import annotations
 import os
 import time
 import logging
 import requests
+from typing import Optional
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Depends, status
 from starlette.responses import RedirectResponse
@@ -65,9 +67,9 @@ async def instagram_login_np(token: str, current_user: User = Depends(get_curren
 
 @router_no_prefix.get("/callback/instagram")
 async def instagram_callback(
-    code: str | None = None,
-    error: str | None = None,
-    state: str | None = None
+    code: Optional[str] = None,
+    error: Optional[str] = None,
+    state: Optional[str] = None
 ):
     if error:
         raise HTTPException(status_code=400, detail=f"Error de Instagram OAuth: {error}")
@@ -157,7 +159,7 @@ async def instagram_callback(
                 'instagram_business_account_id': instagram_business_account_id,
                 'long_lived_access_token': long_lived_access_token,
                 'expires_at': expires_at.isoformat() + 'Z'
-            }).execute()
+            }, on_conflict='user_id,instagram_business_account_id').execute()
             logger.info("Instagram account details saved to Supabase.")
         except Exception as e:
             logger.error(f"Error saving Instagram account details to Supabase: {e}")
@@ -478,3 +480,17 @@ async def get_scheduled_posts(current_user: User = Depends(get_current_user)):
         return response.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener posts programados: {str(e)}")
+
+@router_no_prefix.get("/instagram/accounts")
+async def get_instagram_accounts(current_user: User = Depends(get_current_user)):
+    """
+    Retorna la lista de cuentas de Instagram conectadas del usuario autenticado.
+    """
+    try:
+        response = supabase.table('instagram_accounts')\
+            .select('id, instagram_business_account_id, username, account_name, followers_count, profile_picture_url')\
+            .eq('user_id', current_user.id)\
+            .execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener las cuentas de Instagram: {str(e)}")

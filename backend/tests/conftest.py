@@ -1,4 +1,9 @@
 import os
+from unittest.mock import MagicMock
+
+# Mock supabase create_client to prevent validation exceptions at module load time
+import supabase
+supabase.create_client = MagicMock()
 
 # Set before any backend module is imported — supabase_client.py raises at module
 # level if these are absent.

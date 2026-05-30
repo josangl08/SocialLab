@@ -1,8 +1,14 @@
-import React, { useState, FormEvent } from 'react';
+import React, { useState, FormEvent, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 
 interface CreatePostProps {
   onPostCreated: () => void;
+}
+
+interface InstagramAccount {
+  id: number;
+  username: string;
+  account_name: string;
 }
 
 const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
@@ -16,11 +22,35 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
   const [message, setMessage] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
 
+  // --- Estados de cuenta de Instagram ---
+  const [instagramAccounts, setInstagramAccounts] = useState<InstagramAccount[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
+
   // --- Nuevos estados para la funcionalidad de IA ---
   const [aiTopic, setAiTopic] = useState<string>('');
   const [aiLoading, setAiLoading] = useState<boolean>(false);
   const [aiMessage, setAiMessage] = useState<string>('');
   const [aiRole, setAiRole] = useState<string>('content_manager'); // Nuevo estado para el rol de la IA
+
+  useEffect(() => {
+    const fetchAccounts = async () => {
+      if (!token) return;
+      try {
+        const response = await fetch('http://localhost:8000/instagram/accounts', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setInstagramAccounts(data);
+        }
+      } catch (err) {
+        console.error('Error fetching Instagram accounts:', err);
+      }
+    };
+    fetchAccounts();
+  }, [token]);
 
   // Definir los roles disponibles para el frontend
   const aiRoles = [
@@ -115,6 +145,9 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
       formData.append('scheduled_at', new Date(scheduledAt).toISOString());
     }
     formData.append('media_file', mediaFile);
+    if (selectedAccountId) {
+      formData.append('instagram_account_id', selectedAccountId);
+    }
 
     try {
       const response = await fetch('http://localhost:8000/posts', {
@@ -135,6 +168,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
         setPostType('post');
         setStatus('draft');
         setScheduledAt('');
+        setSelectedAccountId('');
         onPostCreated();
       } else {
         const errorData = await response.json();
@@ -264,6 +298,23 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
               <option value="scheduled">Programado</option>
             </select>
           </div>
+        </div>
+        <div className="mb-3">
+          <label htmlFor="instagramAccountId" className="form-label">Cuenta de Instagram</label>
+          <select
+            className="form-select"
+            id="instagramAccountId"
+            value={selectedAccountId}
+            onChange={(e) => setSelectedAccountId(e.target.value)}
+            disabled={loading}
+          >
+            <option value="">-- Seleccionar Cuenta de Instagram --</option>
+            {instagramAccounts.map((acc) => (
+              <option key={acc.id} value={acc.id}>
+                {acc.account_name || acc.username} ({acc.username})
+              </option>
+            ))}
+          </select>
         </div>
         <div className="mb-3">
           <label htmlFor="scheduledAt" className="form-label">Programar para (opcional)</label>
