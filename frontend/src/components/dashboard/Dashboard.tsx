@@ -122,6 +122,7 @@ const Dashboard: React.FC = () => {
   const [scheduledPosts, setScheduledPosts] = useState<ScheduledPost[]>([]);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [instagramAccountId, setInstagramAccountId] = useState<number | null>(null);
+  const [accounts, setAccounts] = useState<Array<{ id: number; username: string | null; account_name: string | null; profile_picture_url: string | null; connected: boolean; expired: boolean }>>([]);
   const hasInitialFetched = useRef(false);
 
   // New audience analytics state
@@ -142,26 +143,30 @@ const Dashboard: React.FC = () => {
       });
 
       if (response.ok) {
-        const data = await response.json();
-        setInstagramConnected(data.connected);
+        const accountList = await response.json();
+        setAccounts(accountList);
 
-        // Guardar instagram_account_id para usarlo en sync
-        if (data.instagram_account_id) {
-          setInstagramAccountId(data.instagram_account_id);
+        const connectedAccounts = accountList.filter((a: any) => a.connected);
+        const isConnected = connectedAccounts.length > 0;
+        setInstagramConnected(isConnected);
+
+        if (isConnected && !instagramAccountId) {
+          setInstagramAccountId(connectedAccounts[0].id);
         }
 
-        if (data.expired) {
-          alert('Tu token de Instagram ha expirado. Por favor vuelve a conectar tu cuenta.');
+        const expiredAccounts = accountList.filter((a: any) => a.expired);
+        if (expiredAccounts.length > 0) {
+          alert('Uno o más tokens de Instagram han expirado. Por favor vuelve a conectar las cuentas afectadas.');
         }
 
-        return data.connected; // ← Retornar el valor
+        return isConnected;
       }
       return false;
     } catch (error) {
       console.error('Error al verificar estado de Instagram:', error);
       return false;
     }
-  }, [setInstagramConnected]);
+  }, [setInstagramConnected, instagramAccountId]);
 
   const fetchDashboardStats = useCallback(async (connected: boolean = false) => {
     const token = localStorage.getItem('authToken');
@@ -175,7 +180,8 @@ const Dashboard: React.FC = () => {
 
       // Fetch Instagram analytics overview (all time - from cache, fast!)
       if (connected) {
-        const instagramResponse = await fetch('http://localhost:8000/api/analytics/overview?days=3650', {
+        const accountParam = instagramAccountId ? `&instagram_account_id=${instagramAccountId}` : '';
+        const instagramResponse = await fetch(`http://localhost:8000/api/analytics/overview?days=3650${accountParam}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
 
@@ -231,7 +237,7 @@ const Dashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []); // Sin dependencias, ahora recibe `connected` como parámetro
+  }, [instagramAccountId]);
 
   const handleSync = useCallback(async () => {
     if (isSyncing || (lastSync && new Date().getTime() - lastSync.getTime() < 5 * 60 * 1000)) {
@@ -244,7 +250,8 @@ const Dashboard: React.FC = () => {
     setSyncing(true);
     try {
       // 1. Sincronizar posts básicos + datos del perfil (followers, username, etc.)
-      const postsResponse = await fetch(`http://localhost:8000/instagram/sync`, {
+      const syncParam = instagramAccountId ? `?instagram_account_id=${instagramAccountId}` : '';
+      const postsResponse = await fetch(`http://localhost:8000/instagram/sync${syncParam}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
@@ -357,6 +364,20 @@ const Dashboard: React.FC = () => {
               </button>
             ) : (
               <div className="sync-section">
+                {accounts.length > 1 && (
+                  <select
+                    className="form-select form-select-sm"
+                    value={instagramAccountId ?? ''}
+                    onChange={(e) => setInstagramAccountId(Number(e.target.value))}
+                    style={{ width: 'auto', marginRight: '8px' }}
+                  >
+                    {accounts.filter(a => a.connected).map(account => (
+                      <option key={account.id} value={account.id}>
+                        @{account.username || account.account_name || `Cuenta ${account.id}`}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 {lastSyncAt && (
                   <small className="dashboard-small-text" style={{ marginRight: '12px' }}>
                     <i className="bi bi-clock-history"></i> {formatTimeAgo(lastSyncAt)}

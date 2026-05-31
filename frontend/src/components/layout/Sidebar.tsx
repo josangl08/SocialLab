@@ -26,6 +26,7 @@ const Sidebar: React.FC = () => {
     { path: '/calendar', label: 'Calendario', icon: 'bi-calendar-event' },
     { path: '/analytics', label: 'Analytics', icon: 'bi-bar-chart-line' },
     { path: '/strategy', label: 'Estrategia CM', icon: 'bi-bullseye' },
+    { path: '/accounts', label: 'Cuentas', icon: 'bi-instagram' },
   ];
 
   return (

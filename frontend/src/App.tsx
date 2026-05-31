@@ -10,6 +10,7 @@ import PostGenerator from './components/posts/PostGenerator';
 import CalendarView from './components/calendar/CalendarView';
 import Analytics from './components/analytics/Analytics';
 import StrategyConfig from './components/strategy/StrategyConfig';
+import AccountsPage from './components/accounts/AccountsPage';
 import MainLayout from './components/layout/MainLayout';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import './App.css';
@@ -94,6 +95,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <StrategyConfig />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounts"
+            element={
+              <ProtectedRoute>
+                <AccountsPage />
               </ProtectedRoute>
             }
           />

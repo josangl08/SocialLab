@@ -11,7 +11,7 @@ import logging
 import json
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 from pydantic import BaseModel
 
 from auth.jwt_handler import get_current_user
@@ -23,13 +23,20 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analytics", tags=["Analytics"])
 
-def get_instagram_service(current_user: dict = Depends(get_current_user)) -> InstagramInsightsService:
+def get_instagram_service(
+    instagram_account_id: Optional[int] = None,
+    current_user: dict = Depends(get_current_user)
+) -> InstagramInsightsService:
     """
     Dependency para obtener el servicio de Instagram configurado para el usuario actual
     """
     try:
-        # Obtener credenciales de Instagram del usuario
-        result = supabase.table('instagram_accounts').select('*').eq('user_id', current_user['id']).eq('is_active', True).single().execute()
+        query = supabase.table('instagram_accounts').select('*').eq('user_id', current_user['id'])
+        if instagram_account_id:
+            query = query.eq('id', instagram_account_id)
+        else:
+            query = query.eq('is_active', True)
+        result = query.limit(1).execute()
 
         if not result.data:
             raise HTTPException(
@@ -37,7 +44,7 @@ def get_instagram_service(current_user: dict = Depends(get_current_user)) -> Ins
                 detail="No hay cuenta de Instagram conectada. Por favor conecta tu cuenta primero."
             )
 
-        instagram_account = result.data
+        instagram_account = result.data[0]
 
         # Verificar si el token ha expirado
         expires_at_str = instagram_account.get('expires_at')
@@ -218,35 +225,14 @@ async def sync_instagram_analytics(
     instagram_account_id: int,
     background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user),
-    instagram_service: InstagramInsightsService = Depends(get_instagram_service)
 ):
     """
     Inicia sincronización de posts y métricas de una cuenta Instagram específica.
-
-    Este endpoint permite sincronizar cualquier cuenta Instagram especificada
-    por su ID, con validación de permisos del usuario actual.
-
-    Args:
-        instagram_account_id: ID de la cuenta Instagram en la base de datos
-        background_tasks: FastAPI background tasks
-        current_user: Usuario autenticado actual
-        instagram_service: Servicio de Instagram Insights
-
-    Returns:
-        {
-            "message": "Mensaje de confirmación",
-            "instagram_account_id": ID de la cuenta sincronizada
-        }
-
-    Raises:
-        HTTPException 403: Si el usuario no tiene permisos
-        HTTPException 404: Si la cuenta no existe
-        HTTPException 500: Error interno
     """
     try:
-        # Verificar que la cuenta existe y pertenece al usuario
+        # Verificar que la cuenta existe, pertenece al usuario y obtener credenciales
         result = supabase.table('instagram_accounts').select(
-            'id, user_id, is_active'
+            'id, user_id, is_active, long_lived_access_token, instagram_business_account_id'
         ).eq('id', instagram_account_id).single().execute()
 
         if not result.data:
@@ -257,21 +243,23 @@ async def sync_instagram_analytics(
 
         account = result.data
 
-        # Verificar permisos: el usuario debe ser dueño de la cuenta
         if account['user_id'] != current_user['id']:
             raise HTTPException(
                 status_code=403,
                 detail="No tienes permiso para sincronizar esta cuenta"
             )
 
-        # Verificar que la cuenta esté activa
         if not account.get('is_active', True):
             raise HTTPException(
                 status_code=400,
                 detail="La cuenta Instagram está inactiva"
             )
 
-        # Añadir tarea de sincronización en segundo plano
+        instagram_service = InstagramInsightsService(
+            account['long_lived_access_token'],
+            account['instagram_business_account_id']
+        )
+
         background_tasks.add_task(
             full_sync_account,
             instagram_service=instagram_service,
@@ -325,12 +313,11 @@ async def sync_instagram_data_deprecated(
     de rendimiento desde la API de Instagram a la base de datos local.
     """
     try:
-        # Obtener el ID de la cuenta de instagram en nuestra BD
-        result = supabase.table('instagram_accounts').select('id').eq('user_id', current_user['id']).eq('is_active', True).single().execute()
+        result = supabase.table('instagram_accounts').select('id').eq('user_id', current_user['id']).eq('is_active', True).limit(1).execute()
         if not result.data:
             raise HTTPException(status_code=404, detail="No se encontró una cuenta de Instagram activa para este usuario.")
-        
-        instagram_account_id_db = result.data['id']
+
+        instagram_account_id_db = result.data[0]['id']
 
         # Añadir la tarea de sincronización para que se ejecute en segundo plano
         background_tasks.add_task(

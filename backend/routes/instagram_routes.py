@@ -10,7 +10,7 @@ from starlette.responses import RedirectResponse
 
 from database.supabase_client import get_supabase_client
 from database.supabase_client import get_supabase_admin_client
-from models.schemas import User
+from models.schemas import User, InstagramAccountConfigUpdate
 from auth.dependencies import get_current_user, get_current_user_from_query_token
 
 logger = logging.getLogger(__name__)
@@ -172,23 +172,31 @@ async def instagram_callback(
         raise HTTPException(status_code=500, detail=f"Error durante el proceso de autenticación de Instagram: {e}")
 
 @router_no_prefix.get("/instagram/sync")
-async def instagram_sync(current_user: User = Depends(get_current_user)):
+async def instagram_sync(
+    instagram_account_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
     """
     Sincroniza publicaciones desde Instagram a SocialLab.
     """
     logger.info(f"🔄 Sincronizando Instagram para usuario: {current_user.id}")
 
     try:
-        response = supabase.table('instagram_accounts').select('id, long_lived_access_token, instagram_business_account_id').eq('user_id', current_user.id).single().execute()
+        query = supabase.table('instagram_accounts').select('id, long_lived_access_token, instagram_business_account_id').eq('user_id', current_user.id)
+        if instagram_account_id:
+            query = query.eq('id', instagram_account_id)
+        else:
+            query = query.eq('is_active', True)
+        response = query.limit(1).execute()
 
-        if not response.data or not response.data.get('long_lived_access_token'):
+        if not response.data or not response.data[0].get('long_lived_access_token'):
             raise HTTPException(
                 status_code=404,
                 detail="No se encontraron credenciales de Instagram para este usuario."
             )
 
-        account_id = response.data['id']
-        access_token = response.data['long_lived_access_token']
+        account_id = response.data[0]['id']
+        access_token = response.data[0]['long_lived_access_token']
 
         user_accounts_url = f"https://graph.facebook.com/v19.0/me/accounts?access_token={access_token}"
         user_accounts_response = requests.get(user_accounts_url)
@@ -305,6 +313,8 @@ async def instagram_sync(current_user: User = Depends(get_current_user)):
                 detail="El token de acceso de Instagram ha expirado. Vuelve a conectar tu cuenta."
             )
         raise HTTPException(status_code=500, detail=f"Error al comunicarse con Instagram API: {error_detail}")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error durante la sincronización: {str(e)}")
 
@@ -312,42 +322,38 @@ async def instagram_sync(current_user: User = Depends(get_current_user)):
 async def instagram_status(current_user: User = Depends(get_current_user)):
     try:
         response = supabase.table('instagram_accounts').select(
-            'id, instagram_business_account_id, expires_at, created_at'
-        ).eq('user_id', current_user.id).single().execute()
+            'id, instagram_business_account_id, username, account_name, profile_picture_url, expires_at, created_at, is_active'
+        ).eq('user_id', current_user.id).execute()
 
-        if not response.data:
-            return {
-                "connected": False,
-                "message": "No se encontraron credenciales de Instagram"
-            }
+        accounts = []
+        for account in (response.data or []):
+            expires_at_str = account.get('expires_at')
+            expired = False
+            connected = True
 
-        expires_at_str = response.data.get('expires_at')
-        created_at_str = response.data.get('created_at')
+            if expires_at_str:
+                expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+                if expires_at < datetime.now(expires_at.tzinfo):
+                    expired = True
+                    connected = False
 
-        if expires_at_str:
-            expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
-            now = datetime.now(expires_at.tzinfo)
+            accounts.append({
+                'id': account.get('id'),
+                'instagram_business_account_id': account.get('instagram_business_account_id'),
+                'username': account.get('username'),
+                'account_name': account.get('account_name'),
+                'profile_picture_url': account.get('profile_picture_url'),
+                'expires_at': expires_at_str,
+                'created_at': account.get('created_at'),
+                'is_active': account.get('is_active', True),
+                'connected': connected,
+                'expired': expired,
+            })
 
-            if expires_at < now:
-                return {
-                    "connected": False,
-                    "expired": True,
-                    "expires_at": expires_at_str,
-                    "message": "El token de Instagram ha expirado."
-                }
-
-        return {
-            "connected": True,
-            "instagram_account_id": response.data.get('id'),
-            "instagram_business_account_id": response.data.get('instagram_business_account_id'),
-            "expires_at": expires_at_str,
-            "created_at": created_at_str
-        }
+        return accounts
     except Exception as e:
-        return {
-            "connected": False,
-            "error": str(e)
-        }
+        logger.error(f"Error en instagram_status: {e}")
+        return []
 
 @router_no_prefix.post("/instagram/publish/{post_id}")
 async def publish_to_instagram(post_id: int, current_user: User = Depends(get_current_user)):
@@ -362,13 +368,27 @@ async def publish_to_instagram(post_id: int, current_user: User = Depends(get_cu
         if post.get('instagram_post_id'):
             raise HTTPException(status_code=400, detail="Este post ya está publicado en Instagram")
 
-        ig_response = supabase.table('instagram_accounts').select('instagram_business_account_id, long_lived_access_token').eq('user_id', current_user.id).single().execute()
+        post_account_id = post.get('instagram_account_id')
+        query = supabase.table('instagram_accounts').select('instagram_business_account_id, long_lived_access_token, expires_at').eq('user_id', current_user.id)
+        if post_account_id:
+            query = query.eq('id', post_account_id)
+        else:
+            query = query.eq('is_active', True)
+        ig_response = query.limit(1).execute()
 
         if not ig_response.data:
             raise HTTPException(status_code=400, detail="No hay cuenta de Instagram conectada")
 
-        ig_account_id = ig_response.data['instagram_business_account_id']
-        access_token = ig_response.data['long_lived_access_token']
+        ig_data = ig_response.data[0]
+
+        expires_at_str = ig_data.get('expires_at')
+        if expires_at_str:
+            expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+            if expires_at < datetime.now(expires_at.tzinfo):
+                raise HTTPException(status_code=401, detail="El token de Instagram ha expirado. Vuelve a conectar esta cuenta.")
+
+        ig_account_id = ig_data['instagram_business_account_id']
+        access_token = ig_data['long_lived_access_token']
 
         media_url = post.get('media_url')
         if not media_url:
@@ -437,6 +457,8 @@ async def publish_to_instagram(post_id: int, current_user: User = Depends(get_cu
             "instagram_post_id": instagram_post_id,
             "message": "Post publicado exitosamente en Instagram"
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al publicar en Instagram: {str(e)}")
 
@@ -470,6 +492,8 @@ async def schedule_instagram_post(
             "message": f"Post programado para {scheduled_time.isoformat()}",
             "scheduled_time": scheduled_time.isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al programar post: {str(e)}")
 
@@ -488,9 +512,36 @@ async def get_instagram_accounts(current_user: User = Depends(get_current_user))
     """
     try:
         response = supabase.table('instagram_accounts')\
-            .select('id, instagram_business_account_id, username, account_name, followers_count, profile_picture_url')\
+            .select('id, instagram_business_account_id, username, account_name, followers_count, profile_picture_url, expires_at, is_active, telegram_chat_id, drive_folder_id')\
             .eq('user_id', current_user.id)\
             .execute()
         return response.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener las cuentas de Instagram: {str(e)}")
+
+@router_no_prefix.put("/instagram/accounts/{account_id}/config")
+async def update_account_config(
+    account_id: str,
+    config: InstagramAccountConfigUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    existing = supabase.table('instagram_accounts').select('id').eq('id', account_id).eq('user_id', current_user.id).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Cuenta no encontrada")
+
+    update_data = {k: v for k, v in config.model_dump().items() if v is not None}
+    if update_data:
+        supabase.table('instagram_accounts').update(update_data).eq('id', account_id).execute()
+    return {"success": True}
+
+@router_no_prefix.delete("/instagram/accounts/{account_id}")
+async def disconnect_account(
+    account_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    existing = supabase.table('instagram_accounts').select('id').eq('id', account_id).eq('user_id', current_user.id).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Cuenta no encontrada")
+
+    supabase.table('instagram_accounts').delete().eq('id', account_id).execute()
+    return {"success": True}

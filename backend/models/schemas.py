@@ -35,6 +35,10 @@ class Post(PostBase):
     publication_date: Optional[datetime] = None
 
 # --- Modelos de Inteligencia Artificial ---
+class InstagramAccountConfigUpdate(BaseModel):
+    telegram_chat_id: Optional[str] = None
+    drive_folder_id: Optional[str] = None
+
 class AIPostRequest(BaseModel):
     topic: str
     role: str = "content_manager"
