@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 import logging
 from datetime import datetime
@@ -58,7 +59,19 @@ async def create_post(
         }).execute()
 
         if response.data:
-            return response.data[0]
+            post = response.data[0]
+            if instagram_account_id:
+                account_res = supabase.table('instagram_accounts')\
+                    .select('telegram_chat_id')\
+                    .eq('id', instagram_account_id)\
+                    .execute()
+                if account_res.data and account_res.data[0].get('telegram_chat_id'):
+                    from services.telegram_service import TelegramService
+                    chat_id = account_res.data[0]['telegram_chat_id']
+                    asyncio.create_task(
+                        TelegramService().send_approval_message(post['id'], chat_id, post)
+                    )
+            return post
         else:
             raise HTTPException(status_code=500, detail="No se pudo crear la publicación.")
 

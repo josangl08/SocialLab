@@ -43,6 +43,7 @@ def publish_post_job(post_id: int) -> None:
     # Create fresh instances (no serialization issues)
     supabase = get_supabase_admin_client()
     publisher = InstagramPublisher()
+    telegram_chat_id = None
 
     try:
         # Update job status to running
@@ -64,7 +65,7 @@ def publish_post_job(post_id: int) -> None:
 
         # Get Instagram account ID
         instagram_result = supabase.table('instagram_accounts')\
-            .select('id')\
+            .select('id, telegram_chat_id')\
             .eq('user_id', post_data['user_id'])\
             .eq('is_active', True)\
             .single()\
@@ -77,6 +78,7 @@ def publish_post_job(post_id: int) -> None:
             )
 
         instagram_account_id = instagram_result.data['id']
+        telegram_chat_id = instagram_result.data.get('telegram_chat_id')
 
         # Publish to Instagram
         logger.info(f"📤 Publishing post {post_id} to Instagram...")
@@ -102,6 +104,16 @@ def publish_post_job(post_id: int) -> None:
         }).eq('post_id', post_id).execute()
 
         logger.info(f"✅ Post {post_id} published successfully")
+
+        if telegram_chat_id:
+            try:
+                import asyncio
+                from services.telegram_service import TelegramService
+                asyncio.run(TelegramService().send_status_notification(
+                    telegram_chat_id, post_id, 'published', result.get('id')
+                ))
+            except Exception as te:
+                logger.error(f"Telegram notification failed for post {post_id}: {te}")
 
     except Exception as e:
         logger.error(f"❌ Error publishing post {post_id}: {e}")
@@ -166,6 +178,16 @@ def publish_post_job(post_id: int) -> None:
                 }).eq('id', post_id).execute()
 
                 logger.error(f"❌ Post {post_id} failed after {max_retries} retries")
+
+                if telegram_chat_id:
+                    try:
+                        import asyncio
+                        from services.telegram_service import TelegramService
+                        asyncio.run(TelegramService().send_status_notification(
+                            telegram_chat_id, post_id, 'failed', str(e)
+                        ))
+                    except Exception as te:
+                        logger.error(f"Telegram notification failed for post {post_id}: {te}")
 
         raise
 

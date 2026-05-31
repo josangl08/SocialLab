@@ -45,3 +45,58 @@ class AIPostRequest(BaseModel):
 
 class AIPostResponse(BaseModel):
     generated_text: str
+
+# --- Modelos de Telegram ---
+class TelegramUser(BaseModel):
+    id: int
+    is_bot: bool
+    first_name: str
+    last_name: Optional[str] = None
+    username: Optional[str] = None
+    language_code: Optional[str] = None
+
+class TelegramChat(BaseModel):
+    id: int
+    type: str
+    title: Optional[str] = None
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+
+class TelegramMessage(BaseModel):
+    message_id: int
+    from_user: Optional[TelegramUser] = Field(None, alias="from")
+    chat: TelegramChat
+    date: int
+    text: Optional[str] = None
+    reply_to_message: Optional['TelegramMessage'] = None
+
+    class Config:
+        populate_by_name = True
+
+class TelegramCallbackQuery(BaseModel):
+    id: str
+    from_user: TelegramUser = Field(..., alias="from")
+    message: Optional[TelegramMessage] = None
+    inline_message_id: Optional[str] = None
+    chat_instance: Optional[str] = None
+    data: Optional[str] = None
+    game_short_name: Optional[str] = None
+
+    class Config:
+        populate_by_name = True
+
+class TelegramUpdate(BaseModel):
+    update_id: int
+    message: Optional[TelegramMessage] = None
+    edited_message: Optional[TelegramMessage] = None
+    channel_post: Optional[TelegramMessage] = None
+    edited_channel_post: Optional[TelegramMessage] = None
+    callback_query: Optional[TelegramCallbackQuery] = None
+
+class TelegramLinkTokenResponse(BaseModel):
+    token: str
+    expires_at: datetime
+
+TelegramMessage.model_rebuild()
+

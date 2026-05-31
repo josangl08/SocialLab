@@ -37,10 +37,15 @@ def test_create_post_with_account(mock_supabase):
     
     mock_execute = MagicMock()
     mock_execute.execute.return_value = MagicMock(data=[mock_post])
-    
-    # Mock insert and execute chain
+
+    # Mock insert chain
     mock_supabase.table.return_value.insert.return_value = mock_execute
-    
+
+    # Mock instagram_accounts select (no telegram_chat_id → skip Telegram task)
+    mock_account_exec = MagicMock()
+    mock_account_exec.execute.return_value = MagicMock(data=[{"telegram_chat_id": None}])
+    mock_supabase.table.return_value.select.return_value.eq.return_value = mock_account_exec
+
     # Send request to create post with instagram_account_id
     response = client.post(
         "/posts",
@@ -51,12 +56,12 @@ def test_create_post_with_account(mock_supabase):
             "instagram_account_id": 123
         }
     )
-    
+
     assert response.status_code == 200
     assert response.json()["instagram_account_id"] == 123
-    
+
     # Verify insert call included instagram_account_id
-    mock_supabase.table.assert_called_with("posts")
+    mock_supabase.table.assert_any_call("posts")
     mock_supabase.table().insert.assert_called_once()
     inserted_data = mock_supabase.table().insert.call_args[0][0]
     assert inserted_data["instagram_account_id"] == 123

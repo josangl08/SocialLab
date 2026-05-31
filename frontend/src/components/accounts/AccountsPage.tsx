@@ -30,6 +30,9 @@ const AccountsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState<number | null>(null);
+  const [telegramLinking, setTelegramLinking] = useState<number | null>(null);
+  const [telegramUnlinking, setTelegramUnlinking] = useState<number | null>(null);
+  const [linkTokens, setLinkTokens] = useState<Record<number, string>>({});
 
   const fetchAccounts = useCallback(async () => {
     const token = localStorage.getItem('authToken');
@@ -65,6 +68,45 @@ const AccountsPage: React.FC = () => {
       alert(e.message);
     } finally {
       setDisconnecting(null);
+    }
+  };
+
+  const handleTelegramLink = async (accountId: number) => {
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    setTelegramLinking(accountId);
+    try {
+      const res = await fetch('http://localhost:8000/api/telegram/generate-link-token', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Error al generar token');
+      const data = await res.json();
+      setLinkTokens(prev => ({ ...prev, [accountId]: data.token }));
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setTelegramLinking(null);
+    }
+  };
+
+  const handleTelegramUnlink = async (accountId: number) => {
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    setTelegramUnlinking(accountId);
+    try {
+      const res = await fetch(`http://localhost:8000/instagram/accounts/${accountId}/config`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telegram_chat_id: null })
+      });
+      if (!res.ok) throw new Error('Error al desvincular');
+      setAccounts(prev => prev.map(a => a.id === accountId ? { ...a, telegram_chat_id: null } : a));
+      setLinkTokens(prev => { const next = { ...prev }; delete next[accountId]; return next; });
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setTelegramUnlinking(null);
     }
   };
 
@@ -157,6 +199,43 @@ const AccountsPage: React.FC = () => {
                           : <><i className="bi bi-trash me-1"></i>Desconectar</>
                         }
                       </button>
+                    </div>
+
+                    <div className="mt-3 pt-3 border-top">
+                      {account.telegram_chat_id ? (
+                        <div className="d-flex align-items-center gap-2">
+                          <span className="badge bg-success">Linked ✅</span>
+                          <button
+                            className="btn btn-sm btn-outline-secondary"
+                            onClick={() => handleTelegramUnlink(account.id)}
+                            disabled={telegramUnlinking === account.id}
+                          >
+                            {telegramUnlinking === account.id
+                              ? <span className="spinner-border spinner-border-sm" role="status"></span>
+                              : 'Unlink'
+                            }
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            className="btn btn-sm btn-outline-primary"
+                            onClick={() => handleTelegramLink(account.id)}
+                            disabled={telegramLinking === account.id}
+                          >
+                            {telegramLinking === account.id
+                              ? <span className="spinner-border spinner-border-sm" role="status"></span>
+                              : <><i className="bi bi-telegram me-1"></i>Link Telegram</>
+                            }
+                          </button>
+                          {linkTokens[account.id] && (
+                            <div className="mt-2">
+                              <small className="text-muted d-block">Send to bot:</small>
+                              <code className="d-block">/start {linkTokens[account.id]}</code>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>

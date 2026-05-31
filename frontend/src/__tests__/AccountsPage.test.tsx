@@ -50,10 +50,16 @@ describe('AccountsPage Component', () => {
     
     // Mock global fetch
     global.fetch = vi.fn().mockImplementation((url: string, options?: any) => {
-      if (url.includes('/instagram/accounts') && (!options || options.method !== 'DELETE')) {
+      if (url.includes('/instagram/accounts') && (!options || (options.method !== 'DELETE' && options.method !== 'PATCH' && options.method !== 'PUT'))) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve(mockAccounts),
+        });
+      }
+      if (url.includes('/api/telegram/generate-link-token')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ token: 'mock-link-token-abc', expires_at: '2026-06-01T00:00:00Z' }),
         });
       }
       return Promise.resolve({
@@ -132,4 +138,76 @@ describe('AccountsPage Component', () => {
       expect(screen.getByText(/No tienes cuentas de Instagram conectadas/i)).toBeInTheDocument();
     });
   });
+
+  test('renders Telegram section: Link Telegram when chat ID is null, Linked badge when chat ID is set', async () => {
+    render(<AccountsPage />);
+
+    // Wait for accounts to load
+    await waitFor(() => {
+      expect(screen.getByText('@active_user')).toBeInTheDocument();
+    });
+
+    const activeUserCard = screen.getByText('@active_user').closest('.card') as HTMLElement;
+    const expiredUserCard = screen.getByText('@expired_user').closest('.card') as HTMLElement;
+
+    // Active user has telegram_chat_id: '12345' -> should show Linked badge and Unlink button
+    expect(within(activeUserCard).getByText(/Linked/i)).toBeInTheDocument();
+    expect(within(activeUserCard).getByRole('button', { name: /Unlink/i })).toBeInTheDocument();
+
+    // Expired user has telegram_chat_id: null -> should show Link Telegram button
+    expect(within(expiredUserCard).getByRole('button', { name: /Link Telegram/i })).toBeInTheDocument();
+  });
+
+  test('clicking Link Telegram calls generate-link-token and displays the linking token', async () => {
+    render(<AccountsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('@expired_user')).toBeInTheDocument();
+    });
+
+    const expiredUserCard = screen.getByText('@expired_user').closest('.card') as HTMLElement;
+    const linkBtn = within(expiredUserCard).getByRole('button', { name: /Link Telegram/i });
+
+    fireEvent.click(linkBtn);
+
+    // Should call generate-link-token endpoint
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        'http://localhost:8000/api/telegram/generate-link-token',
+        expect.objectContaining({ method: 'POST' })
+      );
+    });
+
+    // Should display the generated token 'mock-link-token-abc' on the screen
+    await waitFor(() => {
+      expect(screen.getByText(/mock-link-token-abc/i)).toBeInTheDocument();
+    });
+  });
+
+  test('clicking Unlink calls API to clear telegram_chat_id and updates state', async () => {
+    render(<AccountsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('@active_user')).toBeInTheDocument();
+    });
+
+    const activeUserCard = screen.getByText('@active_user').closest('.card') as HTMLElement;
+    const unlinkBtn = within(activeUserCard).getByRole('button', { name: /Unlink/i });
+
+    // Mock confirm dialog
+    window.confirm = vi.fn().mockReturnValue(true);
+
+    fireEvent.click(unlinkBtn);
+
+    // Should call update endpoint (PATCH /instagram/accounts/1 or PUT /instagram/accounts/1/config)
+    await waitFor(() => {
+      const call = (global.fetch as any).mock.calls.find(([url]: any) => url.includes('/accounts/1'));
+      expect(call).toBeDefined();
+      const [, options] = call;
+      expect(options.method === 'PATCH' || options.method === 'PUT').toBe(true);
+      const body = JSON.parse(options.body);
+      expect(body.telegram_chat_id).toBeNull();
+    });
+  });
 });
+

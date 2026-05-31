@@ -109,6 +109,13 @@ async def startup_event():
         logger.error(f"❌ Error al inicializar PostScheduler: {e}")
 
     try:
+        from services.telegram_service import TelegramService
+        await TelegramService().register_webhook(os.getenv("TELEGRAM_WEBHOOK_URL"))
+        logger.info("✅ Telegram webhook registrado correctamente")
+    except Exception as e:
+        logger.error(f"❌ Error al registrar Telegram webhook: {e}")
+
+    try:
         from apscheduler.triggers.cron import CronTrigger
         from services.scheduler.post_scheduler import PostScheduler
 
@@ -160,12 +167,14 @@ from routes.auth_routes import router as auth_router
 from routes.ai_routes import router as ai_router
 from routes.instagram_routes import router_no_prefix as instagram_router
 from routes.posts_crud_routes import router as posts_crud_router
+from routes.telegram_routes import router as telegram_router
 
 # --- Registrar todos los routers ---
 app.include_router(auth_router)
 app.include_router(ai_router)
 app.include_router(instagram_router)
 app.include_router(posts_crud_router)
+app.include_router(telegram_router)
 
 app.include_router(templates_router)
 app.include_router(content_router)
