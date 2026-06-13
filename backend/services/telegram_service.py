@@ -81,7 +81,9 @@ class TelegramService:
                 "callback_query_id": callback_query.id
             })
 
-            if data.startswith("approve:"):
+            if data.startswith("proposal:"):
+                await self._handle_proposal_callback(callback_query)
+            elif data.startswith("approve:"):
                 post_id = int(data.split(":", 1)[1])
                 await self._handle_approve(client, post_id, chat_id, message_id)
             elif data.startswith("reject:"):
@@ -259,3 +261,100 @@ class TelegramService:
                 "chat_id": chat_id,
                 "text": text
             })
+
+    async def send_proposal_card(self, chat_id: str, proposal_id: str, slots: list) -> None:
+        lines = "\n".join(
+            f"• {s.day if hasattr(s, 'day') else s['day']}: "
+            f"{s.theme if hasattr(s, 'theme') else s['theme']} — "
+            f"{(s.caption if hasattr(s, 'caption') else s['caption'])[:60]}"
+            for s in slots
+        )
+        text = f"📅 *Propuesta de contenido semanal*\n\n{lines}\n\n¿Apruebas este calendario?"
+
+        keyboard = {
+            "inline_keyboard": [[
+                {"text": "Aprobar Calendario ✅", "callback_data": f"proposal:approve:{proposal_id}"},
+                {"text": "Rechazar ❌", "callback_data": f"proposal:reject:{proposal_id}"}
+            ]]
+        }
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(self._bot_url("sendMessage"), json={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "Markdown",
+                "reply_markup": keyboard
+            })
+            if resp.status_code == 200:
+                msg_id = resp.json().get("result", {}).get("message_id")
+                if msg_id:
+                    supabase = get_supabase_client()
+                    supabase.table('content_proposals').update({
+                        "telegram_message_id": str(msg_id)
+                    }).eq('id', proposal_id).execute()
+
+    async def _handle_proposal_callback(self, callback_query) -> None:
+        data = callback_query.data or ""
+        chat_id = str(callback_query.from_user.id)
+        message_id = callback_query.message.message_id if callback_query.message else None
+
+        parts = data.split(":", 2)
+        if len(parts) < 3:
+            return
+        action, proposal_id = parts[1], parts[2]
+
+        supabase = get_supabase_client()
+        proposal_res = supabase.table('content_proposals').select('*').eq('id', proposal_id).execute()
+        if not proposal_res.data:
+            logger.error(f"Proposal {proposal_id} not found")
+            return
+
+        proposal = proposal_res.data[0]
+        slots = proposal.get('slots', [])
+
+        async with httpx.AsyncClient() as client:
+            if action == "approve":
+                supabase.table('content_proposals').update({
+                    "status": "approved",
+                    "resolved_at": datetime.now(timezone.utc).isoformat()
+                }).eq('id', proposal_id).execute()
+
+                post_ids = [s['post_id'] for s in slots if s.get('post_id')]
+                if post_ids:
+                    posts_res = supabase.table('posts').select('id, scheduled_at').in_('id', post_ids).execute()
+                    for post in (posts_res.data or []):
+                        supabase.table('posts').update({"status": "scheduled"}).eq('id', post['id']).execute()
+                        scheduled_at_raw = post.get('scheduled_at')
+                        scheduled_time = datetime.now(timezone.utc)
+                        if scheduled_at_raw:
+                            parsed = datetime.fromisoformat(str(scheduled_at_raw).replace('Z', '+00:00'))
+                            if parsed.tzinfo is None:
+                                parsed = parsed.replace(tzinfo=timezone.utc)
+                            if parsed > datetime.now(timezone.utc):
+                                scheduled_time = parsed
+                        PostScheduler().schedule_post(post['id'], scheduled_time)
+
+                if message_id:
+                    await client.post(self._bot_url("editMessageText"), json={
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "text": f"✅ Calendario aprobado — {len(post_ids)} posts programados."
+                    })
+
+            elif action == "reject":
+                supabase.table('content_proposals').update({
+                    "status": "rejected",
+                    "resolved_at": datetime.now(timezone.utc).isoformat()
+                }).eq('id', proposal_id).execute()
+
+                post_ids = [s['post_id'] for s in slots if s.get('post_id')]
+                if post_ids:
+                    for pid in post_ids:
+                        supabase.table('posts').delete().eq('id', pid).eq('status', 'draft').execute()
+
+                if message_id:
+                    await client.post(self._bot_url("editMessageText"), json={
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "text": "❌ Propuesta rechazada — borradores eliminados."
+                    })

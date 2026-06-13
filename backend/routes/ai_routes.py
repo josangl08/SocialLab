@@ -1,6 +1,8 @@
 import os
+import json
+import tempfile
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted
 
@@ -33,23 +35,41 @@ async def generate_ai_post_content(
         
         genai.configure(api_key=api_key)
         
-        # --- Creación del Prompt ---
-        prompt = f"""
-Eres 'SocialPro', un experto estratega de redes sociales y content manager con 10 años de experiencia. Tu objetivo es crear contenido para Instagram que sea auténtico, atractivo y que genere interacción.
+        # --- Prompt estratégico según tipo de cuenta ---
+        acct_type = request.account_type or "personal"
+        language = request.default_language or "es"
+        tone = request.default_tone or ("professional" if acct_type == "professional" else "energetic")
+        style_note = f"Guía de estilo: {request.style_guide}" if request.style_guide else ""
+        audience_note = f"Audiencia: {request.target_audience}" if request.target_audience else ""
 
-**Instrucciones:**
-1.  **Analiza el tema:** "{request.topic}"
-2.  **Tono y Voz:** Utiliza un tono enérgico, positivo e inspirador.
-3.  **Formato de Salida:** Genera un texto para la publicación (máximo 300 caracteres) y, en una nueva línea, una lista de 5 a 7 hashtags relevantes y específicos.
-4.  **Llamada a la acción (CTA):** Incluye una pregunta o una frase que invite a los usuarios a comentar o visitar un enlace.
+        if acct_type == "professional":
+            tone_block = (
+                f"Tono {tone}, voz de marca semiformal, emojis mínimos (0-1). "
+                f"Empieza directamente con el beneficio principal o propuesta de valor. "
+                f"CTA de conversión al final ('Contáctanos', 'Reserva ahora', 'Más info en bio'). "
+                f"Incluye 1-2 keywords SEO relevantes en el texto (Instagram indexado por Google desde 2025)."
+            )
+        else:
+            tone_block = (
+                f"Tono {tone}, primera persona, emojis moderados (1-3). "
+                f"Cuenta brevemente una historia auténtica o comparte un momento real. "
+                f"Termina con una pregunta que invite a comentar ('¿Qué opinas?', '¡Cuéntame!', '¿Te ha pasado?')."
+            )
 
-**Ejemplo de resultado:**
-¡Dale un giro a tu estilo! 🌿✨ Descubre nuestra nueva colección hecha con materiales reciclados. Moda que cuida del planeta y de ti. ¿Cuál es tu pieza favorita? ¡Cuéntanos abajo!
-#ModaSostenible #EcoFriendly #EstiloConsciente #Novedades #HechoAMano #SlowFashion
+        prompt = f"""Eres 'SocialPro', experto en estrategia de Instagram con 10 años de experiencia.
 
----
+**Tema:** "{request.topic}"
+**Tipo de cuenta:** {acct_type}
+**Idioma:** {"Español" if language == "es" else "English"}
+**Tono y voz:** {tone_block}
+{f"**{style_note}**" if style_note else ""}
+{f"**{audience_note}**" if audience_note else ""}
 
-Ahora, genera el contenido para el tema proporcionado.
+**Formato de salida:**
+- Texto principal: máximo 300 caracteres
+- Nueva línea con 3-5 hashtags muy relevantes (máx. 5 — límite de Instagram desde dic. 2025)
+
+Genera el contenido ahora.
 """
 
         generated_text = None
@@ -88,3 +108,60 @@ Ahora, genera el contenido para el tema proporcionado.
     except Exception as e:
         logger.error(f"Error general en el endpoint de IA: {e}")
         raise HTTPException(status_code=500, detail=f"Error al generar contenido con IA: {str(e)}")
+
+
+@router.post("/analyze-image")
+async def analyze_image(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Analyzes an image using Gemini Vision and returns structured JSON with
+    objects, mood, theme, raw description, and a suggested caption.
+    """
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="GOOGLE_API_KEY no configurado")
+
+    genai.configure(api_key=api_key)
+    content = await file.read()
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=f"_{file.filename}", delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        uploaded = genai.upload_file(tmp_path, mime_type=file.content_type or "image/jpeg")
+
+        prompt = """Analiza detalladamente esta imagen. Retorna SOLO un objeto JSON con esta estructura exacta:
+{
+  "objects": ["lista de objetos o personas principales"],
+  "text_visible": "texto visible en la imagen o cadena vacía",
+  "mood": "uno de: energetic, calm, professional, fun, inspiring, nostalgic",
+  "theme": "tema principal en 2-3 palabras",
+  "raw_description": "descripción detallada en 2-3 frases",
+  "suggested_caption": "caption sugerido para Instagram (1-2 frases con hashtags relevantes)"
+}"""
+
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content([uploaded, prompt])
+
+        text = response.text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+
+        return json.loads(text)
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Gemini returned non-JSON response: {e}")
+        raise HTTPException(status_code=500, detail="La IA devolvió una respuesta inválida")
+    except Exception as e:
+        logger.error(f"Error en analyze-image: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al analizar imagen: {str(e)}")
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import 'bootstrap-icons/font/bootstrap-icons.css';
+import { AgentStrategyDrawer } from '../../features/agent/AgentStrategyDrawer';
 
 interface InstagramAccount {
   id: number;
@@ -11,6 +12,17 @@ interface InstagramAccount {
   is_active: boolean;
   telegram_chat_id: string | null;
   drive_folder_id: string | null;
+  account_type?: string;
+  sector?: string;
+  purpose?: string;
+  target_audience?: string;
+  style_guide?: string;
+  default_tone?: string;
+  default_language?: string;
+  posting_frequency?: string;
+  best_times?: string[];
+  content_pillars?: string[];
+  hashtag_strategy?: string;
 }
 
 type TokenStatus = 'valid' | 'expiring' | 'expired';
@@ -33,6 +45,7 @@ const AccountsPage: React.FC = () => {
   const [telegramLinking, setTelegramLinking] = useState<number | null>(null);
   const [telegramUnlinking, setTelegramUnlinking] = useState<number | null>(null);
   const [linkTokens, setLinkTokens] = useState<Record<number, string>>({});
+  const [drawerAccount, setDrawerAccount] = useState<InstagramAccount | null>(null);
 
   const fetchAccounts = useCallback(async () => {
     const token = localStorage.getItem('authToken');
@@ -237,6 +250,18 @@ const AccountsPage: React.FC = () => {
                         </>
                       )}
                     </div>
+
+                    <div className="mt-3 pt-3 border-top">
+                      <button
+                        className="btn btn-sm btn-outline-info w-100"
+                        onClick={() => setDrawerAccount(account)}
+                      >
+                        <i className="bi bi-robot me-1"></i>Configurar Estrategia
+                        {account.sector && (
+                          <span className="badge bg-success ms-2" style={{ fontSize: '0.65rem' }}>Activa</span>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -244,6 +269,14 @@ const AccountsPage: React.FC = () => {
           })}
         </div>
       )}
+
+      <AgentStrategyDrawer
+        accountId={drawerAccount?.id ?? 0}
+        accountUsername={drawerAccount?.username ?? undefined}
+        show={drawerAccount !== null}
+        onHide={() => setDrawerAccount(null)}
+        onSave={fetchAccounts}
+      />
     </div>
   );
 };

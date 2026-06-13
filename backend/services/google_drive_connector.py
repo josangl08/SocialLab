@@ -300,6 +300,32 @@ class GoogleDriveConnector:
             logger.error(f"Error listando exports: {str(e)}")
             return []
 
+    def list_generic_resources(
+        self,
+        folder_id: str,
+        already_processed_ids: set
+    ) -> list:
+        """Returns image/video files from a Drive folder, excluding already-processed IDs."""
+        if not self.service:
+            if not self.authenticate():
+                return []
+        try:
+            query = (
+                f"'{folder_id}' in parents and "
+                f"(mimeType contains 'image/' or mimeType contains 'video/') and "
+                f"trashed=false"
+            )
+            results = self.service.files().list(
+                q=query,
+                pageSize=100,
+                fields="files(id, name, mimeType, webContentLink)"
+            ).execute()
+            files = results.get('files', [])
+            return [f for f in files if f['id'] not in already_processed_ids]
+        except Exception as e:
+            logger.error(f"Error listing generic resources: {str(e)}")
+            return []
+
     def get_file_direct_url(self, file_id: str) -> str:
         """
         Obtiene URL directa de descarga de un archivo.

@@ -322,7 +322,12 @@ async def instagram_sync(
 async def instagram_status(current_user: User = Depends(get_current_user)):
     try:
         response = supabase.table('instagram_accounts').select(
-            'id, instagram_business_account_id, username, account_name, profile_picture_url, expires_at, created_at, is_active'
+            'id, instagram_business_account_id, username, account_name, profile_picture_url, '
+            'expires_at, created_at, is_active, followers_count, telegram_chat_id, drive_folder_id, '
+            'account_type, sector, purpose, target_audience, style_guide, '
+            'default_tone, default_language, posting_frequency, best_times, '
+            'content_pillars, hashtag_strategy, reference_accounts, '
+            'posts_per_week, scheduling_mode, preferred_days, last_agent_sync'
         ).eq('user_id', current_user.id).execute()
 
         accounts = []
@@ -346,8 +351,28 @@ async def instagram_status(current_user: User = Depends(get_current_user)):
                 'expires_at': expires_at_str,
                 'created_at': account.get('created_at'),
                 'is_active': account.get('is_active', True),
+                'followers_count': account.get('followers_count'),
+                'telegram_chat_id': account.get('telegram_chat_id'),
+                'drive_folder_id': account.get('drive_folder_id'),
                 'connected': connected,
                 'expired': expired,
+                # Strategy fields
+                'account_type': account.get('account_type', 'personal'),
+                'sector': account.get('sector'),
+                'purpose': account.get('purpose'),
+                'target_audience': account.get('target_audience'),
+                'style_guide': account.get('style_guide'),
+                'default_tone': account.get('default_tone', 'energetic'),
+                'default_language': account.get('default_language', 'es'),
+                'posting_frequency': account.get('posting_frequency', 'few_times_week'),
+                'best_times': account.get('best_times') or ['09:00', '18:00'],
+                'content_pillars': account.get('content_pillars') or [],
+                'hashtag_strategy': account.get('hashtag_strategy', 'moderate'),
+                'reference_accounts': account.get('reference_accounts') or [],
+                'posts_per_week': account.get('posts_per_week', 3),
+                'scheduling_mode': account.get('scheduling_mode', 'flexible'),
+                'preferred_days': account.get('preferred_days') or [],
+                'last_agent_sync': account.get('last_agent_sync'),
             })
 
         return accounts

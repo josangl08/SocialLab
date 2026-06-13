@@ -6,6 +6,8 @@ import './Dashboard.css';
 
 // Import new analytics components
 import { KPICard } from '../analytics/cards/KPICard';
+import { AgentStatusCard } from '../../features/agent/AgentStatusCard';
+import { CalendarProposalView } from '../../features/agent/CalendarProposalView';
 import { FollowerGrowthChart } from '../analytics/charts/FollowerGrowthChart';
 import { DemographicsChart } from '../analytics/charts/DemographicsChart';
 import { ActivityHeatmap } from '../analytics/charts/ActivityHeatmap';
@@ -458,6 +460,16 @@ const Dashboard: React.FC = () => {
         </div>
       ) : (
         <div className="dashboard-content">
+          {instagramAccountId && (
+            <div className="row mb-4">
+              <div className="col-12 col-md-6 col-lg-4">
+                <AgentStatusCard accountId={instagramAccountId} />
+              </div>
+              <div className="col-12 col-md-6 col-lg-8">
+                <CalendarProposalView accountId={instagramAccountId} />
+              </div>
+            </div>
+          )}
           {/* Section 1: Follower Growth */}
           <div className="analytics-section">
             <div className="section-header">

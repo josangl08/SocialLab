@@ -42,6 +42,12 @@ class InstagramAccountConfigUpdate(BaseModel):
 class AIPostRequest(BaseModel):
     topic: str
     role: str = "content_manager"
+    account_type: Optional[Literal["personal", "professional"]] = None
+    default_tone: Optional[str] = None
+    style_guide: Optional[str] = None
+    target_audience: Optional[str] = None
+    hashtag_strategy: Optional[Literal["minimal", "moderate", "maximum"]] = None
+    default_language: Optional[Literal["es", "en"]] = None
 
 class AIPostResponse(BaseModel):
     generated_text: str
@@ -99,4 +105,53 @@ class TelegramLinkTokenResponse(BaseModel):
     expires_at: datetime
 
 TelegramMessage.model_rebuild()
+
+
+# --- Modelos de Agente Autónomo ---
+class AgentConfig(BaseModel):
+    account_type: Literal["personal", "professional"] = "personal"
+    sector: Optional[str] = None
+    purpose: Optional[str] = None
+    target_audience: Optional[str] = None
+    style_guide: Optional[str] = None
+    default_tone: Literal["energetic", "professional", "casual", "inspirational"] = "energetic"
+    default_language: Literal["es", "en"] = "es"
+    posting_frequency: Literal["daily", "few_times_week", "once_or_twice_week", "weekly"] = "few_times_week"
+    best_times: list[str] = ["09:00", "18:00"]
+    content_pillars: list[str] = []
+    hashtag_strategy: Literal["minimal", "moderate", "maximum"] = "moderate"
+    reference_accounts: list[str] = []
+    posts_per_week: int = 3
+    scheduling_mode: Literal["fixed", "flexible"] = "flexible"
+    preferred_days: list[str] = []
+    content_type_mix: dict = {"post": 2, "reel": 1, "carousel": 1, "story": 0}
+
+class VisualAnalysis(BaseModel):
+    drive_file_id: str
+    gemini_description: dict
+    suggested_caption: Optional[str] = None
+
+class CalendarSlot(BaseModel):
+    day: str
+    post_id: Optional[int] = None
+    image_id: Optional[str] = None
+    theme: str
+    caption: str
+    post_type: Optional[str] = None  # "post" | "reel" | "carousel" | "story"
+
+class ContentProposal(BaseModel):
+    id: str
+    account_id: str
+    week_start: str
+    slots: list[CalendarSlot]
+    status: Literal["pending_approval", "approved", "rejected"] = "pending_approval"
+
+class AgentLog(BaseModel):
+    account_id: str
+    images_scanned: int = 0
+    images_analyzed: int = 0
+    posts_drafted: int = 0
+    error: Optional[str] = None
+    duration_ms: Optional[int] = None
+
 
