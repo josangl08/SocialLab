@@ -1,13 +1,279 @@
-.login-container {
+.login-page {
+  min-height: 100vh;
+  background: #0d1117;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
-  background-color: var(--bs-light);
+  position: relative;
+  overflow: hidden;
+  padding: 24px;
 }
 
+/* ── Aurora Galáctica background ──────────────────────────────── */
+
+/* Star field — 3 parallax layers at prime tile sizes (no visible grid) */
+.login-stars-sm {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.75) 0.8px, transparent 0.8px);
+  background-size: 173px 181px;
+  animation: stars-pan-a 55s linear infinite;
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.login-stars-md {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(200, 210, 255, 0.65) 1.5px, transparent 1.5px);
+  background-size: 311px 293px;
+  animation: stars-pan-b 80s linear infinite reverse;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.login-stars-lg {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(180, 190, 255, 0.95) 2px, transparent 2px);
+  background-size: 503px 487px;
+  animation: stars-pan-a 130s linear infinite, stars-twinkle 5s ease-in-out infinite;
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+@keyframes stars-pan-a {
+  from { background-position: 0 0; }
+  to   { background-position: 173px 181px; }
+}
+
+@keyframes stars-pan-b {
+  from { background-position: 0 0; }
+  to   { background-position: 311px 293px; }
+}
+
+@keyframes stars-twinkle {
+  0%, 100% { opacity: 0.35; }
+  50%       { opacity: 0.65; }
+}
+
+/* Rotating conic color prism — full scene color sweep */
+.login-conic {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 300vmax;
+  height: 300vmax;
+  background: conic-gradient(
+    from 0deg at 50% 50%,
+    transparent              0deg,
+    rgba(102, 126, 234, 0.22) 45deg,
+    rgba(118,  75, 162, 0.32) 90deg,
+    rgba(139,  92, 246, 0.20) 135deg,
+    transparent              180deg,
+    rgba( 79,  70, 229, 0.18) 225deg,
+    rgba(102, 126, 234, 0.24) 295deg,
+    transparent              360deg
+  );
+  animation: conic-spin 90s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes conic-spin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to   { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+/* Large ambient glows */
+.login-glow-a {
+  position: absolute;
+  width: 900px;
+  height: 900px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(102, 126, 234, 0.50) 0%, transparent 62%);
+  filter: blur(50px);
+  top: -330px;
+  left: -290px;
+  animation: glow-pulse 9s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.login-glow-b {
+  position: absolute;
+  width: 820px;
+  height: 820px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(118, 75, 162, 0.48) 0%, transparent 62%);
+  filter: blur(55px);
+  bottom: -270px;
+  right: -250px;
+  animation: glow-pulse 12s ease-in-out infinite reverse;
+  pointer-events: none;
+}
+
+@keyframes glow-pulse {
+  0%, 100% { transform: scale(1);    opacity: 0.75; }
+  50%       { transform: scale(1.12); opacity: 1;    }
+}
+
+/* Diagonal searchlight beams — sweep left→right at 22° */
+.login-beam {
+  position: absolute;
+  top: -80px;
+  left: 0;
+  height: 200vh;
+  pointer-events: none;
+}
+
+.login-beam-1 {
+  width: 12px;
+  background: linear-gradient(
+    180deg,
+    transparent                0%,
+    rgba(102, 126, 234, 0.50) 20%,
+    rgba(139,  92, 246, 0.65) 50%,
+    rgba(102, 126, 234, 0.50) 80%,
+    transparent               100%
+  );
+  filter: blur(22px);
+  animation: beam-pass 30s cubic-bezier(0.4, 0, 0.6, 1) infinite 0s;
+}
+
+.login-beam-2 {
+  width: 8px;
+  background: linear-gradient(
+    180deg,
+    transparent                0%,
+    rgba(118,  75, 162, 0.40) 25%,
+    rgba(102, 126, 234, 0.55) 50%,
+    rgba(118,  75, 162, 0.40) 75%,
+    transparent               100%
+  );
+  filter: blur(18px);
+  animation: beam-pass 30s cubic-bezier(0.4, 0, 0.6, 1) infinite 10s;
+}
+
+.login-beam-3 {
+  width: 20px;
+  background: linear-gradient(
+    180deg,
+    transparent                0%,
+    rgba(139,  92, 246, 0.25) 30%,
+    rgba(102, 126, 234, 0.35) 50%,
+    rgba(139,  92, 246, 0.25) 70%,
+    transparent               100%
+  );
+  filter: blur(36px);
+  animation: beam-pass 30s cubic-bezier(0.4, 0, 0.6, 1) infinite 20s;
+}
+
+@keyframes beam-pass {
+  0%   { transform: translateX(-110vw) rotate(22deg); opacity: 0;   }
+  4%   { opacity: 1;   }
+  88%  { opacity: 0.8; }
+  100% { transform: translateX(210vw)  rotate(22deg); opacity: 0;   }
+}
+
+/* Edge vignette — darkens corners, focuses on card center */
+.login-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse 68% 62% at 50% 50%,
+    transparent          0%,
+    rgba(13, 17, 23, 0.6)  76%,
+    rgba(13, 17, 23, 0.94) 100%
+  );
+  pointer-events: none;
+}
+
+/* Card entrance */
 .login-card {
-  max-width: 400px;
-  margin: auto;
+  animation: card-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(32px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Logo bounce */
+.login-logo-icon {
+  animation: logo-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both 0.15s;
+}
+
+@keyframes logo-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* Input styling */
+.login-input {
+  width: 100%;
+  background: #0d1117;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 13px 14px 13px 44px;
+  color: #e8e9ed;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+}
+
+.login-input::placeholder {
+  color: #4b5563;
+}
+
+.login-input:focus {
+  border-color: rgba(102, 126, 234, 0.55);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.12);
+}
+
+.login-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Submit button */
+.login-btn {
+  width: 100%;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  border: none;
+  border-radius: 10px;
+  padding: 13px;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: transform 0.18s, box-shadow 0.18s;
+  position: relative;
+  overflow: hidden;
+}
+
+.login-btn:not(:disabled):hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(102, 126, 234, 0.38);
+}
+
+.login-btn:not(:disabled):active {
+  transform: translateY(0);
+}
+
+.login-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+/* Error shake */
+.login-error {
+  animation: shake 0.38s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%       { transform: translateX(-6px); }
+  40%       { transform: translateX(6px); }
+  60%       { transform: translateX(-4px); }
+  80%       { transform: translateX(4px); }
 }

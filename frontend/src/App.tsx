@@ -3,14 +3,11 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import Login from './components/auth/Login';
 import Register from './components/auth/Register';
 import Dashboard from './components/dashboard/Dashboard';
-import UserProfile from './components/user/UserProfile';
 import CreatePost from './components/posts/CreatePost';
-import PostList from './components/posts/PostList';
 import PostGenerator from './components/posts/PostGenerator';
-import CalendarView from './components/calendar/CalendarView';
+import PlannerPage from './components/planner/PlannerPage';
 import Analytics from './components/analytics/Analytics';
-import StrategyConfig from './components/strategy/StrategyConfig';
-import AccountsPage from './components/accounts/AccountsPage';
+import SettingsPage from './components/settings/SettingsPage';
 import MainLayout from './components/layout/MainLayout';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import './App.css';
@@ -51,26 +48,10 @@ function App() {
             }
           />
           <Route
-            path="/profile"
+            path="/planner"
             element={
               <ProtectedRoute>
-                <UserProfile />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/calendar"
-            element={
-              <ProtectedRoute>
-                <CalendarView />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/posts"
-            element={
-              <ProtectedRoute>
-                <PostList />
+                <PlannerPage />
               </ProtectedRoute>
             }
           />
@@ -91,20 +72,20 @@ function App() {
             }
           />
           <Route
-            path="/strategy"
+            path="/settings"
             element={
               <ProtectedRoute>
-                <StrategyConfig />
+                <SettingsPage />
               </ProtectedRoute>
             }
           />
           <Route
+            path="/profile"
+            element={<Navigate to="/settings" replace />}
+          />
+          <Route
             path="/accounts"
-            element={
-              <ProtectedRoute>
-                <AccountsPage />
-              </ProtectedRoute>
-            }
+            element={<Navigate to="/settings" replace />}
           />
 
           {/* Redirigir a /dashboard si está autenticado, de lo contrario a /login */}

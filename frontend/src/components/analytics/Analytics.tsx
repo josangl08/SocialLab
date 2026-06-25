@@ -13,6 +13,39 @@ import {
 } from 'recharts';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 import './Analytics.css';
+import { FollowerGrowthChart } from './charts/FollowerGrowthChart';
+import { DemographicsChart } from './charts/DemographicsChart';
+import { ActivityHeatmap } from './charts/ActivityHeatmap';
+import { TopLocations } from './charts/TopLocations';
+
+interface FollowerGrowthData {
+  date: string;
+  follower_count: number;
+  change: number;
+}
+
+interface LocationData {
+  country_code?: string;
+  city_name?: string;
+  audience_count: number;
+  percentage: number;
+}
+
+interface BestPostingTimeRaw {
+  hour: string;
+  score: number;
+  online_followers: number;
+  avg_engagement: number;
+  posts_count: number;
+}
+
+interface AudienceData {
+  follower_growth: FollowerGrowthData[];
+  demographics: { audience_gender_age: Record<string, number> };
+  online_hours: Record<string, number>;
+  top_locations: { countries: LocationData[]; cities: LocationData[] };
+  best_posting_times_raw: BestPostingTimeRaw[];
+}
 
 interface ContentTypeStats {
   count: number;
@@ -63,6 +96,7 @@ interface AnalyticsData {
     description: string;
     icon: string;
   }>;
+  audience?: AudienceData;
 }
 
 const Analytics: React.FC = () => {
@@ -147,7 +181,14 @@ const Analytics: React.FC = () => {
           time: item.hour || '00:00',
           avg_engagement: item.avg_engagement_rate || 0
         })),
-        insights: data.data.insights || []
+        insights: data.data.insights || [],
+        audience: data.data.audience ? {
+          follower_growth: data.data.audience.follower_growth || [],
+          demographics: data.data.audience.demographics || { audience_gender_age: {} },
+          online_hours: data.data.audience.online_hours || {},
+          top_locations: data.data.audience.top_locations || { countries: [], cities: [] },
+          best_posting_times_raw: data.data.best_posting_times || []
+        } : undefined
       };
 
       setAnalytics(formattedData);
@@ -366,6 +407,40 @@ const Analytics: React.FC = () => {
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* Audience Charts */}
+      {analytics.audience && (
+        <>
+          <div className="analytics-section">
+            <h3><i className="bi bi-graph-up-arrow me-2"></i>Crecimiento de Seguidores</h3>
+            <FollowerGrowthChart data={analytics.audience.follower_growth} loading={loading} />
+          </div>
+
+          <div className="analytics-columns">
+            <div className="analytics-section">
+              <h3><i className="bi bi-people me-2"></i>Demografía de Audiencia</h3>
+              <DemographicsChart data={analytics.audience.demographics} loading={loading} />
+            </div>
+            <div className="analytics-section">
+              <h3><i className="bi bi-geo-alt me-2"></i>Ubicaciones Principales</h3>
+              <TopLocations
+                countries={analytics.audience.top_locations.countries}
+                cities={analytics.audience.top_locations.cities}
+                loading={loading}
+              />
+            </div>
+          </div>
+
+          <div className="analytics-section">
+            <h3><i className="bi bi-clock-history me-2"></i>Actividad de Seguidores</h3>
+            <ActivityHeatmap
+              onlineHours={analytics.audience.online_hours}
+              bestPostingTimes={analytics.audience.best_posting_times_raw}
+              loading={loading}
+            />
+          </div>
+        </>
+      )}
 
       {/* Análisis por Tipo de Contenido */}
       {contentTypeChartData.length > 0 && (

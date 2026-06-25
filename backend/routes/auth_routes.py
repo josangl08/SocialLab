@@ -52,3 +52,14 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
     Obtiene la información del usuario autenticado actualmente.
     """
     return current_user
+
+@router.post("/users/me/send-password-reset", status_code=200)
+async def send_password_reset(current_user: User = Depends(get_current_user)):
+    """
+    Envía un email de restablecimiento de contraseña al usuario autenticado.
+    """
+    try:
+        supabase.auth.reset_password_for_email(current_user.email)
+        return {"message": "Email de restablecimiento enviado"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al enviar email: {e}")

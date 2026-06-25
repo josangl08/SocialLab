@@ -8,10 +8,6 @@ import './Dashboard.css';
 import { KPICard } from '../analytics/cards/KPICard';
 import { AgentStatusCard } from '../../features/agent/AgentStatusCard';
 import { CalendarProposalView } from '../../features/agent/CalendarProposalView';
-import { FollowerGrowthChart } from '../analytics/charts/FollowerGrowthChart';
-import { DemographicsChart } from '../analytics/charts/DemographicsChart';
-import { ActivityHeatmap } from '../analytics/charts/ActivityHeatmap';
-import { TopLocations } from '../analytics/charts/TopLocations';
 
 interface DashboardStats {
   follower_count: number;
@@ -35,65 +31,12 @@ interface TopPost {
   impressions: number;
 }
 
-interface EngagementTrendItem {
-  date: string;
-  likes: number;
-  comments: number;
-  engagement: number;
-  posts_count: number;
-}
-
-interface BestPostingTime {
-  hour: string;
-  score: number;
-  online_followers: number;
-  avg_engagement: number;
-  posts_count: number;
-}
-
-interface FollowerGrowthData {
-  date: string;
-  follower_count: number;
-  change: number;
-}
-
-interface LocationData {
-  country_code?: string;
-  city_name?: string;
-  audience_count: number;
-  percentage: number;
-}
-
-interface AudienceData {
-  follower_growth: FollowerGrowthData[];
-  demographics: {
-    audience_gender_age: Record<string, number>;
-  };
-  online_hours: Record<string, number>;
-  top_locations: {
-    countries: LocationData[];
-    cities: LocationData[];
-  };
-}
-
 interface ScheduledPost {
   id: number;
   content: string;
   post_type: string;
   scheduled_at: string | null;
   status: string;
-}
-
-interface AnalyticsData {
-  success: boolean;
-  data: {
-    overview: DashboardStats;
-    audience: AudienceData;
-    top_posts: TopPost[];
-    engagement_trend: EngagementTrendItem[];
-    best_posting_times: BestPostingTime[];
-  };
-  last_sync_at: string | null;
 }
 
 const Dashboard: React.FC = () => {
@@ -119,21 +62,11 @@ const Dashboard: React.FC = () => {
     total_posts: 0
   });
   const [topPosts, setTopPosts] = useState<TopPost[]>([]);
-  const [engagementTrend, setEngagementTrend] = useState<EngagementTrendItem[]>([]);
-  const [bestTimes, setBestTimes] = useState<BestPostingTime[]>([]);
   const [scheduledPosts, setScheduledPosts] = useState<ScheduledPost[]>([]);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [instagramAccountId, setInstagramAccountId] = useState<number | null>(null);
   const [accounts, setAccounts] = useState<Array<{ id: number; username: string | null; account_name: string | null; profile_picture_url: string | null; connected: boolean; expired: boolean }>>([]);
   const hasInitialFetched = useRef(false);
-
-  // New audience analytics state
-  const [audienceData, setAudienceData] = useState<AudienceData>({
-    follower_growth: [],
-    demographics: { audience_gender_age: {} },
-    online_hours: {},
-    top_locations: { countries: [], cities: [] }
-  });
 
   const checkInstagramStatus = useCallback(async (): Promise<boolean> => {
     const token = localStorage.getItem('authToken');
@@ -201,19 +134,7 @@ const Dashboard: React.FC = () => {
               total_posts: data.data.overview.total_posts || 0
             });
             setTopPosts(data.data.top_posts || []);
-            setEngagementTrend(data.data.engagement_trend || []);
-            setBestTimes(data.data.best_posting_times || []);
             setLastSyncAt(data.last_sync_at);
-
-            // Set audience data
-            if (data.data.audience) {
-              setAudienceData({
-                follower_growth: data.data.audience.follower_growth || [],
-                demographics: data.data.audience.demographics || { audience_gender_age: {} },
-                online_hours: data.data.audience.online_hours || {},
-                top_locations: data.data.audience.top_locations || { countries: [], cities: [] }
-              });
-            }
           }
         } else {
           console.error('Error cargando analytics de Instagram:', instagramResponse.status);
@@ -470,64 +391,7 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
           )}
-          {/* Section 1: Follower Growth */}
-          <div className="analytics-section">
-            <div className="section-header">
-              <h3><i className="bi bi-graph-up-arrow me-2"></i>Crecimiento de Seguidores</h3>
-            </div>
-            <div className="section-content">
-              <FollowerGrowthChart
-                data={audienceData.follower_growth}
-                loading={loading}
-              />
-            </div>
-          </div>
-
-          {/* Section 2: Audience Analytics - Two Columns */}
-          <div className="analytics-section-row">
-            {/* Demographics */}
-            <div className="analytics-section">
-              <div className="section-header">
-                <h3><i className="bi bi-people me-2"></i>Demografía de Audiencia</h3>
-              </div>
-              <div className="section-content">
-                <DemographicsChart
-                  data={audienceData.demographics}
-                  loading={loading}
-                />
-              </div>
-            </div>
-
-            {/* Top Locations */}
-            <div className="analytics-section">
-              <div className="section-header">
-                <h3><i className="bi bi-geo-alt me-2"></i>Ubicaciones Principales</h3>
-              </div>
-              <div className="section-content">
-                <TopLocations
-                  countries={audienceData.top_locations.countries}
-                  cities={audienceData.top_locations.cities}
-                  loading={loading}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Section 3: Activity Heatmap */}
-          <div className="analytics-section">
-            <div className="section-header">
-              <h3><i className="bi bi-clock-history me-2"></i>Actividad de Seguidores</h3>
-            </div>
-            <div className="section-content">
-              <ActivityHeatmap
-                onlineHours={audienceData.online_hours}
-                bestPostingTimes={bestTimes}
-                loading={loading}
-              />
-            </div>
-          </div>
-
-          {/* Section 4: Top Posts & Scheduled - Two Columns */}
+          {/* Top Posts & Scheduled - Two Columns */}
           <div className="analytics-section-row">
             {/* Top Post */}
             <div className="analytics-section">

@@ -15,18 +15,11 @@ const Sidebar: React.FC = () => {
   };
 
   const menuItems = [
-    // Items originales
     { path: '/dashboard', label: 'Dashboard', icon: 'bi-speedometer2' },
-    { path: '/create-post', label: 'Crear Publicación', icon: 'bi-plus-circle' },
-    { path: '/profile', label: 'Perfil de Usuario', icon: 'bi-person-circle' },
-
-    // Nuevos items
-    { path: '/posts', label: 'Publicaciones', icon: 'bi-file-text' },
-    { path: '/generate', label: 'Generar Contenido', icon: 'bi-stars' },
-    { path: '/calendar', label: 'Calendario', icon: 'bi-calendar-event' },
+    { path: '/planner', label: 'Planner', icon: 'bi-calendar-event' },
+    { path: '/generate', label: 'AI Generator', icon: 'bi-stars' },
     { path: '/analytics', label: 'Analytics', icon: 'bi-bar-chart-line' },
-    { path: '/strategy', label: 'Estrategia CM', icon: 'bi-bullseye' },
-    { path: '/accounts', label: 'Cuentas', icon: 'bi-instagram' },
+    { path: '/settings', label: 'Settings', icon: 'bi-gear' },
   ];
 
   return (

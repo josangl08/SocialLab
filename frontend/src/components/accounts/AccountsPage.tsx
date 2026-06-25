@@ -140,17 +140,17 @@ const AccountsPage: React.FC = () => {
   return (
     <div className="container-fluid p-4">
       <div className="d-flex justify-content-between align-items-center mb-4">
-        <h2 className="mb-0"><i className="bi bi-instagram me-2"></i>Cuentas de Instagram</h2>
+        <h2 className="mb-0" style={{ color: '#e8e9ed' }}><i className="bi bi-instagram me-2 text-primary"></i>Cuentas de Instagram</h2>
         <button className="btn btn-primary" onClick={handleReconnect}>
           <i className="bi bi-plus-circle me-2"></i>Conectar cuenta
         </button>
       </div>
 
       {accounts.length === 0 ? (
-        <div className="alert alert-info">
-          <i className="bi bi-info-circle me-2"></i>
+        <div className="alert" style={{ background: 'rgba(99,102,241,0.12)', borderColor: '#667eea', color: '#e8e9ed' }}>
+          <i className="bi bi-info-circle me-2" style={{ color: '#818cf8' }}></i>
           No tienes cuentas de Instagram conectadas.{' '}
-          <button className="btn btn-link p-0 alert-link" onClick={handleReconnect}>Conectar ahora</button>
+          <button className="btn btn-link p-0" style={{ color: '#818cf8' }} onClick={handleReconnect}>Conectar ahora</button>
         </div>
       ) : (
         <div className="row g-3">
@@ -158,7 +158,7 @@ const AccountsPage: React.FC = () => {
             const status = getTokenStatus(account.expires_at);
             return (
               <div key={account.id} className="col-12 col-md-6 col-lg-4">
-                <div className="card h-100 shadow-sm">
+                <div className="card h-100" style={{ background: '#2a3038', borderColor: '#3d444d', color: '#e8e9ed' }}>
                   <div className="card-body">
                     <div className="d-flex align-items-center mb-3">
                       {account.profile_picture_url ? (
@@ -174,15 +174,15 @@ const AccountsPage: React.FC = () => {
                         </div>
                       )}
                       <div>
-                        <h6 className="mb-0 fw-bold">@{account.username || account.account_name || `Cuenta ${account.id}`}</h6>
-                        {account.account_name && <small className="text-muted">{account.account_name}</small>}
+                        <h6 className="mb-0 fw-bold" style={{ color: '#e8e9ed' }}>@{account.username || account.account_name || `Cuenta ${account.id}`}</h6>
+                        {account.account_name && <small style={{ color: '#9ca3af' }}>{account.account_name}</small>}
                       </div>
                     </div>
 
                     <div className="d-flex justify-content-between align-items-center mb-3">
                       {statusBadge(status)}
                       {account.followers_count != null && (
-                        <small className="text-muted">
+                        <small style={{ color: '#9ca3af' }}>
                           <i className="bi bi-people me-1"></i>
                           {account.followers_count.toLocaleString()} seguidores
                         </small>
@@ -190,7 +190,7 @@ const AccountsPage: React.FC = () => {
                     </div>
 
                     {account.expires_at && (
-                      <small className="text-muted d-block mb-3">
+                      <small className="d-block mb-3" style={{ color: '#9ca3af' }}>
                         <i className="bi bi-clock me-1"></i>
                         Expira: {new Date(account.expires_at).toLocaleDateString('es-ES')}
                       </small>
@@ -214,7 +214,7 @@ const AccountsPage: React.FC = () => {
                       </button>
                     </div>
 
-                    <div className="mt-3 pt-3 border-top">
+                    <div className="mt-3 pt-3" style={{ borderTop: '1px solid #3d444d' }}>
                       {account.telegram_chat_id ? (
                         <div className="d-flex align-items-center gap-2">
                           <span className="badge bg-success">Linked ✅</span>
@@ -243,15 +243,15 @@ const AccountsPage: React.FC = () => {
                           </button>
                           {linkTokens[account.id] && (
                             <div className="mt-2">
-                              <small className="text-muted d-block">Send to bot:</small>
-                              <code className="d-block">/start {linkTokens[account.id]}</code>
+                              <small className="d-block" style={{ color: '#9ca3af' }}>Send to bot:</small>
+                              <code className="d-block" style={{ background: '#1a1d23', color: '#a5b4fc', padding: '4px 8px', borderRadius: 6, fontSize: '0.82rem' }}>/start {linkTokens[account.id]}</code>
                             </div>
                           )}
                         </>
                       )}
                     </div>
 
-                    <div className="mt-3 pt-3 border-top">
+                    <div className="mt-3 pt-3" style={{ borderTop: '1px solid #3d444d' }}>
                       <button
                         className="btn btn-sm btn-outline-info w-100"
                         onClick={() => setDrawerAccount(account)}
