@@ -26,8 +26,9 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 sys.stdout.flush()
 
 # Importar cliente de Supabase
-from database.supabase_client import get_supabase_client
+from database.supabase_client import get_supabase_client, get_supabase_admin_client
 supabase = get_supabase_client()
+admin_supabase = get_supabase_admin_client()
 
 # --- Inicialización de la Aplicación FastAPI ---
 app = FastAPI(
@@ -47,7 +48,7 @@ def sync_all_accounts_metrics():
     try:
         from services.instagram_insights import InstagramInsightsService
 
-        all_accounts = supabase.table('instagram_accounts')\
+        all_accounts = admin_supabase.table('instagram_accounts')\
             .select('id, user_id, long_lived_access_token, instagram_business_account_id, is_active')\
             .execute()
 
@@ -73,12 +74,12 @@ def sync_all_accounts_metrics():
                 )
 
                 instagram_service.sync_posts_to_database(
-                    db_client=supabase,
+                    db_client=admin_supabase,
                     user_id=account['user_id'],
                     instagram_account_id_db=account['id']
                 )
 
-                supabase.table('instagram_accounts')\
+                admin_supabase.table('instagram_accounts')\
                     .update({'last_sync_at': datetime.utcnow().isoformat()})\
                     .eq('id', account['id'])\
                     .execute()
@@ -104,8 +105,7 @@ def run_agent_for_all_accounts():
         from database.supabase_client import get_supabase_client
         from services.agent_service import run_agent
         
-        supabase_client = get_supabase_client()
-        all_accounts = supabase_client.table('instagram_accounts')\
+        all_accounts = admin_supabase.table('instagram_accounts')\
             .select('id, is_active')\
             .execute()
             

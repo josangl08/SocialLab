@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status
 from pydantic import BaseModel
-from database.supabase_client import get_supabase_client
+from database.supabase_client import get_supabase_client, get_supabase_admin_client
 from models.schemas import User, AgentConfig, ContentProposal
 from auth.dependencies import get_current_user
 import uuid
@@ -12,6 +12,7 @@ import google.generativeai as genai
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["Agent"])
 supabase = get_supabase_client()
+admin_supabase = get_supabase_admin_client()
 
 class TriggerRequest(BaseModel):
     account_id: int
@@ -27,7 +28,7 @@ async def trigger_agent(
     """
     try:
         # Verify account exists and belongs to current_user
-        acc_res = supabase.table('instagram_accounts').select('user_id').eq('id', request.account_id).execute()
+        acc_res = admin_supabase.table('instagram_accounts').select('user_id').eq('id', request.account_id).execute()
         if not acc_res.data:
             raise HTTPException(status_code=404, detail="Cuenta de Instagram no encontrada")
         if str(acc_res.data[0]['user_id']) != str(current_user.id):
@@ -55,7 +56,7 @@ async def list_proposals(
     """
     try:
         # Verify account exists and belongs to current_user
-        acc_res = supabase.table('instagram_accounts').select('user_id').eq('id', account_id).execute()
+        acc_res = admin_supabase.table('instagram_accounts').select('user_id').eq('id', account_id).execute()
         if not acc_res.data:
             raise HTTPException(status_code=404, detail="Cuenta de Instagram no encontrada")
         if str(acc_res.data[0]['user_id']) != str(current_user.id):
@@ -96,7 +97,7 @@ async def get_agent_config(
     current_user: User = Depends(get_current_user)
 ):
     try:
-        acc_res = supabase.table('instagram_accounts').select(STRATEGY_FIELDS).eq('id', account_id).execute()
+        acc_res = admin_supabase.table('instagram_accounts').select(STRATEGY_FIELDS).eq('id', account_id).execute()
         if not acc_res.data:
             raise HTTPException(status_code=404, detail="Cuenta no encontrada")
         if str(acc_res.table if hasattr(acc_res, 'table') else ''):
@@ -137,13 +138,13 @@ async def update_agent_config(
     """
     try:
         # Verify account exists and belongs to current_user
-        acc_res = supabase.table('instagram_accounts').select('user_id').eq('id', account_id).execute()
+        acc_res = admin_supabase.table('instagram_accounts').select('user_id').eq('id', account_id).execute()
         if not acc_res.data:
             raise HTTPException(status_code=404, detail="Cuenta de Instagram no encontrada")
         if str(acc_res.data[0]['user_id']) != str(current_user.id):
             raise HTTPException(status_code=403, detail="No tienes acceso a esta cuenta")
 
-        supabase.table('instagram_accounts').update({
+        admin_supabase.table('instagram_accounts').update({
             'account_type': config.account_type,
             'sector': config.sector,
             'purpose': config.purpose,

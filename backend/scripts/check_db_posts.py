@@ -60,52 +60,47 @@ posts_7d = supabase.table('posts')\
 
 print(f"   - Count: {posts_7d.count}")
 
-# 5. Verificar posts con performance data
-posts_with_perf = supabase.table('posts')\
+# 5. Diagnóstico de los 5 posts más recientes (los que muestran "Sin datos aún")
+recent_posts_check = supabase.table('posts')\
     .select(
-        'id, content, publication_date, '
-        'post_performance(likes, comments, reach, impressions)',
-        count='exact'
+        'id, content, publication_date, instagram_post_id, '
+        'post_performance(likes, comments, reach, impressions)'
     )\
     .eq('instagram_account_id', instagram_account_id)\
     .eq('status', 'published')\
+    .order('publication_date', desc=True)\
     .limit(5)\
     .execute()
 
-print(f"\n📈 Muestra de posts (primeros 5):")
-if posts_with_perf.data:
-    for post in posts_with_perf.data:
-        perf = post.get('post_performance') or {}
+print(f"\n📈 5 posts más recientes (diagnóstico):")
+if recent_posts_check.data:
+    for post in recent_posts_check.data:
+        raw_perf = post.get('post_performance')
+        perf = raw_perf if isinstance(raw_perf, dict) else {}
         pub_date = post.get('publication_date', 'N/A')[:10] if post.get('publication_date') else 'N/A'
-        print(f"\n   Post ID: {post['id']}")
-        print(f"   - Date: {pub_date}")
-        print(f"   - Content: {post.get('content', '')[:50]}...")
-        print(f"   - Likes: {perf.get('likes', 0)}, Comments: {perf.get('comments', 0)}")
+        ig_id = post.get('instagram_post_id') or '❌ NULL'
+        has_perf = '✅' if raw_perf else '❌ Sin datos'
+        print(f"\n   Post DB ID: {post['id']}")
+        print(f"   - Fecha:          {pub_date}")
+        print(f"   - instagram_post_id: {ig_id}")
+        print(f"   - post_performance:  {has_perf}")
+        if raw_perf:
+            print(f"   - Likes: {perf.get('likes', 0)}, Comments: {perf.get('comments', 0)}")
+        print(f"   - Contenido: {post.get('content', '')[:60]}...")
 else:
-    print("   ⚠️  No hay posts con datos de performance")
+    print("   ⚠️  No hay posts publicados")
 
-# 6. Verificar rango de fechas de publicación
-date_range = supabase.table('posts')\
-    .select('publication_date')\
+# 6. Posts con instagram_post_id = NULL (publicados via stub, no en Instagram real)
+null_id_posts = supabase.table('posts')\
+    .select('id, publication_date, content')\
     .eq('instagram_account_id', instagram_account_id)\
     .eq('status', 'published')\
-    .order('publication_date', desc=False)\
-    .limit(1)\
+    .is_('instagram_post_id', 'null')\
     .execute()
 
-if date_range.data and len(date_range.data) > 0:
-    oldest = date_range.data[0]['publication_date'][:10] if date_range.data[0].get('publication_date') else 'N/A'
-    print(f"\n%s" % "📆 Rango de fechas:")
-    print(f"   - Post más antiguo: {oldest}")
+print(f"\n⚠️  Posts con instagram_post_id=NULL (no están en Instagram real): {len(null_id_posts.data or [])}")
+for p in (null_id_posts.data or [])[:3]:
+    pub_date = (p.get('publication_date') or 'N/A')[:10]
+    print(f"   - DB ID {p['id']} | {pub_date} | {p.get('content', '')[:50]}...")
 
-    newest_result = supabase.table('posts')\
-        .select('publication_date')\
-        .eq('instagram_account_id', instagram_account_id)\
-        .eq('status', 'published')\
-        .order('publication_date', desc=True)\
-        .limit(1)\
-        .execute()
-
-    if newest_result.data and len(newest_result.data) > 0:
-        newest = newest_result.data[0]['publication_date'][:10] if newest_result.data[0].get('publication_date') else 'N/A'
-        print(f"   - Post más reciente: {newest}")
+print(f"\n✅ Diagnóstico completado.")

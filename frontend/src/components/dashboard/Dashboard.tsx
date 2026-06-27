@@ -4,7 +4,6 @@ import { useAuth } from '../../context/AuthContext';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 import './Dashboard.css';
 
-// Import new analytics components
 import { KPICard } from '../analytics/cards/KPICard';
 import { AgentStatusCard } from '../../features/agent/AgentStatusCard';
 import { CalendarProposalView } from '../../features/agent/CalendarProposalView';
@@ -29,6 +28,7 @@ interface TopPost {
   comments: number;
   engagement: number;
   impressions: number;
+  has_stats?: boolean;
 }
 
 interface ScheduledPost {
@@ -38,6 +38,25 @@ interface ScheduledPost {
   scheduled_at: string | null;
   status: string;
 }
+
+interface EngagementTrendItem {
+  date: string;
+  likes: number;
+  comments: number;
+  engagement: number;
+}
+
+interface BestTimeSlot {
+  hour: string;
+  avg_engagement: number;
+  posts_count: number;
+}
+
+interface BestTimesByWeekday {
+  [weekday: string]: BestTimeSlot[];
+}
+
+const WEEKDAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
 const Dashboard: React.FC = () => {
   const {
@@ -62,15 +81,30 @@ const Dashboard: React.FC = () => {
     total_posts: 0
   });
   const [topPosts, setTopPosts] = useState<TopPost[]>([]);
+  const [recentPostsData, setRecentPostsData] = useState<TopPost[]>([]);
   const [scheduledPosts, setScheduledPosts] = useState<ScheduledPost[]>([]);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [instagramAccountId, setInstagramAccountId] = useState<number | null>(null);
-  const [accounts, setAccounts] = useState<Array<{ id: number; username: string | null; account_name: string | null; profile_picture_url: string | null; connected: boolean; expired: boolean }>>([]);
+  const [accounts, setAccounts] = useState<Array<{
+    id: number;
+    username: string | null;
+    account_name: string | null;
+    profile_picture_url: string | null;
+    connected: boolean;
+    expired: boolean;
+  }>>([]);
+  const [engagementTrend, setEngagementTrend] = useState<EngagementTrendItem[]>([]);
+  const [bestTimes, setBestTimes] = useState<BestTimeSlot[]>([]);
+  const [bestTimesByWeekday, setBestTimesByWeekday] = useState<BestTimesByWeekday>({});
+  const [selectedWeekday, setSelectedWeekday] = useState<number>(() => {
+    const jsDay = new Date().getDay();
+    return jsDay === 0 ? 6 : jsDay - 1; // JS Sunday(0) → Python 6, JS Mon(1) → Python 0
+  });
   const hasInitialFetched = useRef(false);
 
-  const checkInstagramStatus = useCallback(async (): Promise<boolean> => {
+  const checkInstagramStatus = useCallback(async (): Promise<{ connected: boolean; accountId: number | null }> => {
     const token = localStorage.getItem('authToken');
-    if (!token) return false;
+    if (!token) return { connected: false, accountId: null };
 
     try {
       const response = await fetch('http://localhost:8000/instagram/status', {
@@ -85,8 +119,9 @@ const Dashboard: React.FC = () => {
         const isConnected = connectedAccounts.length > 0;
         setInstagramConnected(isConnected);
 
-        if (isConnected && !instagramAccountId) {
-          setInstagramAccountId(connectedAccounts[0].id);
+        const resolvedAccountId = isConnected ? connectedAccounts[0].id : null;
+        if (resolvedAccountId !== null) {
+          setInstagramAccountId(resolvedAccountId);
         }
 
         const expiredAccounts = accountList.filter((a: any) => a.expired);
@@ -94,16 +129,16 @@ const Dashboard: React.FC = () => {
           alert('Uno o más tokens de Instagram han expirado. Por favor vuelve a conectar las cuentas afectadas.');
         }
 
-        return isConnected;
+        return { connected: isConnected, accountId: resolvedAccountId };
       }
-      return false;
+      return { connected: false, accountId: null };
     } catch (error) {
       console.error('Error al verificar estado de Instagram:', error);
-      return false;
+      return { connected: false, accountId: null };
     }
-  }, [setInstagramConnected, instagramAccountId]);
+  }, [setInstagramConnected]);
 
-  const fetchDashboardStats = useCallback(async (connected: boolean = false) => {
+  const fetchDashboardStats = useCallback(async (connected: boolean = false, resolvedAccountId?: number | null) => {
     const token = localStorage.getItem('authToken');
     if (!token) {
       setLoading(false);
@@ -113,9 +148,9 @@ const Dashboard: React.FC = () => {
     try {
       setLoading(true);
 
-      // Fetch Instagram analytics overview (all time - from cache, fast!)
       if (connected) {
-        const accountParam = instagramAccountId ? `&instagram_account_id=${instagramAccountId}` : '';
+        const effectiveAccountId = resolvedAccountId !== undefined ? resolvedAccountId : instagramAccountId;
+        const accountParam = effectiveAccountId ? `&instagram_account_id=${effectiveAccountId}` : '';
         const instagramResponse = await fetch(`http://localhost:8000/api/analytics/overview?days=3650${accountParam}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -134,14 +169,17 @@ const Dashboard: React.FC = () => {
               total_posts: data.data.overview.total_posts || 0
             });
             setTopPosts(data.data.top_posts || []);
+            setRecentPostsData(data.data.recent_posts || []);
             setLastSyncAt(data.last_sync_at);
+            setEngagementTrend(data.data.engagement_trend || []);
+            setBestTimes(data.data.best_posting_times || []);
+            setBestTimesByWeekday(data.data.best_times_by_weekday || {});
           }
         } else {
           console.error('Error cargando analytics de Instagram:', instagramResponse.status);
         }
       }
 
-      // Fetch scheduled posts from local database
       const postsResponse = await fetch('http://localhost:8000/posts', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -160,7 +198,7 @@ const Dashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [instagramAccountId]);
+  }, [instagramAccountId]); // instagramAccountId usado como fallback cuando resolvedAccountId no se pasa
 
   const handleSync = useCallback(async () => {
     if (isSyncing || (lastSync && new Date().getTime() - lastSync.getTime() < 5 * 60 * 1000)) {
@@ -172,7 +210,6 @@ const Dashboard: React.FC = () => {
 
     setSyncing(true);
     try {
-      // 1. Sincronizar posts básicos + datos del perfil (followers, username, etc.)
       const syncParam = instagramAccountId ? `?instagram_account_id=${instagramAccountId}` : '';
       const postsResponse = await fetch(`http://localhost:8000/instagram/sync${syncParam}`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -184,7 +221,6 @@ const Dashboard: React.FC = () => {
         return;
       }
 
-      // 2. Sincronizar métricas de performance (likes, comments, reach, etc.)
       const metricsResponse = await fetch(`http://localhost:8000/api/analytics/sync/${instagramAccountId}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
@@ -193,9 +229,8 @@ const Dashboard: React.FC = () => {
       if (metricsResponse.ok) {
         setLastSync(new Date());
         setSyncCompleted(0);
-        // Esperar un momento para que el background task procese los datos
         setTimeout(() => {
-          fetchDashboardStats(true); // Refresh stats after sync
+          fetchDashboardStats(true);
         }, 2000);
       } else {
         console.error('Error al sincronizar métricas de Instagram');
@@ -214,8 +249,8 @@ const Dashboard: React.FC = () => {
     hasInitialFetched.current = true;
 
     const initDashboard = async () => {
-      const connected = await checkInstagramStatus(); // Obtener el valor
-      await fetchDashboardStats(connected);  // Pasarlo como parámetro
+      const { connected, accountId } = await checkInstagramStatus();
+      await fetchDashboardStats(connected, accountId);
     };
 
     initDashboard();
@@ -248,7 +283,8 @@ const Dashboard: React.FC = () => {
     return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   };
 
-  const formatNumber = (num: number) => {
+  const formatNumber = (num: number | null | undefined): string => {
+    if (num == null) return '0';
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
     if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
     return num.toString();
@@ -256,7 +292,6 @@ const Dashboard: React.FC = () => {
 
   const formatTimeAgo = (dateStr: string | null): string => {
     if (!dateStr) return 'Nunca';
-
     const now = new Date();
     const syncDate = new Date(dateStr);
     const diffMs = now.getTime() - syncDate.getTime();
@@ -273,188 +308,355 @@ const Dashboard: React.FC = () => {
     return `Hace ${diffDays} días`;
   };
 
+  const getPostTypeIcon = (postType: string): string => {
+    if (postType === 'reel') return 'bi-camera-video';
+    if (postType === 'carousel') return 'bi-collection';
+    return 'bi-image';
+  };
+
+  const sparkline = engagementTrend.slice(-7).map(d => d.engagement);
+  const currentAccount =
+    accounts.find(a => a.id === instagramAccountId) ??
+    accounts.find(a => a.connected);
+  const totalInteractions = Math.round(stats.avg_interactions_per_post * stats.total_posts);
+
   return (
     <div className="dashboard-container">
-      {/* Header with Stats */}
-      <div className="dashboard-header">
-        <div className="header-top">
-          <h1>Dashboard - SocialLab</h1>
-          <div className="header-actions">
-            {!isInstagramConnected ? (
-              <button className="btn-connect-instagram" onClick={handleConnectInstagram}>
-                <i className="bi bi-instagram me-2"></i>
-                Conectar Instagram
-              </button>
-            ) : (
-              <div className="sync-section">
-                {accounts.length > 1 && (
-                  <select
-                    className="form-select form-select-sm"
-                    value={instagramAccountId ?? ''}
-                    onChange={(e) => setInstagramAccountId(Number(e.target.value))}
-                    style={{ width: 'auto', marginRight: '8px' }}
-                  >
-                    {accounts.filter(a => a.connected).map(account => (
-                      <option key={account.id} value={account.id}>
-                        @{account.username || account.account_name || `Cuenta ${account.id}`}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {lastSyncAt && (
-                  <small className="dashboard-small-text" style={{ marginRight: '12px' }}>
-                    <i className="bi bi-clock-history"></i> {formatTimeAgo(lastSyncAt)}
-                  </small>
-                )}
-                <button
-                  className="btn-sync"
-                  onClick={handleSync}
-                  disabled={isSyncing}
-                >
-                  <i className={`bi ${isSyncing ? 'bi-arrow-repeat' : 'bi-arrow-clockwise'} me-2`}></i>
-                  {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
 
-        {/* KPI Cards Grid */}
-        <div className="kpi-grid">
+      {/* ─── Zone 1: Profile Banner ─────────────────── */}
+      <div className="sl-banner">
+        {isInstagramConnected && currentAccount ? (
+          <div className="sl-banner-inner">
+            <div className="sl-banner-left">
+              <div className="sl-avatar-ring">
+                <div className="sl-avatar-inner">
+                  {currentAccount.profile_picture_url ? (
+                    <img
+                      src={currentAccount.profile_picture_url}
+                      alt="avatar"
+                      className="sl-avatar-img"
+                    />
+                  ) : (
+                    <div className="sl-avatar-initials">
+                      {(currentAccount.username ?? currentAccount.account_name ?? 'U')[0].toUpperCase()}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="sl-banner-info">
+                <div className="sl-banner-username">
+                  @{currentAccount.username ?? currentAccount.account_name ?? `Cuenta ${currentAccount.id}`}
+                </div>
+                {currentAccount.account_name && currentAccount.username && (
+                  <div className="sl-banner-name">{currentAccount.account_name}</div>
+                )}
+                <div className="sl-connected-badge">
+                  <span className="sl-connected-dot"></span>
+                  Conectado
+                </div>
+              </div>
+            </div>
+
+            <div className="sl-banner-right">
+              {accounts.length > 1 && (
+                <select
+                  className="sl-account-select"
+                  value={instagramAccountId ?? ''}
+                  onChange={(e) => setInstagramAccountId(Number(e.target.value))}
+                >
+                  {accounts.filter(a => a.connected).map(account => (
+                    <option key={account.id} value={account.id}>
+                      @{account.username ?? account.account_name ?? `Cuenta ${account.id}`}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {lastSyncAt && (
+                <span className="sl-sync-time">
+                  <i className="bi bi-clock-history"></i>
+                  {formatTimeAgo(lastSyncAt)}
+                </span>
+              )}
+              <button
+                className={`sl-sync-btn${isSyncing ? ' syncing' : ''}`}
+                onClick={handleSync}
+                disabled={isSyncing}
+              >
+                <i className="bi bi-arrow-clockwise"></i>
+                {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="sl-connect-cta">
+            <button className="sl-connect-btn" onClick={handleConnectInstagram}>
+              <i className="bi bi-instagram me-2"></i>
+              Conectar Instagram
+            </button>
+            <p className="sl-connect-hint">Conecta tu cuenta para ver analytics y programar contenido</p>
+          </div>
+        )}
+      </div>
+
+      {/* ─── Zone 2: KPI Grid ───────────────────────── */}
+      <div className="sl-kpi-section">
+        <div className="sl-kpi-grid">
           <KPICard
             title="Seguidores"
             value={formatNumber(stats.follower_count)}
-            icon="bi-people"
+            icon="people"
             color="primary"
             loading={loading}
-          />
-          <KPICard
-            title="Vistas Perfil"
-            value={formatNumber(stats.profile_views)}
-            icon="bi-eye"
-            color="info"
-            loading={loading}
+            sparklineData={sparkline}
+            sparklineColor="#a5b4fc"
           />
           <KPICard
             title="Alcance"
             value={formatNumber(stats.reach)}
-            icon="bi-broadcast"
+            icon="broadcast"
             color="purple"
             loading={loading}
+            sparklineData={sparkline}
+            sparklineColor="#c4b5fd"
           />
           <KPICard
             title="Engagement"
             value={`${stats.engagement_rate.toFixed(1)}%`}
-            icon="bi-heart"
+            icon="heart"
             color="danger"
             loading={loading}
+            sparklineData={sparkline}
+            sparklineColor="#fca5a5"
           />
           <KPICard
-            title="Avg. Interacciones"
-            value={formatNumber(stats.avg_interactions_per_post)}
-            icon="bi-chat-dots"
+            title="Interacciones"
+            value={formatNumber(totalInteractions)}
+            icon="chat-dots"
             color="success"
             loading={loading}
-          />
-          <KPICard
-            title="Total Posts"
-            value={stats.total_posts}
-            icon="bi-grid-3x3"
-            color="warning"
-            loading={loading}
+            sparklineData={sparkline}
+            sparklineColor="#6ee7b7"
           />
         </div>
       </div>
 
-      {/* Main Dashboard Content */}
-      {!isInstagramConnected ? (
-        <div className="dashboard-content">
-          <div className="alert alert-info">
-            <i className="bi bi-info-circle me-2"></i>
-            Conecta tu cuenta de Instagram para ver insights y análisis detallados
+      {/* ─── Zone 3: Two-column content ─────────────── */}
+      {isInstagramConnected && (
+        loading ? (
+          <div className="sl-loading">
+            <div className="sl-spinner"></div>
+            <p>Cargando datos de Instagram...</p>
           </div>
-        </div>
-      ) : loading ? (
-        <div className="dashboard-loading">
-          <div className="spinner"></div>
-          <p>Cargando datos de Instagram...</p>
-        </div>
-      ) : (
-        <div className="dashboard-content">
-          {instagramAccountId && (
-            <div className="row mb-4">
-              <div className="col-12 col-md-6 col-lg-4">
-                <AgentStatusCard accountId={instagramAccountId} />
-              </div>
-              <div className="col-12 col-md-6 col-lg-8">
-                <CalendarProposalView accountId={instagramAccountId} />
-              </div>
-            </div>
-          )}
-          {/* Top Posts & Scheduled - Two Columns */}
-          <div className="analytics-section-row">
-            {/* Top Post */}
-            <div className="analytics-section">
-              <div className="section-header">
-                <h3><i className="bi bi-trophy me-2"></i>Post Destacado</h3>
-              </div>
-              <div className="section-content">
-                {topPosts.length > 0 ? (
-                  <div className="top-post-card">
-                    {topPosts[0].media_url && (
-                      <img src={topPosts[0].media_url} alt="Top post" className="top-post-image" />
-                    )}
-                    <div className="top-post-content">
-                      <p className="top-post-caption">
-                        {topPosts[0].caption.substring(0, 120)}{topPosts[0].caption.length > 120 ? '...' : ''}
-                      </p>
-                      <div className="top-post-metrics">
-                        <span><i className="bi bi-heart-fill"></i> {formatNumber(topPosts[0].likes)}</span>
-                        <span><i className="bi bi-chat-fill"></i> {formatNumber(topPosts[0].comments)}</span>
-                        <span><i className="bi bi-eye-fill"></i> {formatNumber(topPosts[0].impressions)}</span>
+        ) : (
+          <div className="sl-content">
+            <div className="row g-4">
+
+              {/* ── Left Column: AI & Planning ───────── */}
+              <div className="col-12 col-lg-6">
+                {instagramAccountId !== null && (
+                  <>
+                    <div className="mb-4">
+                      <AgentStatusCard accountId={instagramAccountId} />
+                    </div>
+                    <div className="mb-4">
+                      <CalendarProposalView accountId={instagramAccountId} />
+                    </div>
+                  </>
+                )}
+
+                <div className="sl-panel">
+                  <div className="sl-panel-header">
+                    <i className="bi bi-calendar-event"></i>
+                    Próximas Publicaciones
+                  </div>
+                  <div className="sl-panel-body">
+                    {scheduledPosts.length > 0 ? (
+                      <div className="sl-timeline">
+                        {scheduledPosts.map((post) => (
+                          <div key={post.id} className="sl-timeline-item">
+                            <div className="sl-timeline-dot"></div>
+                            <div className="sl-timeline-icon">
+                              <i className={`bi ${getPostTypeIcon(post.post_type)}`}></i>
+                            </div>
+                            <div className="sl-timeline-body">
+                              <p className="sl-timeline-text">
+                                {post.content.substring(0, 60)}{post.content.length > 60 ? '…' : ''}
+                              </p>
+                              <span className="sl-timeline-time">
+                                <i className="bi bi-clock"></i>
+                                {post.scheduled_at ? formatDate(post.scheduled_at) : 'Fecha no definida'}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <a href={topPosts[0].permalink} target="_blank" rel="noopener noreferrer" className="btn-view-post">
-                        Ver en Instagram <i className="bi bi-box-arrow-up-right"></i>
-                      </a>
+                    ) : (
+                      <p className="sl-empty">No hay publicaciones programadas</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Right Column: Results ─────────────── */}
+              <div className="col-12 col-lg-6">
+
+                {/* Mejores Horarios */}
+                <div className="sl-panel mb-4">
+                  <div className="sl-panel-header">
+                    <i className="bi bi-clock-history"></i>
+                    Mejores Horarios para Publicar
+                    <span className="sl-panel-header-sub">España (Madrid)</span>
+                  </div>
+                  <div className="sl-panel-body">
+                    {Object.keys(bestTimesByWeekday).length > 0 ? (
+                      <>
+                        {/* TODO(human): Implementa el selector de días de la semana aquí.
+                            Renderiza una fila de 7 botones usando WEEKDAYS (index 0=Lun..6=Dom).
+                            Cada botón llama a setSelectedWeekday(i).
+                            El botón activo es el que tiene i === selectedWeekday.
+                            Si bestTimesByWeekday[String(i)] es undefined, el día no tiene datos
+                            y puedes marcarlo visualmente (ej. opacidad reducida).
+                            Usa las clases CSS: sl-day-tabs, sl-day-btn, active, no-data */}
+                        <div className="sl-day-tabs mb-3">
+                        </div>
+                        {(bestTimesByWeekday[String(selectedWeekday)] ?? []).length > 0 ? (
+                          (bestTimesByWeekday[String(selectedWeekday)] ?? []).map((slot, i) => {
+                            const daySlots = bestTimesByWeekday[String(selectedWeekday)] ?? [];
+                            const maxEngagement = daySlots[0]?.avg_engagement || 1;
+                            const pct = Math.min(100, (slot.avg_engagement / maxEngagement) * 100);
+                            return (
+                              <div key={slot.hour} className="sl-time-slot">
+                                <div className="sl-time-rank">#{i + 1}</div>
+                                <div className="sl-time-label">{slot.hour}</div>
+                                <div className="sl-time-bar-wrap">
+                                  <div className="sl-time-bar" style={{ '--sl-bar-w': `${pct}%` } as React.CSSProperties}></div>
+                                </div>
+                                <div className="sl-time-score">{Math.round(slot.avg_engagement)}</div>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <p className="sl-empty">Sin datos para este día — elige otro</p>
+                        )}
+                      </>
+                    ) : bestTimes.length > 0 ? (
+                      bestTimes.slice(0, 3).map((slot, i) => {
+                        const maxEngagement = bestTimes[0]?.avg_engagement || 1;
+                        const pct = Math.min(100, (slot.avg_engagement / maxEngagement) * 100);
+                        return (
+                          <div key={slot.hour} className="sl-time-slot">
+                            <div className="sl-time-rank">#{i + 1}</div>
+                            <div className="sl-time-label">{slot.hour}</div>
+                            <div className="sl-time-bar-wrap">
+                              <div className="sl-time-bar" style={{ '--sl-bar-w': `${pct}%` } as React.CSSProperties}></div>
+                            </div>
+                            <div className="sl-time-score">{Math.round(slot.avg_engagement)}</div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <p className="sl-empty">Datos insuficientes</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Carrusel Posts Recientes */}
+                {recentPostsData.length > 0 && (
+                  <div className="sl-panel mb-4">
+                    <div className="sl-panel-header">
+                      <i className="bi bi-grid-3x3"></i>
+                      Posts Recientes
+                    </div>
+                    <div className="sl-panel-body">
+                      <div className="sl-post-carousel">
+                        {recentPostsData.map(post => (
+                          <div key={post.id} className="sl-post-thumb">
+                            {post.media_url ? (
+                              <img
+                                src={post.media_url}
+                                alt="post reciente"
+                                className="sl-post-thumb-img"
+                              />
+                            ) : (
+                              <div className="sl-post-thumb-placeholder">
+                                <i className="bi bi-image"></i>
+                              </div>
+                            )}
+                            <div className="sl-post-thumb-overlay">
+                              {post.has_stats !== false ? (
+                                <>
+                                  <span>
+                                    <i className="bi bi-heart-fill"></i>
+                                    {formatNumber(post.likes)}
+                                  </span>
+                                  <span>
+                                    <i className="bi bi-chat-fill"></i>
+                                    {formatNumber(post.comments)}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="sl-no-stats">Sin datos aún</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                ) : (
-                  <p className="dashboard-empty-state">No hay posts disponibles</p>
                 )}
-              </div>
-            </div>
 
-            {/* Upcoming Posts */}
-            <div className="analytics-section">
-              <div className="section-header">
-                <h3><i className="bi bi-calendar-event me-2"></i>Próximas Publicaciones</h3>
-              </div>
-              <div className="section-content">
-                {scheduledPosts.length > 0 ? (
-                  <div className="upcoming-posts-list">
-                    {scheduledPosts.map((post) => (
-                      <div key={post.id} className="upcoming-post-item">
-                        <div className="upcoming-post-icon">
-                          <i className="bi bi-instagram"></i>
-                        </div>
-                        <div className="upcoming-post-info">
-                          <p className="upcoming-post-content">
-                            {post.content.substring(0, 60)}{post.content.length > 60 ? '...' : ''}
-                          </p>
-                          <span className="upcoming-post-date">
-                            <i className="bi bi-clock"></i> {post.scheduled_at ? formatDate(post.scheduled_at) : 'Fecha no definida'}
+                {/* Post Destacado */}
+                {topPosts.length > 0 && (
+                  <div className="sl-panel">
+                    <div className="sl-panel-header">
+                      <i className="bi bi-trophy"></i>
+                      Post Destacado
+                    </div>
+                    <div className="sl-panel-body">
+                      <div className="sl-featured-post">
+                        {topPosts[0].media_url && (
+                          <img
+                            src={topPosts[0].media_url}
+                            alt="post destacado"
+                            className="sl-featured-img"
+                          />
+                        )}
+                        <p className="sl-featured-caption">
+                          {topPosts[0].caption.substring(0, 120)}
+                          {topPosts[0].caption.length > 120 ? '…' : ''}
+                        </p>
+                        <div className="sl-featured-metrics">
+                          <span>
+                            <i className="bi bi-heart-fill"></i>
+                            {formatNumber(topPosts[0].likes)}
+                          </span>
+                          <span>
+                            <i className="bi bi-chat-fill"></i>
+                            {formatNumber(topPosts[0].comments)}
+                          </span>
+                          <span>
+                            <i className="bi bi-eye-fill"></i>
+                            {formatNumber(topPosts[0].impressions)}
                           </span>
                         </div>
+                        <a
+                          href={topPosts[0].permalink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="sl-featured-link"
+                        >
+                          Ver en Instagram
+                          <i className="bi bi-box-arrow-up-right"></i>
+                        </a>
                       </div>
-                    ))}
+                    </div>
                   </div>
-                ) : (
-                  <p className="dashboard-empty-state">No hay publicaciones programadas</p>
                 )}
+
               </div>
             </div>
           </div>
-        </div>
+        )
       )}
     </div>
   );

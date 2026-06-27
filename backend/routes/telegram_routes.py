@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
 
-from database.supabase_client import get_supabase_client
+from database.supabase_client import get_supabase_client, get_supabase_admin_client
 from models.schemas import User, TelegramUpdate, TelegramLinkTokenResponse
 from auth.dependencies import get_current_user
 from services.telegram_service import TelegramService
@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/telegram", tags=["Telegram Integration"])
 supabase = get_supabase_client()
+admin_supabase = get_supabase_admin_client()
 
 class LinkAccountRequest(BaseModel):
     link_token: str
@@ -52,7 +53,7 @@ async def generate_link_token(current_user: User = Depends(get_current_user)):
     """
     try:
         # Find user's active Instagram account
-        response = supabase.table('instagram_accounts')\
+        response = admin_supabase.table('instagram_accounts')\
             .select('id')\
             .eq('user_id', current_user.id)\
             .eq('is_active', True)\
@@ -62,7 +63,7 @@ async def generate_link_token(current_user: User = Depends(get_current_user)):
         account_data = response.data
         if not account_data:
             # Fallback to the first account if none is marked active
-            response = supabase.table('instagram_accounts')\
+            response = admin_supabase.table('instagram_accounts')\
                 .select('id')\
                 .eq('user_id', current_user.id)\
                 .limit(1)\
@@ -80,7 +81,7 @@ async def generate_link_token(current_user: User = Depends(get_current_user)):
         # Token is valid for 10 minutes
         expires_at = datetime.utcnow() + timedelta(minutes=10)
 
-        supabase.table('instagram_accounts')\
+        admin_supabase.table('instagram_accounts')\
             .update({
                 'telegram_link_token': token,
                 'telegram_link_token_expires_at': expires_at.isoformat()
@@ -107,7 +108,7 @@ async def link_account(payload: LinkAccountRequest):
     """
     try:
         # Find account by link token
-        response = supabase.table('instagram_accounts')\
+        response = admin_supabase.table('instagram_accounts')\
             .select('id, telegram_link_token_expires_at')\
             .eq('telegram_link_token', payload.link_token)\
             .execute()
@@ -134,7 +135,7 @@ async def link_account(payload: LinkAccountRequest):
             )
 
         # Update the account with the telegram chat ID and clear the token fields
-        supabase.table('instagram_accounts')\
+        admin_supabase.table('instagram_accounts')\
             .update({
                 'telegram_chat_id': payload.telegram_chat_id,
                 'telegram_link_token': None,

@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from auth.jwt_handler import get_current_user
 from database import supabase
+from database.supabase_client import get_supabase_admin_client
 from services.instagram_insights import InstagramInsightsService
 from services.analytics import AnalyticsService
 
@@ -31,7 +32,8 @@ def get_instagram_service(
     Dependency para obtener el servicio de Instagram configurado para el usuario actual
     """
     try:
-        query = supabase.table('instagram_accounts').select('*').eq('user_id', current_user['id'])
+        admin_db = get_supabase_admin_client()
+        query = admin_db.table('instagram_accounts').select('*').eq('user_id', current_user['id'])
         if instagram_account_id:
             query = query.eq('id', instagram_account_id)
         else:
@@ -230,8 +232,9 @@ async def sync_instagram_analytics(
     Inicia sincronización de posts y métricas de una cuenta Instagram específica.
     """
     try:
-        # Verificar que la cuenta existe, pertenece al usuario y obtener credenciales
-        result = supabase.table('instagram_accounts').select(
+        # Usar admin client: RLS bloquea instagram_accounts con cliente anon
+        admin_db = get_supabase_admin_client()
+        result = admin_db.table('instagram_accounts').select(
             'id, user_id, is_active, long_lived_access_token, instagram_business_account_id'
         ).eq('id', instagram_account_id).single().execute()
 
@@ -263,7 +266,7 @@ async def sync_instagram_analytics(
         background_tasks.add_task(
             full_sync_account,
             instagram_service=instagram_service,
-            db_client=supabase,
+            db_client=get_supabase_admin_client(),
             user_id=current_user['id'],
             instagram_account_id_db=instagram_account_id
         )
@@ -313,7 +316,8 @@ async def sync_instagram_data_deprecated(
     de rendimiento desde la API de Instagram a la base de datos local.
     """
     try:
-        result = supabase.table('instagram_accounts').select('id').eq('user_id', current_user['id']).eq('is_active', True).limit(1).execute()
+        admin_db = get_supabase_admin_client()
+        result = admin_db.table('instagram_accounts').select('id').eq('user_id', current_user['id']).eq('is_active', True).limit(1).execute()
         if not result.data:
             raise HTTPException(status_code=404, detail="No se encontró una cuenta de Instagram activa para este usuario.")
 
@@ -322,7 +326,7 @@ async def sync_instagram_data_deprecated(
         # Añadir la tarea de sincronización para que se ejecute en segundo plano
         background_tasks.add_task(
             instagram_service.sync_posts_to_database,
-            db_client=supabase, 
+            db_client=admin_db,
             user_id=current_user['id'], 
             instagram_account_id_db=instagram_account_id_db
         )
@@ -388,6 +392,7 @@ async def get_recent_posts(
 async def get_analytics_overview(
     days: int = 365,
     compare: bool = False,
+    instagram_account_id: Optional[int] = None,
     current_user: dict = Depends(get_current_user),
     instagram_service: InstagramInsightsService = Depends(get_instagram_service)
 ) -> Dict:
@@ -425,16 +430,17 @@ async def get_analytics_overview(
     - last_sync_at: Timestamp de última sincronización
     """
     try:
-        # Inicializar servicio de analytics con el servicio de Instagram inyectado
+        # Usar admin client: RLS bloquea instagram_accounts, instagram_account_snapshots
+        # y online_followers_data con el cliente anon del backend server-side
         analytics_service = AnalyticsService(
-            db_client=supabase,
+            db_client=get_supabase_admin_client(),
             instagram_service=instagram_service
         )
 
         # Obtener análisis completo
         result = analytics_service.get_comprehensive_analytics(
             user_id=current_user['id'],
-            instagram_account_id=None,  # Se obtiene internamente
+            instagram_account_id=instagram_account_id,
             days=days,
             compare=compare
         )

@@ -10,8 +10,12 @@ Date: 2025-01-19
 import logging
 import json
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Dict, List, Optional
 from collections import defaultdict
+
+# Zona horaria de la cuenta — Instagram guarda timestamps en UTC
+_ACCOUNT_TZ = ZoneInfo('Europe/Madrid')
 from database.supabase_client import retry_on_network_error
 
 logger = logging.getLogger(__name__)
@@ -101,8 +105,10 @@ class AnalyticsService:
         # 5. Análisis por tipo de contenido
         by_content_type = self._analyze_by_content_type(posts)
 
-        # 6. Top posts
+        # 6. Top posts (por engagement), posts recientes (por fecha) y mejores horarios por día
         top_posts = self._get_top_posts(posts, limit=3)
+        recent_posts = self._get_recent_posts(posts, limit=5)
+        best_times_by_weekday = self._calculate_best_times_by_weekday(posts)
 
         # 7. Tendencias temporales
         engagement_trend = self._calculate_trends(posts, days)
@@ -134,6 +140,8 @@ class AnalyticsService:
                 'audience': audience,
                 'by_content_type': by_content_type,
                 'top_posts': top_posts,
+                'recent_posts': recent_posts,
+                'best_times_by_weekday': best_times_by_weekday,
                 'engagement_trend': engagement_trend,
                 'best_posting_times': best_posting_times,
                 'insights': insights
@@ -221,7 +229,17 @@ class AnalyticsService:
 
         result = query.order('publication_date', desc=True).execute()
 
-        posts = [p for p in (result.data or []) if p is not None]
+        # Excluir posts sin instagram_post_id — son posts marcados como "published"
+        # por el sistema pero que nunca se publicaron realmente en Instagram
+        all_rows = [p for p in (result.data or []) if p is not None]
+        posts = [p for p in all_rows if p.get('instagram_post_id')]
+
+        skipped = len(all_rows) - len(posts)
+        if skipped:
+            logger.warning(
+                f"⚠️  {skipped} posts sin instagram_post_id excluidos del análisis "
+                f"(publicados via stub, no están en Instagram)"
+            )
 
         logger.info(
             f"📊 Obtenidos {len(posts)} posts para cuenta {instagram_account_id}"
@@ -254,14 +272,23 @@ class AnalyticsService:
         profile_views = account_info.get('profile_views', 0)
 
         # Calcular total de interacciones
+        # Usar `or 0` en cada campo: .get(key, 0) devuelve None si el valor es NULL en DB
+        def _perf_int(perf: dict, key: str) -> int:
+            return int(perf.get(key) or 0)
+
         total_interactions = sum(
-            (p.get('post_performance') or {}).get('total_interactions', 0) for p in posts
+            _perf_int(p.get('post_performance') or {}, 'total_interactions') or (
+                _perf_int(p.get('post_performance') or {}, 'likes') +
+                _perf_int(p.get('post_performance') or {}, 'comments') +
+                _perf_int(p.get('post_performance') or {}, 'saves')
+            )
+            for p in posts
         )
 
         # Calcular impressions totales sumando las de todos los posts
         # NOTA: impressions no existe a nivel de cuenta, solo a nivel de post
         total_impressions = sum(
-            (p.get('post_performance') or {}).get('impressions', 0) for p in posts
+            _perf_int(p.get('post_performance') or {}, 'impressions') for p in posts
         )
 
         # Calcular promedio de interacciones por post
@@ -575,18 +602,22 @@ class AnalyticsService:
 
                     post_date = datetime.fromisoformat(
                         pub_date.replace('Z', '+00:00')
-                    )
+                    ).astimezone(_ACCOUNT_TZ)
                     hour = post_date.hour
 
                     perf = post.get('post_performance') or {}
-                    likes = perf.get('likes', 0)
-                    comments = perf.get('comments', 0)
-                    reach = perf.get('reach', 0)
+                    likes = perf.get('likes') or 0
+                    comments = perf.get('comments') or 0
+                    reach = perf.get('reach') or 0
+                    total_interactions = likes + comments + (perf.get('saves') or 0)
 
-                    # Calcular engagement rate
-                    engagement_rate = 0
+                    # Usar engagement_rate cuando hay reach; si no, total_interactions como proxy
                     if reach > 0:
                         engagement_rate = ((likes + comments) / reach) * 100
+                    else:
+                        engagement_rate = float(
+                            total_interactions or (likes + comments)
+                        )
 
                     if hour not in hourly_performance:
                         hourly_performance[hour] = {
@@ -733,16 +764,16 @@ class AnalyticsService:
 
             posts_with_engagement.append({
                 'id': instagram_post_id,
-                'caption': post.get('content', '')[:100],
-                'media_url': post.get('media_url', ''),
+                'caption': (post.get('content') or '')[:100],
+                'media_url': post.get('media_url') or '',
                 'permalink': permalink,
-                'timestamp': post.get('publication_date', ''),
-                'likes': likes,
-                'comments': comments,
-                'engagement': engagement,
-                'impressions': perf.get('impressions', 0),
-                'reach': perf.get('reach', 0),
-                'saved': perf.get('saves', 0)
+                'timestamp': post.get('publication_date') or '',
+                'likes': int(likes or 0),
+                'comments': int(comments or 0),
+                'engagement': int(engagement or 0),
+                'impressions': int(perf.get('impressions') or 0),
+                'reach': int(perf.get('reach') or 0),
+                'saved': int(perf.get('saves') or 0)
             })
 
         # Ordenar por engagement y tomar top N
@@ -753,6 +784,106 @@ class AnalyticsService:
         )[:limit]
 
         return top
+
+    def _get_recent_posts(self, posts: List[Dict], limit: int = 3) -> List[Dict]:
+        """Retorna los posts más recientes por fecha de publicación."""
+        posts_with_data = []
+
+        for post in posts:
+            raw_perf = post.get('post_performance')  # None si aún no se sincronizó
+            perf = raw_perf or {}
+            likes = perf.get('likes', 0)
+            comments = perf.get('comments', 0)
+            instagram_post_id = post.get('instagram_post_id', '')
+            permalink = (
+                f"https://www.instagram.com/p/{instagram_post_id}/"
+                if instagram_post_id else ''
+            )
+            posts_with_data.append({
+                'id': instagram_post_id,
+                'caption': (post.get('content') or '')[:100],
+                'media_url': post.get('media_url') or '',
+                'permalink': permalink,
+                'timestamp': post.get('publication_date') or '',
+                'likes': int(likes or 0),
+                'comments': int(comments or 0),
+                'engagement': int((likes or 0) + (comments or 0)),
+                'impressions': int(perf.get('impressions') or 0),
+                'reach': int(perf.get('reach') or 0),
+                'saved': int(perf.get('saves') or 0),
+                'has_stats': raw_perf is not None,
+            })
+
+        recent = sorted(
+            posts_with_data,
+            key=lambda x: x['timestamp'] or '',
+            reverse=True
+        )[:limit]
+
+        return recent
+
+    def _calculate_best_times_by_weekday(self, posts: List[Dict]) -> Dict:
+        """
+        Calcula los mejores horarios de publicación por día de semana.
+
+        Usa solo performance histórico (engagement_rate por hora × día).
+        Solo incluye días con >= 3 posts para que el dato sea estadísticamente confiable.
+
+        Returns:
+            Dict con claves 0-6 (0=lunes, 6=domingo), cada una con lista
+            de hasta 3 slots [{ hour, avg_engagement, posts_count }] ordenados desc.
+        """
+        by_day_hour: Dict[int, Dict[int, Dict]] = {}
+
+        for post in posts:
+            pub_date = post.get('publication_date')
+            if not pub_date:
+                continue
+            try:
+                dt = datetime.fromisoformat(
+                    pub_date.replace('Z', '+00:00')
+                ).astimezone(_ACCOUNT_TZ)
+                weekday = dt.weekday()   # 0=lunes … 6=domingo
+                hour = dt.hour
+
+                perf = post.get('post_performance') or {}
+                likes = perf.get('likes') or 0
+                comments = perf.get('comments') or 0
+                reach = perf.get('reach') or 0
+                total_interactions = likes + comments + (perf.get('shares') or 0) + (perf.get('saves') or 0)
+                if reach > 0:
+                    engagement_rate = ((likes + comments) / reach) * 100
+                else:
+                    engagement_rate = float(total_interactions or (likes + comments))
+
+                by_day_hour.setdefault(weekday, {}).setdefault(
+                    hour, {'total_engagement': 0.0, 'count': 0}
+                )
+                by_day_hour[weekday][hour]['total_engagement'] += engagement_rate
+                by_day_hour[weekday][hour]['count'] += 1
+            except Exception:
+                continue
+
+        result: Dict[int, list] = {}
+        for weekday, hours in by_day_hour.items():
+            total_posts_for_day = sum(h['count'] for h in hours.values())
+            if total_posts_for_day < 3:
+                continue
+
+            slots = [
+                {
+                    'hour': f"{hour:02d}:00",
+                    'avg_engagement': round(
+                        data['total_engagement'] / data['count'], 1
+                    ),
+                    'posts_count': data['count']
+                }
+                for hour, data in hours.items()
+            ]
+            slots.sort(key=lambda x: x['avg_engagement'], reverse=True)
+            result[weekday] = slots[:3]
+
+        return result
 
     def _calculate_trends(self, posts: List[Dict], days: int) -> List[Dict]:
         """

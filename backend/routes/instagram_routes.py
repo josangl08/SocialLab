@@ -16,6 +16,7 @@ from auth.dependencies import get_current_user, get_current_user_from_query_toke
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/instagram", tags=["Instagram Integration"])
 supabase = get_supabase_client()
+admin_supabase = get_supabase_admin_client()
 
 INSTAGRAM_APP_ID = os.environ.get("INSTAGRAM_APP_ID")
 INSTAGRAM_APP_SECRET = os.environ.get("INSTAGRAM_APP_SECRET")
@@ -182,7 +183,9 @@ async def instagram_sync(
     logger.info(f"🔄 Sincronizando Instagram para usuario: {current_user.id}")
 
     try:
-        query = supabase.table('instagram_accounts').select('id, long_lived_access_token, instagram_business_account_id').eq('user_id', current_user.id)
+        # Usar admin client: RLS bloquea instagram_accounts con cliente anon
+        admin_db = get_supabase_admin_client()
+        query = admin_db.table('instagram_accounts').select('id, long_lived_access_token, instagram_business_account_id').eq('user_id', current_user.id)
         if instagram_account_id:
             query = query.eq('id', instagram_account_id)
         else:
@@ -287,7 +290,7 @@ async def instagram_sync(
         profile_response.raise_for_status()
         profile_data = profile_response.json()
 
-        supabase.table('instagram_accounts').update({
+        get_supabase_admin_client().table('instagram_accounts').update({
             'followers_count': profile_data.get('followers_count', 0),
             'username': profile_data.get('username', ''),
             'account_name': profile_data.get('name', ''),
@@ -321,7 +324,9 @@ async def instagram_sync(
 @router_no_prefix.get("/instagram/status")
 async def instagram_status(current_user: User = Depends(get_current_user)):
     try:
-        response = supabase.table('instagram_accounts').select(
+        # Usar admin client: RLS bloquea instagram_accounts con cliente anon
+        admin_db = get_supabase_admin_client()
+        response = admin_db.table('instagram_accounts').select(
             'id, instagram_business_account_id, username, account_name, profile_picture_url, '
             'expires_at, created_at, is_active, followers_count, telegram_chat_id, drive_folder_id, '
             'account_type, sector, purpose, target_audience, style_guide, '
@@ -394,7 +399,7 @@ async def publish_to_instagram(post_id: int, current_user: User = Depends(get_cu
             raise HTTPException(status_code=400, detail="Este post ya está publicado en Instagram")
 
         post_account_id = post.get('instagram_account_id')
-        query = supabase.table('instagram_accounts').select('instagram_business_account_id, long_lived_access_token, expires_at').eq('user_id', current_user.id)
+        query = admin_supabase.table('instagram_accounts').select('instagram_business_account_id, long_lived_access_token, expires_at').eq('user_id', current_user.id)
         if post_account_id:
             query = query.eq('id', post_account_id)
         else:
@@ -536,7 +541,7 @@ async def get_instagram_accounts(current_user: User = Depends(get_current_user))
     Retorna la lista de cuentas de Instagram conectadas del usuario autenticado.
     """
     try:
-        response = supabase.table('instagram_accounts')\
+        response = admin_supabase.table('instagram_accounts')\
             .select('id, instagram_business_account_id, username, account_name, followers_count, profile_picture_url, expires_at, is_active, telegram_chat_id, drive_folder_id')\
             .eq('user_id', current_user.id)\
             .execute()
@@ -550,13 +555,13 @@ async def update_account_config(
     config: InstagramAccountConfigUpdate,
     current_user: User = Depends(get_current_user)
 ):
-    existing = supabase.table('instagram_accounts').select('id').eq('id', account_id).eq('user_id', current_user.id).execute()
+    existing = admin_supabase.table('instagram_accounts').select('id').eq('id', account_id).eq('user_id', current_user.id).execute()
     if not existing.data:
         raise HTTPException(status_code=404, detail="Cuenta no encontrada")
 
     update_data = {k: v for k, v in config.model_dump().items() if v is not None}
     if update_data:
-        supabase.table('instagram_accounts').update(update_data).eq('id', account_id).execute()
+        admin_supabase.table('instagram_accounts').update(update_data).eq('id', account_id).execute()
     return {"success": True}
 
 @router_no_prefix.delete("/instagram/accounts/{account_id}")
@@ -564,9 +569,9 @@ async def disconnect_account(
     account_id: str,
     current_user: User = Depends(get_current_user)
 ):
-    existing = supabase.table('instagram_accounts').select('id').eq('id', account_id).eq('user_id', current_user.id).execute()
+    existing = admin_supabase.table('instagram_accounts').select('id').eq('id', account_id).eq('user_id', current_user.id).execute()
     if not existing.data:
         raise HTTPException(status_code=404, detail="Cuenta no encontrada")
 
-    supabase.table('instagram_accounts').delete().eq('id', account_id).execute()
+    admin_supabase.table('instagram_accounts').delete().eq('id', account_id).execute()
     return {"success": True}

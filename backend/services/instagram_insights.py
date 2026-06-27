@@ -395,6 +395,18 @@ class InstagramInsightsService:
                             time.sleep(wait_time)
                         else:
                             raise
+            # SELECT explícito para completar db_posts — el upsert no devuelve
+            # filas sin cambios, por lo que posts ya existentes quedarían fuera
+            try:
+                all_result = db_client.table('posts').select(
+                    'id, instagram_post_id'
+                ).eq('instagram_account_id', instagram_account_id_db).execute()
+                for p in (all_result.data or []):
+                    db_posts.setdefault(p['instagram_post_id'], p['id'])
+                logger.info(f"📊 db_posts completo: {len(db_posts)} posts mapeados")
+            except Exception as e:
+                logger.warning(f"⚠️  Error al completar db_posts con SELECT: {e}")
+
             if not db_posts:
                 logger.error("❌ No se pudieron procesar posts")
                 return
@@ -404,11 +416,20 @@ class InstagramInsightsService:
             recent_posts_count = 0
             posts_with_insights = 0
 
+            skipped_posts = []
             for post_data in all_posts_from_api:
                 instagram_post_id = post_data['id']
-                if instagram_post_id not in db_posts: continue
+                if instagram_post_id not in db_posts:
+                    skipped_posts.append(instagram_post_id)
+                    continue
                 internal_post_id = db_posts[instagram_post_id]
-                post_date = datetime.fromisoformat(post_data.get('timestamp', '').replace('Z', '+00:00')) if post_data.get('timestamp') else None
+                post_date = None
+                if post_data.get('timestamp'):
+                    ts = post_data['timestamp'].replace('Z', '+00:00')
+                    # Instagram devuelve +0000 (sin ':'); Python <3.11 requiere +00:00
+                    if len(ts) >= 5 and ts[-5] in ('+', '-') and ':' not in ts[-5:]:
+                        ts = ts[:-2] + ':' + ts[-2:]
+                    post_date = datetime.fromisoformat(ts)
 
                 likes = post_data.get('like_count', 0)
                 comments = post_data.get('comments_count', 0)
@@ -443,33 +464,44 @@ class InstagramInsightsService:
                     except Exception as e:
                         logger.warning(f"⚠️  No se pudieron obtener insights para post reciente {instagram_post_id}: {e}")
 
-                # Calcular total_interactions = likes + comments + shares + saves
-                total_interactions = likes + comments + shares + saves
-                perf_data['total_interactions'] = total_interactions
+                # total_interactions es valor derivado; se calcula en lectura, no se persiste
                 performance_to_upsert.append(perf_data)
 
+            if skipped_posts:
+                logger.warning(
+                    f"⚠️  {len(skipped_posts)} posts de Instagram API no encontrados "
+                    f"en db_posts (instagram_post_id posiblemente null en DB): {skipped_posts[:5]}"
+                )
             logger.info(
                 f"📊 Posts analizados: {len(all_posts_from_api)} total, "
                 f"{recent_posts_count} recientes (<90 días), "
-                f"{posts_with_insights} con insights disponibles"
+                f"{posts_with_insights} con insights disponibles, "
+                f"{len(skipped_posts)} omitidos"
             )
 
             if performance_to_upsert:
                 logger.info(f"📊 Guardando métricas de {len(performance_to_upsert)} posts...")
+                logger.debug(f"🔍 Columnas en perf_data: {list(performance_to_upsert[0].keys())}")
+                saved_count = 0
                 for i in range(0, len(performance_to_upsert), BATCH_SIZE):
                     batch = performance_to_upsert[i:i + BATCH_SIZE]
                     for attempt in range(MAX_RETRIES):
                         try:
                             db_client.table('post_performance').upsert(batch, on_conflict='post_id').execute()
+                            saved_count += len(batch)
                             time.sleep(0.5)
                             break
                         except (ReadError, Exception) as e:
                             if attempt < MAX_RETRIES - 1:
                                 wait_time = 2 ** attempt
-                                logger.warning(f"⚠️  Error guardando métricas, reintentando en {wait_time}s...")
+                                logger.warning(f"⚠️  Error guardando métricas (intento {attempt+1}): {e}")
                                 time.sleep(wait_time)
                             else:
+                                logger.error(f"❌ Fallo definitivo en batch {i//BATCH_SIZE+1}: {e}")
                                 raise
+                logger.info(f"✅ post_performance guardado para {saved_count} posts")
+            else:
+                logger.warning("⚠️  performance_to_upsert vacío — ningún post procesado para métricas")
         except Exception as e:
             logger.error(f"❌ Error durante el guardado en BD: {e}", exc_info=True)
 

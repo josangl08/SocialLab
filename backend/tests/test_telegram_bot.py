@@ -25,7 +25,7 @@ client = TestClient(app)
 
 @pytest.fixture
 def mock_supabase():
-    with patch("routes.telegram_routes.supabase") as mock_sup:
+    with patch("routes.telegram_routes.admin_supabase") as mock_sup:
         yield mock_sup
 
 @pytest.fixture

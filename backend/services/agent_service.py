@@ -9,7 +9,7 @@ from typing import Optional
 import google.generativeai as genai
 import httpx
 
-from database.supabase_client import get_supabase_client
+from database.supabase_client import get_supabase_admin_client
 from models.schemas import AgentLog, VisualAnalysis, CalendarSlot, ContentProposal
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ FREQUENCY_DAYS: dict = {
 
 def run_agent(account_id: int) -> AgentLog:
     start = datetime.now(timezone.utc)
-    supabase = get_supabase_client()
+    supabase = get_supabase_admin_client()
     images_scanned = 0
     images_analyzed = 0
     posts_drafted = 0

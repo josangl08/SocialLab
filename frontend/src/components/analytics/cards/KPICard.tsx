@@ -1,19 +1,28 @@
 import React from 'react';
+import { LineChart, Line, ResponsiveContainer } from 'recharts';
 import './KPICard.css';
 
 interface KPICardProps {
   title: string;
   value: string | number;
-  change?: string;        // "+12.5%" o "-5.2%"
+  change?: string;
   trend?: 'up' | 'down' | 'neutral';
-  icon: string;           // Bootstrap icon class (sin 'bi-')
+  icon: string;
   color?: 'primary' | 'success' | 'warning' | 'info' | 'purple' | 'danger';
-  comparison?: {
-    value: string | number;
-    label: string;
-  };
+  comparison?: { value: string | number; label: string };
   loading?: boolean;
+  sparklineData?: number[];
+  sparklineColor?: string;
 }
+
+const computeGrowth = (data: number[]): { label: string; positive: boolean } | null => {
+  if (data.length < 2) return null;
+  const first = data[0];
+  const last = data[data.length - 1];
+  if (first === 0) return null;
+  const pct = ((last - first) / Math.abs(first)) * 100;
+  return { label: `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`, positive: pct >= 0 };
+};
 
 export const KPICard: React.FC<KPICardProps> = ({
   title,
@@ -23,13 +32,14 @@ export const KPICard: React.FC<KPICardProps> = ({
   icon,
   color = 'primary',
   comparison,
-  loading = false
+  loading = false,
+  sparklineData,
+  sparklineColor
 }) => {
-  const getTrendColor = () => {
-    if (trend === 'up') return '#10b981';      // green-500
-    if (trend === 'down') return '#ef4444';    // red-500
-    return '#6b7280';                          // gray-500
-  };
+  const getTrendArrow = () => (trend === 'up' ? 'up' : trend === 'down' ? 'down' : 'right');
+  const sparkGrowth = sparklineData ? computeGrowth(sparklineData) : null;
+  const chartData = sparklineData?.map((v) => ({ v })) ?? [];
+  const lineColor = sparklineColor ?? 'rgba(255, 255, 255, 0.75)';
 
   if (loading) {
     return (
@@ -47,25 +57,53 @@ export const KPICard: React.FC<KPICardProps> = ({
 
   return (
     <div className={`kpi-card kpi-card-${color}`}>
-      <div className="kpi-icon">
-        <i className={`bi bi-${icon}`}></i>
+      <div className="kpi-card-top">
+        <div className="kpi-icon-wrap">
+          <i className={`bi bi-${icon}`}></i>
+        </div>
+        <div className="kpi-content">
+          <h3 className="kpi-title">{title}</h3>
+          <div className="kpi-value">{value}</div>
+          {(sparkGrowth || change) && (
+            <div className={`kpi-growth${sparkGrowth ? (sparkGrowth.positive ? ' kpi-growth-up' : ' kpi-growth-down') : ''}`}>
+              {sparkGrowth ? (
+                <>
+                  <i className={`bi bi-arrow-${sparkGrowth.positive ? 'up' : 'down'}-short`}></i>
+                  {sparkGrowth.label}
+                </>
+              ) : (
+                <>
+                  <i className={`bi bi-arrow-${getTrendArrow()}-short`}></i>
+                  {change}
+                </>
+              )}
+            </div>
+          )}
+          {comparison && !sparkGrowth && (
+            <div className="kpi-comparison">
+              <span className="comparison-label">{comparison.label}:</span>
+              <span className="comparison-value">{comparison.value}</span>
+            </div>
+          )}
+        </div>
       </div>
-      <div className="kpi-content">
-        <h3 className="kpi-title">{title}</h3>
-        <div className="kpi-value">{value}</div>
-        {change && (
-          <div className="kpi-change" style={{ color: getTrendColor() }}>
-            <i className={`bi bi-arrow-${trend === 'up' ? 'up' : trend === 'down' ? 'down' : 'right'}`}></i>
-            <span>{change}</span>
-          </div>
-        )}
-        {comparison && (
-          <div className="kpi-comparison">
-            <span className="comparison-label">{comparison.label}:</span>
-            <span className="comparison-value">{comparison.value}</span>
-          </div>
-        )}
-      </div>
+
+      {chartData.length > 1 && (
+        <div className="kpi-sparkline">
+          <ResponsiveContainer width="100%" height={40}>
+            <LineChart data={chartData} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+              <Line
+                type="monotone"
+                dataKey="v"
+                stroke={lineColor}
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
 };

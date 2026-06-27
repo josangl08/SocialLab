@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Literal, Optional
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, status
 
-from database.supabase_client import get_supabase_client
+from database.supabase_client import get_supabase_client, get_supabase_admin_client
 from models.schemas import User, Post
 from auth.dependencies import get_current_user
 
@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 # Sin prefijo para que coincida exactamente con /posts y /posts/{post_id} que usa el frontend
 router = APIRouter(tags=["Posts CRUD"])
 supabase = get_supabase_client()
+admin_supabase = get_supabase_admin_client()
 
 @router.post("/posts", response_model=Post)
 async def create_post(
@@ -61,7 +62,7 @@ async def create_post(
         if response.data:
             post = response.data[0]
             if instagram_account_id:
-                account_res = supabase.table('instagram_accounts')\
+                account_res = admin_supabase.table('instagram_accounts')\
                     .select('telegram_chat_id')\
                     .eq('id', instagram_account_id)\
                     .execute()

@@ -67,7 +67,7 @@ export const CalendarProposalView: React.FC<CalendarProposalViewProps> = ({ acco
 
   if (loading) {
     return (
-      <div className="card shadow-sm mb-4">
+      <div className="card shadow-sm mb-4 bg-dark border-secondary">
         <div className="card-body text-center py-4">
           <div className="spinner-border text-primary spinner-border-sm" role="status" />
         </div>
@@ -79,7 +79,7 @@ export const CalendarProposalView: React.FC<CalendarProposalViewProps> = ({ acco
     return (
       <div className="card shadow-sm mb-4 bg-dark text-white border-secondary" data-testid="calendar-proposal-view">
         <div className="card-body text-center py-4">
-          <p className="text-muted mb-0">No hay propuestas de contenido todavía. El agente generará una cada lunes.</p>
+          <p className="mb-0 text-white text-opacity-75">No hay propuestas de contenido todavía. El agente generará una cada lunes.</p>
         </div>
       </div>
     );

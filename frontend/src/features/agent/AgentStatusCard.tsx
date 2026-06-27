@@ -73,7 +73,7 @@ export const AgentStatusCard: React.FC<AgentStatusCardProps> = ({ accountId }) =
 
   if (loading) {
     return (
-      <div className="card shadow-sm mb-4">
+      <div className="card shadow-sm mb-4 bg-dark border-secondary">
         <div className="card-body text-center py-4">
           <div className="spinner-border text-primary spinner-border-sm" role="status"></div>
         </div>
@@ -92,26 +92,26 @@ export const AgentStatusCard: React.FC<AgentStatusCardProps> = ({ accountId }) =
         <div className="row text-center g-2 my-2">
           <div className="col-4">
             <div className="p-2 bg-secondary bg-opacity-25 rounded">
-              <small className="text-muted d-block small">Escaneadas</small>
+              <small className="d-block small text-white text-opacity-75">Escaneadas</small>
               <span className="fw-bold fs-5">{status?.images_scanned || 0}</span>
             </div>
           </div>
           <div className="col-4">
             <div className="p-2 bg-secondary bg-opacity-25 rounded">
-              <small className="text-muted d-block small">Redactados</small>
+              <small className="d-block small text-white text-opacity-75">Redactados</small>
               <span className="fw-bold fs-5">{status?.posts_drafted || 0}</span>
             </div>
           </div>
           <div className="col-4">
             <div className="p-2 bg-secondary bg-opacity-25 rounded">
-              <small className="text-muted d-block small">Siguiente Ejecución</small>
+              <small className="d-block small text-white text-opacity-75">Siguiente Ejecución</small>
               <span className="fw-bold fs-6 d-block text-warning" style={{ marginTop: '4px' }}>{countdown}</span>
             </div>
           </div>
         </div>
 
         {status?.last_run_at && (
-          <div className="mt-3 pt-2 border-top border-secondary text-muted small">
+          <div className="mt-3 pt-2 border-top border-secondary small text-white text-opacity-75">
             <i className="bi bi-clock-history me-1"></i>
             Última ejecución: {new Date(status.last_run_at).toLocaleDateString('es-ES', {
               day: 'numeric',
