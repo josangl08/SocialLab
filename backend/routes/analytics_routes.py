@@ -445,6 +445,41 @@ async def get_analytics_overview(
             compare=compare
         )
 
+        # Enforce spec-compliant response schema for the UI (Antigravity boilerplate task)
+        if result and result.get('success') and 'data' in result:
+            data = result['data']
+            
+            # 1. Overview metrics
+            if 'overview' in data:
+                overview = data['overview']
+                if 'total_likes' not in overview:
+                    overview['total_likes'] = overview.get('total_likes', 0)
+                if 'total_comments' not in overview:
+                    overview['total_comments'] = overview.get('total_comments', 0)
+                if 'total_saves' not in overview:
+                    overview['total_saves'] = overview.get('total_saves', 0)
+                if 'views' not in overview:
+                    overview['views'] = overview.get('impressions', 0)
+                if 'reach' not in overview:
+                    overview['reach'] = overview.get('reach', 0)
+            
+            # 2. Top posts Reel metrics
+            if 'top_posts' in data:
+                for post in data['top_posts']:
+                    if 'avg_watch_time_ms' not in post:
+                        post['avg_watch_time_ms'] = post.get('avg_watch_time_ms', 0)
+                    if 'total_watch_time_ms' not in post:
+                        post['total_watch_time_ms'] = post.get('total_watch_time_ms', 0)
+            
+            # 3. Audience demographics
+            if 'audience' in data:
+                audience = data['audience']
+                demographics = audience.get('demographics', {})
+                if 'follower_demographics' not in audience:
+                    audience['follower_demographics'] = demographics.get('follower_demographics', demographics)
+                if 'engaged_demographics' not in audience:
+                    audience['engaged_demographics'] = demographics.get('engaged_audience_demographics', {})
+
         return result
 
     except ValueError as e:
