@@ -203,7 +203,6 @@ from routes.posts_routes import router as posts_router
 from routes.auth_routes import router as auth_router
 from routes.ai_routes import router as ai_router
 from routes.instagram_routes import router_no_prefix as instagram_router
-from routes.posts_crud_routes import router as posts_crud_router
 from routes.telegram_routes import router as telegram_router
 from routes.agent_routes import router as agent_router
 
@@ -211,7 +210,6 @@ from routes.agent_routes import router as agent_router
 app.include_router(auth_router)
 app.include_router(ai_router)
 app.include_router(instagram_router)
-app.include_router(posts_crud_router)
 app.include_router(telegram_router)
 app.include_router(agent_router)
 

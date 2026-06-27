@@ -1,0 +1,423 @@
+/* ─────────────────────────────────────────────────────
+   SocialLab CreatePost — Dark Observatory Form
+   ───────────────────────────────────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
+
+.cp-wrap {
+  --cp-page:    #080c18;
+  --cp-surface: rgba(255, 255, 255, 0.04);
+  --cp-border:  rgba(255, 255, 255, 0.09);
+  --cp-border2: rgba(255, 255, 255, 0.14);
+  --cp-text:    #f0f2f8;
+  --cp-muted:   rgba(240, 242, 248, 0.5);
+  --cp-brand:   linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045);
+  --cp-ease:    cubic-bezier(0.4, 0, 0.2, 1);
+  --cp-t:       0.2s;
+
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  color: var(--cp-text);
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+/* Standalone page wrapper */
+.cp-page {
+  min-height: 100vh;
+  background:
+    radial-gradient(ellipse 60% 35% at 20% 10%, rgba(131,58,180,0.1) 0%, transparent 60%),
+    var(--cp-page);
+  padding: 32px 24px 48px;
+}
+
+/* ── Section heading ─────────────────────────────────── */
+.cp-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--cp-muted);
+  margin-bottom: 8px;
+}
+
+/* ── Dark inputs ─────────────────────────────────────── */
+.cp-input,
+.cp-select,
+.cp-textarea {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--cp-border);
+  border-radius: 10px;
+  color: var(--cp-text);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 14px;
+  padding: 11px 14px;
+  transition: border-color var(--cp-t) var(--cp-ease), box-shadow var(--cp-t) var(--cp-ease);
+}
+
+.cp-input:focus,
+.cp-select:focus,
+.cp-textarea:focus {
+  outline: none;
+  border-color: rgba(131, 58, 180, 0.6);
+  box-shadow: 0 0 0 3px rgba(131, 58, 180, 0.12);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.cp-input::placeholder,
+.cp-textarea::placeholder {
+  color: rgba(240, 242, 248, 0.28);
+}
+
+.cp-select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='rgba(240,242,248,0.4)' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 36px;
+}
+
+.cp-select option {
+  background: #161b22;
+  color: #f0f2f8;
+}
+
+.cp-textarea {
+  resize: vertical;
+  min-height: 110px;
+  line-height: 1.6;
+}
+
+/* ── AI section ──────────────────────────────────────── */
+.cp-ai-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: rgba(131, 58, 180, 0.08);
+  border: 1px solid rgba(131, 58, 180, 0.2);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all var(--cp-t) var(--cp-ease);
+  margin-bottom: 4px;
+}
+
+.cp-ai-toggle:hover {
+  background: rgba(131, 58, 180, 0.14);
+  border-color: rgba(131, 58, 180, 0.35);
+}
+
+.cp-ai-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #c084fc;
+}
+
+.cp-ai-toggle-chevron {
+  color: rgba(192, 132, 252, 0.6);
+  font-size: 12px;
+  transition: transform var(--cp-t) var(--cp-ease);
+}
+
+.cp-ai-toggle-chevron.open {
+  transform: rotate(180deg);
+}
+
+.cp-ai-body {
+  background: rgba(131, 58, 180, 0.05);
+  border: 1px solid rgba(131, 58, 180, 0.15);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.cp-ai-generate-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 20px;
+  background: rgba(131, 58, 180, 0.2);
+  border: 1px solid rgba(131, 58, 180, 0.4);
+  border-radius: 10px;
+  color: #c084fc;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  width: 100%;
+  transition: all var(--cp-t) var(--cp-ease);
+}
+
+.cp-ai-generate-btn:hover:not(:disabled) {
+  background: rgba(131, 58, 180, 0.3);
+  border-color: rgba(131, 58, 180, 0.6);
+}
+
+.cp-ai-generate-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Media upload zone ───────────────────────────────── */
+.cp-upload-zone {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  max-height: 220px;
+  border: 2px dashed rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: all var(--cp-t) var(--cp-ease);
+  position: relative;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.cp-upload-zone:hover,
+.cp-upload-zone.dragging {
+  border-color: rgba(131, 58, 180, 0.5);
+  background: rgba(131, 58, 180, 0.06);
+}
+
+.cp-upload-zone input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+}
+
+.cp-upload-icon {
+  font-size: 32px;
+  color: rgba(255, 255, 255, 0.2);
+}
+
+.cp-upload-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cp-muted);
+  text-align: center;
+}
+
+.cp-upload-hint {
+  font-size: 11px;
+  color: rgba(240, 242, 248, 0.3);
+}
+
+/* Preview inside zone */
+.cp-upload-preview {
+  position: absolute;
+  inset: 0;
+}
+
+.cp-upload-preview-img,
+.cp-upload-preview-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cp-upload-preview-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 12, 24, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity var(--cp-t) var(--cp-ease);
+}
+
+.cp-upload-zone:hover .cp-upload-preview-overlay {
+  opacity: 1;
+}
+
+.cp-upload-change-btn {
+  background: rgba(8, 12, 24, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+/* ── Post type cards ─────────────────────────────────── */
+.cp-type-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.cp-type-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--cp-border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all var(--cp-t) var(--cp-ease);
+  color: var(--cp-muted);
+  font-family: inherit;
+}
+
+.cp-type-card:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--cp-text);
+}
+
+.cp-type-card.active {
+  background: linear-gradient(135deg, rgba(131,58,180,0.3), rgba(253,29,29,0.15));
+  border-color: rgba(131, 58, 180, 0.5);
+  color: var(--cp-text);
+  box-shadow: 0 2px 14px rgba(131, 58, 180, 0.2);
+}
+
+.cp-type-card i { font-size: 20px; }
+.cp-type-card span { font-size: 12px; font-weight: 600; }
+
+/* ── Status toggle ───────────────────────────────────── */
+.cp-status-toggle {
+  display: flex;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--cp-border);
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.cp-status-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cp-muted);
+  cursor: pointer;
+  transition: all var(--cp-t) var(--cp-ease);
+}
+
+.cp-status-btn:hover:not(.active) {
+  color: var(--cp-text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.cp-status-btn.active {
+  background: linear-gradient(135deg, rgba(131,58,180,0.3), rgba(253,29,29,0.15));
+  border-color: rgba(131, 58, 180, 0.45);
+  color: var(--cp-text);
+}
+
+/* ── Submit / cancel buttons ─────────────────────────── */
+.cp-actions {
+  display: flex;
+  gap: 10px;
+  padding-top: 8px;
+}
+
+.cp-submit-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: var(--cp-brand);
+  border: none;
+  border-radius: 12px;
+  color: #fff;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  letter-spacing: 0.2px;
+  transition: transform var(--cp-t) var(--cp-ease), box-shadow var(--cp-t) var(--cp-ease);
+}
+
+.cp-submit-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(131, 58, 180, 0.45);
+}
+
+.cp-submit-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.cp-cancel-btn {
+  padding: 12px 20px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--cp-border);
+  border-radius: 12px;
+  color: var(--cp-muted);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--cp-t) var(--cp-ease);
+}
+
+.cp-cancel-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--cp-text);
+}
+
+/* ── Feedback messages ───────────────────────────────── */
+.cp-msg {
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.cp-msg-success { background: rgba(34,197,94,0.1); border-color: rgba(34,197,94,0.25); color: #86efac; }
+.cp-msg-error   { background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.25); color: #fca5a5; }
+.cp-msg-info    { background: rgba(129,140,248,0.1); border-color: rgba(129,140,248,0.25); color: #c7d2fe; }
+
+.cp-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,0.25);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: cp-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes cp-spin { to { transform: rotate(360deg); } }
+
+/* Field spacer */
+.cp-field { margin-bottom: 20px; }
+.cp-field:last-child { margin-bottom: 0; }

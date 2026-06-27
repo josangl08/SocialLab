@@ -84,6 +84,42 @@ async def list_proposals(
         logger.error(f"Error listing proposals: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al obtener las propuestas: {str(e)}")
 
+@router.post("/proposals/{proposal_id}/approve")
+async def approve_proposal(
+    proposal_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    proposal_res = supabase.table('content_proposals').select('id, account_id').eq('id', proposal_id).execute()
+    if not proposal_res.data:
+        raise HTTPException(status_code=404, detail="Propuesta no encontrada")
+
+    account_id = proposal_res.data[0]['account_id']
+    acc_res = admin_supabase.table('instagram_accounts').select('user_id').eq('id', account_id).execute()
+    if not acc_res.data or str(acc_res.data[0]['user_id']) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esta propuesta")
+
+    admin_supabase.table('content_proposals').update({'status': 'approved'}).eq('id', proposal_id).execute()
+    return {"updated": True}
+
+
+@router.post("/proposals/{proposal_id}/reject")
+async def reject_proposal(
+    proposal_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    proposal_res = supabase.table('content_proposals').select('id, account_id').eq('id', proposal_id).execute()
+    if not proposal_res.data:
+        raise HTTPException(status_code=404, detail="Propuesta no encontrada")
+
+    account_id = proposal_res.data[0]['account_id']
+    acc_res = admin_supabase.table('instagram_accounts').select('user_id').eq('id', account_id).execute()
+    if not acc_res.data or str(acc_res.data[0]['user_id']) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esta propuesta")
+
+    admin_supabase.table('content_proposals').update({'status': 'rejected'}).eq('id', proposal_id).execute()
+    return {"updated": True}
+
+
 STRATEGY_FIELDS = (
     'id, account_type, sector, purpose, target_audience, style_guide, '
     'default_tone, default_language, posting_frequency, best_times, '

@@ -1,8 +1,12 @@
 import React, { useState, FormEvent, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import './CreatePost.css';
 
 interface CreatePostProps {
   onPostCreated: () => void;
+  onCancel?: () => void;
+  initialDate?: string;
 }
 
 interface InstagramAccount {
@@ -11,338 +15,327 @@ interface InstagramAccount {
   account_name: string;
 }
 
-const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated }) => {
+const AI_ROLES = [
+  { value: 'content_manager', label: 'Content Manager' },
+  { value: 'marketing_expert', label: 'Experto en Marketing' },
+  { value: 'casual_friend',   label: 'Tono Cercano' },
+];
+
+const POST_TYPES = [
+  { value: 'post',     label: 'Post',     icon: 'bi-image' },
+  { value: 'reel',     label: 'Reel',     icon: 'bi-camera-video' },
+  { value: 'story',    label: 'Story',    icon: 'bi-layers' },
+  { value: 'carousel', label: 'Carrusel', icon: 'bi-collection' },
+];
+
+const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, onCancel, initialDate }) => {
   const { token } = useAuth();
-  const [content, setContent] = useState<string>('');
-  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [searchParams] = useSearchParams();
+
+  const [content, setContent]         = useState('');
+  const [mediaFile, setMediaFile]     = useState<File | null>(null);
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
-  const [postType, setPostType] = useState<string>('post');
-  const [status, setStatus] = useState<string>('draft');
-  const [scheduledAt, setScheduledAt] = useState<string>('');
-  const [message, setMessage] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(false);
-
-  // --- Estados de cuenta de Instagram ---
+  const [isDragging, setIsDragging]   = useState(false);
+  const [postType, setPostType]       = useState('post');
+  const [status, setStatus]           = useState('draft');
+  const [scheduledAt, setScheduledAt] = useState(() => {
+    const raw = initialDate ?? searchParams.get('date') ?? '';
+    if (!raw) return '';
+    const parsed = new Date(raw);
+    return isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 16);
+  });
+  const [selectedAccountId, setSelectedAccountId] = useState('');
   const [instagramAccounts, setInstagramAccounts] = useState<InstagramAccount[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
 
-  // --- Nuevos estados para la funcionalidad de IA ---
-  const [aiTopic, setAiTopic] = useState<string>('');
-  const [aiLoading, setAiLoading] = useState<boolean>(false);
-  const [aiMessage, setAiMessage] = useState<string>('');
-  const [aiRole, setAiRole] = useState<string>('content_manager'); // Nuevo estado para el rol de la IA
+  const [aiOpen, setAiOpen]     = useState(false);
+  const [aiTopic, setAiTopic]   = useState('');
+  const [aiRole, setAiRole]     = useState('content_manager');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiMsg, setAiMsg]       = useState('');
+
+  const [loading, setLoading]   = useState(false);
+  const [message, setMessage]   = useState('');
+  const [isError, setIsError]   = useState(false);
 
   useEffect(() => {
-    const fetchAccounts = async () => {
-      if (!token) return;
-      try {
-        const response = await fetch('http://localhost:8000/instagram/accounts', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        });
-        if (response.ok) {
-          const data = await response.json();
-          setInstagramAccounts(data);
-        }
-      } catch (err) {
-        console.error('Error fetching Instagram accounts:', err);
-      }
-    };
-    fetchAccounts();
+    if (!token) return;
+    fetch('http://localhost:8000/instagram/accounts', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : [])
+      .then(setInstagramAccounts)
+      .catch(() => {});
   }, [token]);
 
-  // Definir los roles disponibles para el frontend
-  const aiRoles = [
-    { value: 'content_manager', label: 'Content Manager Profesional' },
-    { value: 'marketing_expert', label: 'Experto en Marketing Digital' },
-    { value: 'casual_friend', label: 'Amigo Casual y Cercano' },
-  ];
-
-  const formatErrorMessage = (errorData: any) => {
-    if (errorData && Array.isArray(errorData.detail)) {
-      return errorData.detail.map((err: any) => err.msg || err.message || JSON.stringify(err)).join('; ');
-    } else if (errorData && errorData.detail) {
-      return errorData.detail;
-    } else if (errorData && errorData.message) {
-      return errorData.message;
-    }
-    return 'Error desconocido';
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files ? e.target.files[0] : null;
+  const applyFile = (file: File | null) => {
     setMediaFile(file);
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setMediaPreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    } else {
-      setMediaPreview(null);
-    }
+    if (!file) { setMediaPreview(null); return; }
+    const reader = new FileReader();
+    reader.onloadend = () => setMediaPreview(reader.result as string);
+    reader.readAsDataURL(file);
   };
 
-  // --- Nueva función para generar contenido con IA ---
-  const handleGenerateAIContent = async () => {
-    if (!aiTopic) {
-      setAiMessage('Por favor, introduce un tema para la IA.');
-      return;
-    }
-    setAiLoading(true);
-    setAiMessage('');
-    setMessage('');
+  // TODO(human): implement drag-and-drop handlers on .cp-upload-zone
+  // handleDrop should call e.preventDefault(), e.stopPropagation(), setIsDragging(false),
+  // then extract e.dataTransfer.files[0] and pass it to applyFile().
+  // handleDragOver / handleDragEnter should call e.preventDefault() and setIsDragging(true).
+  // handleDragLeave should setIsDragging(false).
+  // Wire them to the .cp-upload-zone div below: onDrop, onDragOver, onDragEnter, onDragLeave.
 
+  const handleGenerateAI = async () => {
+    if (!aiTopic) { setAiMsg('Introduce un tema para generar contenido.'); return; }
+    setAiLoading(true); setAiMsg('');
     try {
-      const response = await fetch('http://localhost:8000/ai/generate-post-content', {
+      const res = await fetch('http://localhost:8000/ai/generate-post-content', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ topic: aiTopic, role: aiRole }), // Enviar el rol seleccionado
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ topic: aiTopic, role: aiRole }),
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        setContent(data.generated_text); // Actualizar el contenido principal
-        setAiMessage('Contenido generado exitosamente.');
+      if (res.ok) {
+        const data = await res.json();
+        setContent(data.generated_text);
+        setAiMsg('Contenido generado correctamente.');
       } else {
-        const errorData = await response.json();
-        setAiMessage('Error al generar contenido: ' + formatErrorMessage(errorData));
+        const err = await res.json();
+        setAiMsg('Error: ' + (err.detail ?? 'No se pudo generar'));
       }
-    } catch (error: any) {
-      setAiMessage('Error de red o servidor: ' + error.message);
+    } catch {
+      setAiMsg('Error de conexión.');
     } finally {
       setAiLoading(false);
     }
   };
 
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setMessage(''); setIsError(false); setLoading(true);
 
-  const handleSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    setMessage('');
-    setLoading(true);
-
-    if (!token) {
-      setMessage('Error: No hay token de autenticación.');
-      setLoading(false);
-      return;
-    }
-
-    if (!mediaFile) {
-      setMessage('Error: Un archivo multimedia es obligatorio para publicaciones de Instagram.');
-      setLoading(false);
-      return;
-    }
+    if (!token) { setMessage('Sin token de autenticación.'); setIsError(true); setLoading(false); return; }
+    if (!mediaFile) { setMessage('La imagen o video es obligatorio para Instagram.'); setIsError(true); setLoading(false); return; }
 
     const formData = new FormData();
     formData.append('content', content);
     formData.append('post_type', postType);
     formData.append('status', status);
-    if (scheduledAt) {
-      formData.append('scheduled_at', new Date(scheduledAt).toISOString());
-    }
+    if (scheduledAt) formData.append('scheduled_at', new Date(scheduledAt).toISOString());
     formData.append('media_file', mediaFile);
-    if (selectedAccountId) {
-      formData.append('instagram_account_id', selectedAccountId);
-    }
+    if (selectedAccountId) formData.append('instagram_account_id', selectedAccountId);
 
     try {
-      const response = await fetch('http://localhost:8000/posts', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-        body: formData,
+      const res = await fetch('http://localhost:8000/api/posts', {
+        method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: formData,
       });
-
-      if (response.ok) {
-        setMessage('Publicación creada exitosamente!');
-        setContent('');
-        setAiTopic('');
-        setMediaFile(null);
-        setMediaPreview(null);
-        (event.target as HTMLFormElement).reset();
-        setPostType('post');
-        setStatus('draft');
-        setScheduledAt('');
-        setSelectedAccountId('');
+      if (res.ok) {
+        setMessage('Publicación creada correctamente.');
+        setContent(''); setAiTopic(''); setMediaFile(null); setMediaPreview(null);
+        setPostType('post'); setStatus('draft'); setScheduledAt(''); setSelectedAccountId('');
         onPostCreated();
       } else {
-        const errorData = await response.json();
-        setMessage('Error al crear publicación: ' + formatErrorMessage(errorData));
+        const err = await res.json();
+        setMessage(Array.isArray(err.detail)
+          ? err.detail.map((e: any) => e.msg).join('; ')
+          : (err.detail ?? 'Error al crear la publicación'));
+        setIsError(true);
       }
-    } catch (error: any) {
-      setMessage('Error de red o servidor: ' + error.message);
-      console.error('Error de red o servidor:', error);
+    } catch {
+      setMessage('Error de red o servidor.'); setIsError(true);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="mt-4 p-4 bg-light rounded shadow-sm create-post-card">
-      <h3 className="mb-4 text-primary">Crear Nueva Publicación</h3>
-      
-      {/* --- Sección de IA --- */}
-      <div className="p-3 mb-4 bg-white rounded border">
-        <h5 className="text-secondary">Asistente de Contenido IA</h5>
-        <div className="mb-3">
-          <label htmlFor="aiRole" className="form-label">Rol de la IA:</label>
-          <select
-            id="aiRole"
-            className="form-select"
-            value={aiRole}
-            onChange={(e) => setAiRole(e.target.value)}
-            disabled={aiLoading || loading}
-          >
-            {aiRoles.map((role) => (
-              <option key={role.value} value={role.value}>
-                {role.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="mb-2">
-          <textarea
-            className="form-control"
-            placeholder="Escribe un tema o idea para tu publicación (ej: 'lanzamiento de nuevas zapatillas ecológicas')..."
-            value={aiTopic}
-            onChange={(e) => setAiTopic(e.target.value)}
-            rows={2}
-            disabled={aiLoading || loading}
-          />
-        </div>
-        <button 
-          type="button" 
-          className="btn btn-outline-primary w-100" 
-          onClick={handleGenerateAIContent} 
-          disabled={aiLoading || loading}
-        >
-          {aiLoading ? (
-            <><span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Generando...</>
-          ) : (
-            '✨ Generar texto con IA'
-          )}
-        </button>
-        {aiMessage && (
-          <p className={`mt-2 text-center small ${aiMessage.startsWith('Error') ? 'text-danger' : 'text-success'}`}>
-            {aiMessage}
-          </p>
-        )}
-      </div>
-      {/* --- Fin Sección de IA --- */}
-
+    <div className="cp-wrap">
       <form onSubmit={handleSubmit}>
-        <div className="mb-3">
-          <label htmlFor="content" className="form-label">Contenido de la Publicación</label>
+
+        {/* ── Media upload ───────────────────────────── */}
+        <div className="cp-field">
+          <p className="cp-section-label">Imagen / Video <span style={{ color: '#f87171' }}>*</span></p>
+          <div className={`cp-upload-zone${isDragging ? ' dragging' : ''}`}>
+            <input
+              type="file"
+              accept="image/*,video/*"
+              required
+              disabled={loading}
+              onChange={e => applyFile(e.target.files?.[0] ?? null)}
+            />
+            {mediaPreview ? (
+              <div className="cp-upload-preview">
+                {mediaPreview.startsWith('data:image') ? (
+                  <img src={mediaPreview} alt="preview" className="cp-upload-preview-img" />
+                ) : (
+                  <video src={mediaPreview} className="cp-upload-preview-video" />
+                )}
+                <div className="cp-upload-preview-overlay">
+                  <button type="button" className="cp-upload-change-btn">Cambiar</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <i className="bi bi-cloud-arrow-up cp-upload-icon"></i>
+                <span className="cp-upload-text">Arrastra tu archivo aquí</span>
+                <span className="cp-upload-hint">o haz clic para seleccionar</span>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ── AI assistant ───────────────────────────── */}
+        <div className="cp-field">
+          <button type="button" className="cp-ai-toggle" onClick={() => setAiOpen(o => !o)}>
+            <span className="cp-ai-toggle-label">
+              <i className="bi bi-stars"></i>
+              Asistente IA
+            </span>
+            <i className={`bi bi-chevron-down cp-ai-toggle-chevron${aiOpen ? ' open' : ''}`}></i>
+          </button>
+          {aiOpen && (
+            <div className="cp-ai-body">
+              <div>
+                <p className="cp-section-label">Tono</p>
+                <select className="cp-select" value={aiRole} onChange={e => setAiRole(e.target.value)} disabled={aiLoading || loading}>
+                  {AI_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <p className="cp-section-label">Tema o idea</p>
+                <textarea
+                  className="cp-textarea"
+                  style={{ minHeight: 72 }}
+                  placeholder="ej. lanzamiento de zapatillas ecológicas..."
+                  value={aiTopic}
+                  onChange={e => setAiTopic(e.target.value)}
+                  disabled={aiLoading || loading}
+                />
+              </div>
+              <button type="button" className="cp-ai-generate-btn" onClick={handleGenerateAI} disabled={aiLoading || loading}>
+                {aiLoading ? <><div className="cp-spinner"></div>Generando...</> : <><i className="bi bi-stars"></i>Generar caption</>}
+              </button>
+              {aiMsg && (
+                <p className={`cp-msg ${aiMsg.startsWith('Error') ? 'cp-msg-error' : 'cp-msg-info'}`} style={{ marginTop: 0 }}>
+                  {aiMsg}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── Caption ────────────────────────────────── */}
+        <div className="cp-field">
+          <p className="cp-section-label">Caption</p>
           <textarea
-            id="content"
-            className="form-control"
-            placeholder="El texto generado por la IA aparecerá aquí..."
+            className="cp-textarea"
+            placeholder="Escribe el texto de tu publicación..."
             value={content}
-            onChange={(e) => setContent(e.target.value)}
+            onChange={e => setContent(e.target.value)}
             rows={5}
             required
             disabled={loading}
           />
         </div>
-        <div className="mb-3">
-          <label htmlFor="mediaFile" className="form-label">Subir Imagen/Video <span className="text-danger">*</span></label>
-          <input
-            type="file"
-            className="form-control"
-            id="mediaFile"
-            onChange={handleFileChange}
-            required
-            disabled={loading}
-            accept="image/*,video/*"
-          />
-          {mediaPreview && (
-            <div className="mt-2 text-center">
-              {mediaPreview.startsWith('data:image') ? (
-                <img src={mediaPreview} alt="Previsualización" className="img-fluid rounded" style={{ maxHeight: '200px' }} />
-              ) : (
-                <video src={mediaPreview} controls className="img-fluid rounded" style={{ maxHeight: '200px' }} />
-              )}
-            </div>
-          )}
-        </div>
-        <div className="row">
-          <div className="col-md-6 mb-3">
-            <label htmlFor="postType" className="form-label">Tipo de Publicación</label>
-            <select
-              className="form-select"
-              id="postType"
-              value={postType}
-              onChange={(e) => setPostType(e.target.value)}
-              disabled={loading}
-            >
-              <option value="post">Post</option>
-              <option value="reel">Reel</option>
-              <option value="story">Story</option>
-            </select>
-          </div>
-          <div className="col-md-6 mb-3">
-            <label htmlFor="status" className="form-label">Estado</label>
-            <select
-              className="form-select"
-              id="status"
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-              disabled={loading}
-            >
-              <option value="draft">Borrador</option>
-              <option value="scheduled">Programado</option>
-            </select>
-          </div>
-        </div>
-        <div className="mb-3">
-          <label htmlFor="instagramAccountId" className="form-label">Cuenta de Instagram</label>
-          <select
-            className="form-select"
-            id="instagramAccountId"
-            value={selectedAccountId}
-            onChange={(e) => setSelectedAccountId(e.target.value)}
-            disabled={loading}
-          >
-            <option value="">-- Seleccionar Cuenta de Instagram --</option>
-            {instagramAccounts.map((acc) => (
-              <option key={acc.id} value={acc.id}>
-                {acc.account_name || acc.username} ({acc.username})
-              </option>
+
+        {/* ── Post type ──────────────────────────────── */}
+        <div className="cp-field">
+          <p className="cp-section-label">Tipo</p>
+          <div className="cp-type-grid">
+            {POST_TYPES.map(t => (
+              <button
+                type="button"
+                key={t.value}
+                className={`cp-type-card${postType === t.value ? ' active' : ''}`}
+                onClick={() => setPostType(t.value)}
+                disabled={loading}
+              >
+                <i className={`bi ${t.icon}`}></i>
+                <span>{t.label}</span>
+              </button>
             ))}
-          </select>
+          </div>
         </div>
-        <div className="mb-3">
-          <label htmlFor="scheduledAt" className="form-label">Programar para (opcional)</label>
-          <input
-            type="datetime-local"
-            className="form-control"
-            id="scheduledAt"
-            value={scheduledAt}
-            onChange={(e) => setScheduledAt(e.target.value)}
-            disabled={loading}
-          />
+
+        {/* ── Status ─────────────────────────────────── */}
+        <div className="cp-field">
+          <p className="cp-section-label">Estado</p>
+          <div className="cp-status-toggle">
+            <button
+              type="button"
+              className={`cp-status-btn${status === 'draft' ? ' active' : ''}`}
+              onClick={() => setStatus('draft')}
+              disabled={loading}
+            >
+              <i className="bi bi-pencil"></i>
+              Borrador
+            </button>
+            <button
+              type="button"
+              className={`cp-status-btn${status === 'scheduled' ? ' active' : ''}`}
+              onClick={() => setStatus('scheduled')}
+              disabled={loading}
+            >
+              <i className="bi bi-clock"></i>
+              Programar
+            </button>
+          </div>
         </div>
-        <button type="submit" className="btn btn-primary w-100" disabled={loading}>
-            {loading ? (
-              <><span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Creando...</>
-            ) : (
-              'Crear Publicación'
-            )}
-        </button>
+
+        {/* ── Schedule datetime (only when Programado) ── */}
+        {status === 'scheduled' && (
+          <div className="cp-field">
+            <p className="cp-section-label">Fecha y hora</p>
+            <input
+              type="datetime-local"
+              className="cp-input"
+              value={scheduledAt}
+              onChange={e => setScheduledAt(e.target.value)}
+              disabled={loading}
+            />
+          </div>
+        )}
+
+        {/* ── Instagram account ──────────────────────── */}
+        {instagramAccounts.length > 0 && (
+          <div className="cp-field">
+            <label htmlFor="instagram-account" className="cp-section-label">Cuenta de Instagram</label>
+            <select
+              id="instagram-account"
+              className="cp-select"
+              value={selectedAccountId}
+              onChange={e => setSelectedAccountId(e.target.value)}
+              disabled={loading}
+            >
+              <option value="">Sin cuenta específica</option>
+              {instagramAccounts.map(acc => (
+                <option key={acc.id} value={acc.id}>
+                  @{acc.username ?? acc.account_name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* ── Feedback ───────────────────────────────── */}
+        {message && (
+          <p className={`cp-msg ${isError ? 'cp-msg-error' : 'cp-msg-success'}`}>
+            <i className={`bi ${isError ? 'bi-exclamation-circle' : 'bi-check-circle'}`}></i>
+            {message}
+          </p>
+        )}
+
+        {/* ── Actions ────────────────────────────────── */}
+        <div className="cp-actions" style={{ marginTop: 24 }}>
+          {onCancel && (
+            <button type="button" className="cp-cancel-btn" onClick={onCancel} disabled={loading}>
+              Cancelar
+            </button>
+          )}
+          <button type="submit" className="cp-submit-btn" disabled={loading}>
+            {loading ? <><div className="cp-spinner"></div>Creando...</> : <><i className="bi bi-plus-lg"></i>Crear publicación</>}
+          </button>
+        </div>
+
       </form>
-      {message && (
-        <p className={`mt-3 text-center ${message.startsWith('Error') ? 'text-danger' : 'text-success'}`}>
-          {message}
-        </p>
-      )}
     </div>
   );
 };
 
 export default CreatePost;
-

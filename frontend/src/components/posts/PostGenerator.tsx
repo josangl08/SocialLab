@@ -257,7 +257,7 @@ const PostGenerator: React.FC<PostGeneratorProps> = ({ onPostGenerated }) => {
 
         formData.append('media_file', blob, `${generatedPost.metadata.export_id}.png`);
 
-        const response = await fetch('http://localhost:8000/posts', {
+        const response = await fetch('http://localhost:8000/api/posts', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,

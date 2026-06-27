@@ -1,0 +1,450 @@
+/* ─────────────────────────────────────────────────────
+   SocialLab PostDetailModal — Dark Observatory
+   ───────────────────────────────────────────────────── */
+
+/* ── Backdrop ────────────────────────────────────────── */
+.pdm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 6, 14, 0.8);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: pdm-fade-in 0.18s ease;
+}
+
+@keyframes pdm-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── Modal panel ─────────────────────────────────────── */
+.pdm-panel {
+  background: #0d1117;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  width: 100%;
+  max-width: 420px;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  animation: pdm-slide-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+@keyframes pdm-slide-in {
+  from { opacity: 0; transform: scale(0.93) translateY(12px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* ── Media zone (top) ────────────────────────────────── */
+.pdm-media {
+  position: relative;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.04);
+  flex-shrink: 0;
+}
+
+.pdm-media-img,
+.pdm-media-video {
+  width: 100%;
+  max-height: 300px;
+  object-fit: cover;
+  display: block;
+}
+
+.pdm-media-none {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 120px;
+  color: rgba(255, 255, 255, 0.15);
+  font-size: 36px;
+}
+
+/* ── Top bar (status + close) overlaid on media ──────── */
+.pdm-topbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pdm-topbar-chips {
+  display: flex;
+  gap: 6px;
+}
+
+.pdm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid transparent;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.pdm-chip-type {
+  background: rgba(8, 12, 24, 0.7);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: rgba(240, 242, 248, 0.85);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.pdm-chip-draft      { background: rgba(252,176,69,0.25);  border-color: rgba(252,176,69,0.5);  color: #fde68a; }
+.pdm-chip-scheduled  { background: rgba(129,140,248,0.25); border-color: rgba(129,140,248,0.5); color: #c7d2fe; }
+.pdm-chip-published  { background: rgba(34,197,94,0.25);   border-color: rgba(34,197,94,0.5);   color: #86efac; }
+.pdm-chip-failed     { background: rgba(239,68,68,0.25);   border-color: rgba(239,68,68,0.5);   color: #fca5a5; }
+
+.pdm-close-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(8, 12, 24, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(240, 242, 248, 0.8);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  line-height: 1;
+  transition: all 0.15s ease;
+}
+
+.pdm-close-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+/* ── Body (scrollable) ───────────────────────────────── */
+.pdm-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+.pdm-caption {
+  font-size: 14px;
+  line-height: 1.65;
+  color: rgba(240, 242, 248, 0.88);
+  margin: 0 0 20px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pdm-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.pdm-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(240, 242, 248, 0.5);
+}
+
+.pdm-meta-row i {
+  font-size: 13px;
+  width: 16px;
+  flex-shrink: 0;
+  color: rgba(131, 58, 180, 0.7);
+}
+
+.pdm-meta-label {
+  font-weight: 600;
+  color: rgba(240, 242, 248, 0.45);
+  min-width: 72px;
+}
+
+.pdm-meta-value {
+  color: rgba(240, 242, 248, 0.75);
+  font-weight: 500;
+}
+
+/* ── Footer ──────────────────────────────────────────── */
+.pdm-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  flex-shrink: 0;
+}
+
+.pdm-footer-row {
+  display: flex;
+  gap: 8px;
+}
+
+.pdm-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  border: 1px solid transparent;
+}
+
+.pdm-btn-edit {
+  background: rgba(129, 140, 248, 0.15);
+  border-color: rgba(129, 140, 248, 0.35);
+  color: #c7d2fe;
+}
+
+.pdm-btn-edit:hover {
+  background: rgba(129, 140, 248, 0.28);
+  border-color: rgba(129, 140, 248, 0.6);
+  transform: translateY(-1px);
+}
+
+.pdm-btn-close {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(240, 242, 248, 0.7);
+}
+
+.pdm-btn-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f0f2f8;
+}
+
+/* Schedule — Instagram gradient (draft → scheduled) */
+.pdm-btn-schedule {
+  background: linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045);
+  border-color: transparent;
+  color: #fff;
+}
+
+.pdm-btn-schedule:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(131, 58, 180, 0.45);
+}
+
+/* Cancel scheduled — amber (back to draft) */
+.pdm-btn-cancel-pub {
+  background: rgba(252, 176, 69, 0.15);
+  border-color: rgba(252, 176, 69, 0.4);
+  color: #fde68a;
+}
+
+.pdm-btn-cancel-pub:hover:not(:disabled) {
+  background: rgba(252, 176, 69, 0.28);
+  border-color: rgba(252, 176, 69, 0.65);
+  transform: translateY(-1px);
+}
+
+/* Retry failed — green */
+.pdm-btn-retry {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #86efac;
+}
+
+.pdm-btn-retry:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.28);
+  border-color: rgba(34, 197, 94, 0.65);
+  transform: translateY(-1px);
+}
+
+/* Confirm schedule — teal/green */
+.pdm-btn-confirm {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: rgba(34, 197, 94, 0.5);
+  color: #86efac;
+  flex: 0 0 auto;
+  padding: 10px 14px;
+}
+
+.pdm-btn-confirm:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.35);
+  transform: translateY(-1px);
+}
+
+.pdm-btn-confirm:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Cancel scheduling step — icon-only circle */
+.pdm-btn-cancel-step {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(240, 242, 248, 0.6);
+}
+
+.pdm-btn-cancel-step:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  color: #f0f2f8;
+}
+
+/* ── Scheduling footer variant ───────────────────────── */
+.pdm-footer-schedule {
+  align-items: center;
+}
+
+.pdm-schedule-input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  color: #f0f2f8;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 13px;
+  padding: 9px 12px;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  color-scheme: dark;
+}
+
+.pdm-schedule-input:focus {
+  outline: none;
+  border-color: rgba(34, 197, 94, 0.5);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1);
+}
+
+/* ── Error strip ─────────────────────────────────────── */
+.pdm-error-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: rgba(239, 68, 68, 0.1);
+  border-top: 1px solid rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.pdm-error-strip i {
+  flex-shrink: 0;
+}
+
+/* ── Action spinner ──────────────────────────────────── */
+.pdm-spinner {
+  width: 15px;
+  height: 15px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: pdm-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pdm-spin { to { transform: rotate(360deg); } }
+
+/* Disabled state for all pdm-btn */
+.pdm-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* Reschedule — indigo (secondary scheduling action) */
+.pdm-btn-reschedule {
+  background: rgba(129, 140, 248, 0.15);
+  border-color: rgba(129, 140, 248, 0.35);
+  color: #c7d2fe;
+}
+
+.pdm-btn-reschedule:hover:not(:disabled) {
+  background: rgba(129, 140, 248, 0.28);
+  border-color: rgba(129, 140, 248, 0.6);
+  transform: translateY(-1px);
+}
+
+/* Delete — subtle red (trigger confirmation) */
+.pdm-btn-delete {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+}
+
+.pdm-btn-delete:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.45);
+  transform: translateY(-1px);
+}
+
+/* Delete confirm — stronger red (inside confirmation step) */
+.pdm-btn-delete-confirm {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: rgba(239, 68, 68, 0.55);
+  color: #fca5a5;
+}
+
+.pdm-btn-delete-confirm:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.4);
+  border-color: rgba(239, 68, 68, 0.8);
+  transform: translateY(-1px);
+}
+
+/* Secondary / neutral */
+.pdm-btn-secondary {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(240, 242, 248, 0.7);
+}
+
+.pdm-btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f0f2f8;
+}
+
+/* Delete confirmation warning message */
+.pdm-confirm-msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fde68a;
+  background: rgba(252, 176, 69, 0.08);
+  border: 1px solid rgba(252, 176, 69, 0.2);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.pdm-confirm-msg i {
+  flex-shrink: 0;
+  font-size: 13px;
+  margin-top: 1px;
+  color: #fcb045;
+}

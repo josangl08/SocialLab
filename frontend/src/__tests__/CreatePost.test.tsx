@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import CreatePost from '../components/posts/CreatePost';
 import { useAuth } from '../context/AuthContext';
@@ -37,7 +38,7 @@ describe('CreatePost Component Boilerplate', () => {
   });
 
   test('renders Instagram account selector option lists', async () => {
-    render(<CreatePost onPostCreated={mockOnPostCreated} />);
+    render(<MemoryRouter><CreatePost onPostCreated={mockOnPostCreated} /></MemoryRouter>);
 
     // Wait for accounts to load
     await waitFor(() => {
@@ -54,12 +55,12 @@ describe('CreatePost Component Boilerplate', () => {
     expect(options[0]).toHaveValue('');
     expect(options[1]).toHaveValue('1');
     expect(options[2]).toHaveValue('2');
-    expect(options[1].textContent).toContain('Test Account 1');
-    expect(options[2].textContent).toContain('Test Account 2');
+    expect(options[1].textContent).toContain('@test_user_1');
+    expect(options[2].textContent).toContain('@test_user_2');
   });
 
   test('allows selecting an Instagram account', async () => {
-    render(<CreatePost onPostCreated={mockOnPostCreated} />);
+    render(<MemoryRouter><CreatePost onPostCreated={mockOnPostCreated} /></MemoryRouter>);
 
     // Wait for accounts to load
     await waitFor(() => {

@@ -180,7 +180,7 @@ const Dashboard: React.FC = () => {
         }
       }
 
-      const postsResponse = await fetch('http://localhost:8000/posts', {
+      const postsResponse = await fetch('http://localhost:8000/api/posts', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 

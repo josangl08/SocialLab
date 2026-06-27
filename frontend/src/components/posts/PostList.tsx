@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { useAuth } from '../../context/AuthContext'; // Ruta corregida
+import React, { useEffect, useState, useRef } from 'react';
+import { useAuth } from '../../context/AuthContext';
 import EditPostForm from './EditPostForm';
+import PostDetailModal from './PostDetailModal';
+import './PostList.css';
 
 interface Post {
   id: number;
@@ -14,155 +16,197 @@ interface Post {
 }
 
 interface PostListProps {
-  refresh?: boolean; // Prop para forzar la recarga
+  refresh?: boolean;
 }
+
+const TYPE_ICONS: Record<string, string> = {
+  reel: 'bi-camera-video', carousel: 'bi-collection', story: 'bi-layers',
+};
+
+// ── Self-contained video cell with play/pause toggle ─────
+const VideoCell: React.FC<{ src: string }> = ({ src }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  const handlePlayToggle = (e: React.MouseEvent) => {
+    e.stopPropagation(); // prevent opening the detail modal
+    const video = videoRef.current;
+    if (!video) return;
+    if (isPlaying) {
+      video.pause();
+    } else {
+      video.play().catch(() => {});
+    }
+  };
+
+  return (
+    <>
+      <video
+        ref={videoRef}
+        src={src}
+        className="sl-post-cell-img"
+        muted
+        playsInline
+        preload="auto"
+        onLoadedMetadata={e => { (e.target as HTMLVideoElement).currentTime = 0.001; }}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onEnded={() => setIsPlaying(false)}
+      />
+      <button
+        className={`sl-cell-play-btn${isPlaying ? ' is-playing' : ''}`}
+        onClick={handlePlayToggle}
+        aria-label={isPlaying ? 'Pausar' : 'Reproducir'}
+      >
+        <i className={`bi ${isPlaying ? 'bi-pause-fill' : 'bi-play-fill'}`}></i>
+      </button>
+    </>
+  );
+};
 
 const PostList: React.FC<PostListProps> = ({ refresh }) => {
   const { token } = useAuth();
   const [posts, setPosts] = useState<Post[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
-  const [editingPost, setEditingPost] = useState<Post | null>(null); // Estado para la publicación en edición
+  const [alert, setAlert] = useState<{ text: string; ok: boolean } | null>(null);
+  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+  const [editingPost, setEditingPost] = useState<Post | null>(null);
 
   const fetchPosts = async () => {
-    if (!token) {
-      setError('No hay token de autenticación disponible.');
-      setLoading(false);
-      return;
-    }
-
+    if (!token) { setError('No hay token de autenticación.'); setLoading(false); return; }
     try {
-      const response = await fetch('http://localhost:8000/posts', {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+      const res = await fetch('http://localhost:8000/api/posts', {
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       });
-
-      if (response.ok) {
-        const data: Post[] = await response.json();
-        setPosts(data);
-      } else {
-        const errorData = await response.json();
-        console.error('Error cargando posts:', errorData);
-        setError('Error al cargar publicaciones: ' + (errorData.detail || 'Error desconocido'));
+      if (res.ok) setPosts(await res.json());
+      else {
+        const err = await res.json();
+        setError('Error al cargar publicaciones: ' + (err.detail ?? 'Error desconocido'));
       }
-    } catch (err) {
-      console.error('Error de red:', err);
+    } catch {
       setError('Error de red o servidor');
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchPosts();
-  }, [token, refresh]); // Añadir 'refresh' a las dependencias del useEffect
+  useEffect(() => { fetchPosts(); }, [token, refresh]);
 
   const handleDelete = async (postId: number) => {
-    if (!window.confirm('¿Estás seguro de que quieres eliminar esta publicación?')) {
-      return;
-    }
-
-    setDeleteMessage(null);
+    if (!window.confirm('¿Eliminar esta publicación?')) return;
+    setAlert(null);
     try {
-      const response = await fetch(`http://localhost:8000/posts/${postId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+      const res = await fetch(`http://localhost:8000/api/posts/${postId}`, {
+        method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` },
       });
-
-      if (response.ok) {
-        setDeleteMessage('Publicación eliminada exitosamente.');
-        fetchPosts(); // Refrescar la lista de publicaciones
+      if (res.ok) {
+        setAlert({ text: 'Publicación eliminada.', ok: true });
+        fetchPosts();
       } else {
-        const errorData = await response.json();
-        setDeleteMessage('Error al eliminar publicación: ' + (errorData.detail || 'Error desconocido'));
+        const err = await res.json();
+        setAlert({ text: 'Error: ' + (err.detail ?? 'Error desconocido'), ok: false });
       }
-    } catch (err) {
-      setDeleteMessage('Error de red o servidor');
-      console.error('Error eliminando post:', err);
+    } catch {
+      setAlert({ text: 'Error de red o servidor', ok: false });
     }
   };
 
-  const handleEditClick = (post: Post) => {
-    setEditingPost(post);
-  };
+  if (loading) return (
+    <div className="sl-post-list">
+      <div className="sl-post-empty"><i className="bi bi-hourglass-split"></i>Cargando publicaciones...</div>
+    </div>
+  );
 
-  const handleEditSave = () => {
-    setEditingPost(null); // Salir del modo edición
-    fetchPosts(); // Refrescar la lista de publicaciones
-  };
+  if (error) return (
+    <div className="sl-post-list">
+      <div className="sl-post-alert sl-post-alert-error"><i className="bi bi-exclamation-circle"></i>{error}</div>
+    </div>
+  );
 
-  const handleEditCancel = () => {
-    setEditingPost(null); // Salir del modo edición
-  };
+  if (editingPost) return (
+    <EditPostForm
+      post={editingPost}
+      onSave={() => { setEditingPost(null); fetchPosts(); }}
+      onCancel={() => setEditingPost(null)}
+    />
+  );
 
-  if (loading) {
-    return <p className="text-center text-primary">Cargando publicaciones...</p>;
-  }
-
-  if (error) {
-    return <p className="text-danger">{error}</p>;
-  }
+  const isImage = (url: string) => /\.(jpeg|jpg|gif|png|webp|svg)(\?.*)?$/i.test(url);
+  const isVideoMedia = (post: Post) =>
+    post.post_type === 'reel' ||
+    (!!post.media_url && /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(post.media_url));
 
   return (
-    <div className="mt-4 post-list-container">
-      <h3 className="mb-4 text-dark">Mis Publicaciones</h3>
-      {deleteMessage && <p className={`mb-3 ${deleteMessage.startsWith('Error') ? 'text-danger' : 'text-success'}`}>{deleteMessage}</p>}
+    <div className="sl-post-list">
+      {alert && (
+        <div className={`sl-post-alert ${alert.ok ? 'sl-post-alert-success' : 'sl-post-alert-error'}`}>
+          <i className={`bi ${alert.ok ? 'bi-check-circle' : 'bi-exclamation-circle'}`}></i>
+          {alert.text}
+        </div>
+      )}
 
-      {editingPost ? (
-        <EditPostForm post={editingPost} onSave={handleEditSave} onCancel={handleEditCancel} />
+      {posts.length === 0 ? (
+        <div className="sl-post-empty">
+          <i className="bi bi-inbox"></i>
+          No tienes publicaciones aún
+        </div>
       ) : (
-        posts.length === 0 ? (
-          <p>No tienes publicaciones aún.</p>
-        ) : (
-          <div className="row row-cols-1 g-3">
-            {posts.map((post) => (
-              <div key={post.id} className="col">
-                <div className="card shadow-sm post-card">
-                  <div className="card-body">
-                    <h5 className="card-title text-dark">Contenido:</h5>
-                    <p className="card-text text-secondary">{post.content}</p>
-                    {post.media_url && (
-                      <div className="mb-2 text-center">
-                        {post.media_url.match(/\.(jpeg|jpg|gif|png|webp|svg)(\?.*)?$/i) ? (
-                          <img src={post.media_url} alt="Publicación" className="img-fluid rounded" style={{ maxHeight: '200px', maxWidth: '100%' }} />
-                        ) : post.media_url.match(/\.(mp4|webm|ogg)(\?.*)?$/i) ? (
-                          <video src={post.media_url} controls className="img-fluid rounded" style={{ maxHeight: '200px', maxWidth: '100%' }} />
-                        ) : (
-                          <p className="text-warning">Formato de medio no soportado para previsualización. <a href={post.media_url} target="_blank" rel="noopener noreferrer" className="text-primary">Ver</a></p>
-                        )}
-                      </div>
-                    )}
-                    <p className="card-text"><strong className="text-dark">Tipo:</strong> {post.post_type}</p>
-                    <p className="card-text"><strong className="text-dark">Estado:</strong> {post.status}</p>
-                    <p className="card-text"><strong className="text-dark">Creado:</strong> {new Date(post.created_at).toLocaleString()}</p>
-                    {post.scheduled_at && <p className="card-text"><strong className="text-dark">Programado:</strong> {new Date(post.scheduled_at).toLocaleString()}</p>}
-                    <div className="d-flex justify-content-end mt-3">
-                      <button
-                        onClick={() => handleEditClick(post)}
-                        className="btn btn-primary btn-sm me-2"
-                      >
-                        Editar
-                      </button>
-                      <button
-                        onClick={() => handleDelete(post.id)}
-                        className="btn btn-danger btn-sm"
-                      >
-                        Eliminar
-                      </button>
-                    </div>
+        <>
+          <div className="sl-grid-header">
+            <span className="sl-grid-count">{posts.length} publicación{posts.length !== 1 ? 'es' : ''}</span>
+          </div>
+
+          <div className="sl-post-grid">
+            {posts.map(post => (
+              <div key={post.id} className="sl-post-cell" onClick={() => setSelectedPost(post)}>
+                {/* Media fill */}
+                {post.media_url && isImage(post.media_url) ? (
+                  <img src={post.media_url} alt="" className="sl-post-cell-img" />
+                ) : isVideoMedia(post) && post.media_url ? (
+                  <VideoCell src={post.media_url} />
+                ) : (
+                  <div className={`sl-post-cell-text status-${post.status}`}>
+                    {post.content}
                   </div>
+                )}
+
+                {/* Status dot */}
+                <span className={`sl-cell-status-dot ${post.status}`}></span>
+
+                {/* Type badge — top-right corner, always visible */}
+                {post.post_type !== 'post' && (
+                  <span className="sl-cell-type-badge">
+                    <i className={`bi ${TYPE_ICONS[post.post_type] ?? 'bi-image'}`}></i>
+                  </span>
+                )}
+
+                {/* Hover overlay */}
+                <div className="sl-post-cell-overlay">
+                  <span className={`sl-overlay-status ${post.status}`}>
+                    {post.status === 'draft' ? 'Borrador' :
+                     post.status === 'scheduled' ? 'Programado' :
+                     post.status === 'published' ? 'Publicado' : post.status}
+                  </span>
+                  <p className="sl-overlay-caption">{post.content}</p>
                 </div>
               </div>
             ))}
           </div>
-        )
+        </>
       )}
+
+      <PostDetailModal
+        show={selectedPost !== null}
+        onHide={() => setSelectedPost(null)}
+        post={selectedPost}
+        onEdit={() => {
+          const post = selectedPost;
+          setSelectedPost(null);
+          if (post) setEditingPost(post);
+        }}
+        onActionSuccess={fetchPosts}
+      />
     </div>
   );
 };

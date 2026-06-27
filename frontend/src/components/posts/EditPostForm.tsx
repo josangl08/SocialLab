@@ -1,5 +1,6 @@
 import React, { useState, FormEvent, useEffect } from 'react';
-import { useAuth } from '../../context/AuthContext'; // Ruta corregida
+import { useAuth } from '../../context/AuthContext';
+import './CreatePost.css';
 
 interface Post {
   id: number;
@@ -13,257 +14,269 @@ interface Post {
   instagram_account_id?: number | null;
 }
 
+interface InstagramAccount {
+  id: number;
+  username: string;
+  account_name: string;
+}
+
 interface EditPostFormProps {
   post: Post;
-  onSave: () => void; // Callback para cuando se guarda la publicación
-  onCancel: () => void; // Callback para cuando se cancela la edición
+  onSave: () => void;
+  onCancel: () => void;
 }
+
+const POST_TYPES = [
+  { value: 'post',     label: 'Post',     icon: 'bi-image' },
+  { value: 'reel',     label: 'Reel',     icon: 'bi-camera-video' },
+  { value: 'carousel', label: 'Carrusel', icon: 'bi-collection' },
+];
+
+const isImageUrl = (url: string) => /\.(jpeg|jpg|gif|png|webp|svg)(\?.*)?$/i.test(url);
 
 const EditPostForm: React.FC<EditPostFormProps> = ({ post, onSave, onCancel }) => {
   const { token } = useAuth();
-  const [content, setContent] = useState<string>(post.content);
-  const [mediaFile, setMediaFile] = useState<File | null>(null); // Estado para el nuevo archivo multimedia
-  const [mediaPreview, setMediaPreview] = useState<string | null>(null); // Nuevo estado para la URL de previsualización
-  const [currentMediaUrl, setCurrentMediaUrl] = useState<string | null>(post.media_url); // Para mostrar la URL actual
-  const [postType, setPostType] = useState<string>(post.post_type);
-  const [status, setStatus] = useState<string>(post.status);
-  const [scheduledAt, setScheduledAt] = useState<string>(
+  const [content, setContent]               = useState(post.content);
+  const [mediaFile, setMediaFile]           = useState<File | null>(null);
+  const [mediaPreview, setMediaPreview]     = useState<string | null>(null);
+  const [currentMediaUrl]                   = useState<string | null>(post.media_url);
+  const [postType, setPostType]             = useState(post.post_type);
+  const [status, setStatus]                 = useState(post.status === 'published' || post.status === 'failed' ? 'draft' : post.status);
+  const [scheduledAt, setScheduledAt]       = useState(
     post.scheduled_at ? new Date(post.scheduled_at).toISOString().slice(0, 16) : ''
   );
-  const [message, setMessage] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(false); // Nuevo estado de carga
-
-  interface InstagramAccount {
-    id: number;
-    username: string;
-    account_name: string;
-  }
-
-  // --- Estados de cuenta de Instagram ---
-  const [instagramAccounts, setInstagramAccounts] = useState<InstagramAccount[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState<string>(
-    post.instagram_account_id ? post.instagram_account_id.toString() : ''
+  const [selectedAccountId, setSelectedAccountId] = useState(
+    post.instagram_account_id ? String(post.instagram_account_id) : ''
   );
+  const [instagramAccounts, setInstagramAccounts] = useState<InstagramAccount[]>([]);
+  const [loading, setLoading]   = useState(false);
+  const [message, setMessage]   = useState('');
+  const [isError, setIsError]   = useState(false);
 
   useEffect(() => {
-    const fetchAccounts = async () => {
-      if (!token) return;
-      try {
-        const response = await fetch('http://localhost:8000/instagram/accounts', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        });
-        if (response.ok) {
-          const data = await response.json();
-          setInstagramAccounts(data);
-        }
-      } catch (err) {
-        console.error('Error fetching Instagram accounts:', err);
-      }
-    };
-    fetchAccounts();
+    if (!token) return;
+    fetch('http://localhost:8000/instagram/accounts', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : [])
+      .then(setInstagramAccounts)
+      .catch(() => {});
   }, [token]);
 
-  const formatErrorMessage = (errorData: any) => {
-    if (errorData && Array.isArray(errorData.detail)) {
-      return errorData.detail.map((err: any) => err.msg || err.message || JSON.stringify(err)).join('; ');
-    } else if (errorData && errorData.detail) {
-      return errorData.detail;
-    } else if (errorData && errorData.message) {
-      return errorData.message;
-    }
-    return 'Error desconocido';
-  };
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files ? e.target.files[0] : null;
+    const file = e.target.files?.[0] ?? null;
     setMediaFile(file);
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setMediaPreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    } else {
-      setMediaPreview(null);
-    }
+    if (!file) { setMediaPreview(null); return; }
+    const reader = new FileReader();
+    reader.onloadend = () => setMediaPreview(reader.result as string);
+    reader.readAsDataURL(file);
   };
 
-  const handleSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    setMessage('');
-    setLoading(true); // Iniciar carga
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setMessage(''); setIsError(false); setLoading(true);
 
     if (!token) {
-      setMessage('Error: No hay token de autenticación.');
-      setLoading(false);
-      return;
+      setMessage('Sin token de autenticación.');
+      setIsError(true); setLoading(false); return;
     }
-
-    // Validación adicional para el archivo multimedia si es obligatorio
-    // Si no hay un archivo actual y no se ha seleccionado uno nuevo, mostrar error
     if (!currentMediaUrl && !mediaFile) {
-      setMessage('Error: Un archivo multimedia es obligatorio para publicaciones de Instagram.');
-      setLoading(false);
-      return;
+      setMessage('Un archivo multimedia es obligatorio para Instagram.');
+      setIsError(true); setLoading(false); return;
     }
 
     const formData = new FormData();
     formData.append('content', content);
     formData.append('post_type', postType);
     formData.append('status', status);
-    if (scheduledAt) {
-      formData.append('scheduled_at', new Date(scheduledAt).toISOString());
-    }
-    if (mediaFile) {
-      formData.append('media_file', mediaFile);
-    } else if (currentMediaUrl) {
-      // Si no se sube un nuevo archivo pero hay uno existente, no hacemos nada
-      // El backend mantendrá el media_url existente si media_file no se envía
-    }
-    if (selectedAccountId) {
-      formData.append('instagram_account_id', selectedAccountId);
-    }
+    if (scheduledAt) formData.append('scheduled_at', new Date(scheduledAt).toISOString());
+    if (mediaFile) formData.append('media_file', mediaFile);
+    if (selectedAccountId) formData.append('instagram_account_id', selectedAccountId);
 
     try {
-      const response = await fetch(`http://localhost:8000/posts/${post.id}`, {
+      const res = await fetch(`http://localhost:8000/api/posts/${post.id}`, {
         method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          // No establecer 'Content-Type', FormData lo hace automáticamente con boundary
-        },
+        headers: { 'Authorization': `Bearer ${token}` },
         body: formData,
       });
-
-      if (response.ok) {
-        setMessage('Publicación actualizada exitosamente!');
-        onSave(); // Notificar al componente padre que se guardó
+      if (res.ok) {
+        setMessage('Publicación actualizada.');
+        onSave();
       } else {
-        const errorData = await response.json();
-        setMessage('Error al actualizar publicación: ' + formatErrorMessage(errorData));
+        const err = await res.json();
+        const detail = err.detail;
+        setMessage(Array.isArray(detail)
+          ? detail.map((d: any) => d.msg).join('; ')
+          : (detail ?? 'Error al actualizar'));
+        setIsError(true);
       }
-    } catch (error) {
-      setMessage('Error de red o servidor: ' + error.message);
-      console.error('Error de red o servidor:', error);
+    } catch {
+      setMessage('Error de red o servidor.'); setIsError(true);
     } finally {
-      setLoading(false); // Finalizar carga
+      setLoading(false);
     }
   };
 
+  // Displayed media: new file preview takes priority over current URL
+  const displayPreview = mediaPreview ?? currentMediaUrl;
+  const displayIsImage = displayPreview
+    ? (mediaPreview ? mediaPreview.startsWith('data:image') : isImageUrl(displayPreview))
+    : false;
+
   return (
-    <div className="mt-4 p-4 bg-light rounded shadow-sm edit-post-form-card">
-      <h4 className="mb-3 text-primary">Editar Publicación (ID: {post.id})</h4>
+    <div className="cp-wrap">
       <form onSubmit={handleSubmit}>
-        <div className="mb-3">
+
+        {/* ── Media ─────────────────────────────────────── */}
+        <div className="cp-field">
+          <p className="cp-section-label">
+            Imagen / Video
+            {currentMediaUrl && !mediaFile && (
+              <span style={{ marginLeft: 8, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+                — haz clic para cambiar
+              </span>
+            )}
+          </p>
+          <div className="cp-upload-zone" style={{ maxHeight: 220 }}>
+            <input
+              type="file"
+              accept="image/*,video/*"
+              onChange={handleFileChange}
+              disabled={loading}
+            />
+            {displayPreview ? (
+              <div className="cp-upload-preview">
+                {displayIsImage ? (
+                  <img src={displayPreview} alt="preview" className="cp-upload-preview-img" />
+                ) : (
+                  <video src={displayPreview} className="cp-upload-preview-video" muted playsInline preload="auto" />
+                )}
+                <div className="cp-upload-preview-overlay">
+                  <button type="button" className="cp-upload-change-btn">Cambiar</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <i className="bi bi-cloud-arrow-up cp-upload-icon"></i>
+                <span className="cp-upload-text">Arrastra tu archivo aquí</span>
+                <span className="cp-upload-hint">o haz clic para seleccionar</span>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ── Caption ───────────────────────────────────── */}
+        <div className="cp-field">
+          <p className="cp-section-label">Caption</p>
           <textarea
-            className="form-control"
-            placeholder="Contenido de la publicación"
+            className="cp-textarea"
+            placeholder="Texto de la publicación..."
             value={content}
-            onChange={(e) => setContent(e.target.value)}
-            rows={3}
+            onChange={e => setContent(e.target.value)}
+            rows={5}
             required
             disabled={loading}
           />
         </div>
-        {currentMediaUrl && (
-          <div className="mb-3">
-            <p className="text-secondary">Medio actual: <a href={currentMediaUrl} target="_blank" rel="noopener noreferrer" className="text-primary">Ver</a></p>
+
+        {/* ── Post type ─────────────────────────────────── */}
+        <div className="cp-field">
+          <p className="cp-section-label">Tipo</p>
+          <div className="cp-type-grid">
+            {POST_TYPES.map(t => (
+              <button
+                type="button"
+                key={t.value}
+                className={`cp-type-card${postType === t.value ? ' active' : ''}`}
+                onClick={() => setPostType(t.value)}
+                disabled={loading}
+              >
+                <i className={`bi ${t.icon}`}></i>
+                <span>{t.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Status ────────────────────────────────────── */}
+        <div className="cp-field">
+          <p className="cp-section-label">Estado</p>
+          <div className="cp-status-toggle">
+            <button
+              type="button"
+              className={`cp-status-btn${status === 'draft' ? ' active' : ''}`}
+              onClick={() => setStatus('draft')}
+              disabled={loading}
+            >
+              <i className="bi bi-pencil"></i>Borrador
+            </button>
+            <button
+              type="button"
+              className={`cp-status-btn${status === 'scheduled' ? ' active' : ''}`}
+              onClick={() => setStatus('scheduled')}
+              disabled={loading}
+            >
+              <i className="bi bi-clock"></i>Programado
+            </button>
+          </div>
+        </div>
+
+        {/* ── Schedule datetime ─────────────────────────── */}
+        {status === 'scheduled' && (
+          <div className="cp-field">
+            <p className="cp-section-label">Fecha y hora</p>
+            <input
+              type="datetime-local"
+              className="cp-input"
+              value={scheduledAt}
+              onChange={e => setScheduledAt(e.target.value)}
+              disabled={loading}
+            />
           </div>
         )}
-        <div className="mb-3">
-          <label htmlFor="mediaFileEdit" className="form-label">Subir nueva Imagen/Video (opcional si ya hay una)</label>
-          <input
-            type="file"
-            className="form-control"
-            id="mediaFileEdit"
-            onChange={handleFileChange}
-            disabled={loading}
-            accept="image/*,video/*" // Aceptar solo imágenes y videos
-          />
-          {mediaPreview && (
-            <div className="mt-2 text-center">
-              {mediaPreview.startsWith('data:image') ? (
-                <img src={mediaPreview} alt="Previsualización" className="img-fluid rounded" style={{ maxHeight: '200px' }} />
-              ) : (
-                <video src={mediaPreview} controls className="img-fluid rounded" style={{ maxHeight: '200px' }} />
-              )}
-            </div>
-          )}
-        </div>
-        <div className="mb-3">
-          <label htmlFor="postTypeEdit" className="form-label">Tipo de Publicación</label>
-          <select
-            className="form-select"
-            id="postTypeEdit"
-            value={postType}
-            onChange={(e) => setPostType(e.target.value)}
-            disabled={loading}
-          >
-            <option value="post">Post</option>
-            <option value="reel">Reel</option>
-            <option value="story">Story</option>
-          </select>
-        </div>
-        <div className="mb-3">
-          <label htmlFor="statusEdit" className="form-label">Estado</label>
-          <select
-            className="form-select"
-            id="statusEdit"
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            disabled={loading}
-          >
-            <option value="draft">Borrador</option>
-            <option value="scheduled">Programado</option>
-          </select>
-        </div>
-        <div className="mb-3">
-          <label htmlFor="instagramAccountIdEdit" className="form-label">Cuenta de Instagram</label>
-          <select
-            className="form-select"
-            id="instagramAccountIdEdit"
-            value={selectedAccountId}
-            onChange={(e) => setSelectedAccountId(e.target.value)}
-            disabled={loading}
-          >
-            <option value="">-- Seleccionar Cuenta de Instagram --</option>
-            {instagramAccounts.map((acc) => (
-              <option key={acc.id} value={acc.id}>
-                {acc.account_name || acc.username} ({acc.username})
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="mb-3">
-          <label htmlFor="scheduledAtEdit" className="form-label">Programar para (opcional)</label>
-          <input
-            type="datetime-local"
-            className="form-control"
-            id="scheduledAtEdit"
-            value={scheduledAt}
-            onChange={(e) => setScheduledAt(e.target.value)}
-            disabled={loading}
-          />
-        </div>
-        <div className="d-flex justify-content-end mt-3">
-          <button type="submit" className="btn btn-success me-2" disabled={loading}>
-            {loading ? (
-              <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-            ) : (
-              'Guardar Cambios'
-            )}
-          </button>
-          <button type="button" onClick={onCancel} className="btn btn-secondary" disabled={loading}>
+
+        {/* ── Instagram account ─────────────────────────── */}
+        {instagramAccounts.length > 0 && (
+          <div className="cp-field">
+            <p className="cp-section-label">Cuenta de Instagram</p>
+            <select
+              className="cp-select"
+              value={selectedAccountId}
+              onChange={e => setSelectedAccountId(e.target.value)}
+              disabled={loading}
+            >
+              <option value="">Sin cuenta específica</option>
+              {instagramAccounts.map(acc => (
+                <option key={acc.id} value={acc.id}>
+                  @{acc.username ?? acc.account_name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* ── Feedback ──────────────────────────────────── */}
+        {message && (
+          <p className={`cp-msg ${isError ? 'cp-msg-error' : 'cp-msg-success'}`}>
+            <i className={`bi ${isError ? 'bi-exclamation-circle' : 'bi-check-circle'}`}></i>
+            {message}
+          </p>
+        )}
+
+        {/* ── Actions ───────────────────────────────────── */}
+        <div className="cp-actions" style={{ marginTop: 24 }}>
+          <button type="button" className="cp-cancel-btn" onClick={onCancel} disabled={loading}>
             Cancelar
           </button>
+          <button type="submit" className="cp-submit-btn" disabled={loading}>
+            {loading
+              ? <><div className="cp-spinner"></div>Guardando...</>
+              : <><i className="bi bi-check-lg"></i>Guardar cambios</>
+            }
+          </button>
         </div>
+
       </form>
-      {message && (
-        <p className={`mt-3 text-center ${message.startsWith('Error') ? 'text-danger' : 'text-success'}`}>
-          {message}
-        </p>
-      )}
     </div>
   );
 };

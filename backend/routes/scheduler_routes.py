@@ -7,7 +7,7 @@ Author: SocialLab
 Date: 2025-01-16
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 import logging
 
@@ -43,7 +43,7 @@ class SchedulePostRequest(BaseModel):
     @validator('scheduled_time')
     def validate_future_time(cls, v):
         """Ensure scheduled time is in the future."""
-        if v <= datetime.now():
+        if v <= datetime.now(timezone.utc):
             raise ValueError("scheduled_time must be in the future")
         return v
 
@@ -67,7 +67,7 @@ class ReschedulePostRequest(BaseModel):
     @validator('new_scheduled_time')
     def validate_future_time(cls, v):
         """Ensure scheduled time is in the future."""
-        if v <= datetime.now():
+        if v <= datetime.now(timezone.utc):
             raise ValueError("new_scheduled_time must be in the future")
         return v
 

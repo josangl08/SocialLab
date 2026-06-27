@@ -1,102 +1,506 @@
-/* Estilos para el calendario */
-.rbc-calendar {
-  font-family: 'Arial', sans-serif;
+/* ─────────────────────────────────────────────────────
+   SocialLab Calendar — Dark Observatory Override
+   Scoped to .sl-calendar-wrap to avoid bleed into global styles.
+   ───────────────────────────────────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
+
+/* ── Design tokens & root ────────────────────────────── */
+.sl-calendar-wrap {
+  --cal-page:       #080c18;
+  --cal-surface:    rgba(255, 255, 255, 0.04);
+  --cal-surface-2:  rgba(255, 255, 255, 0.07);
+  --cal-border:     rgba(255, 255, 255, 0.08);
+  --cal-border-2:   rgba(255, 255, 255, 0.13);
+  --cal-text:       #f0f2f8;
+  --cal-muted:      rgba(240, 242, 248, 0.5);
+  --cal-today-glow: rgba(131, 58, 180, 0.22);
+  --cal-ease:       cubic-bezier(0.4, 0, 0.2, 1);
+  --cal-t:          0.2s;
+
+  font-family: 'Plus Jakarta Sans', sans-serif;
 }
 
-/* Colores de fondo para tipos de publicación */
-.rbc-event.event-post {
-  background-color: #00BCD4; /* Cian vibrante para Posts */
+/* ── Calendar grid wrapper ───────────────────────────── */
+.sl-cal-grid-wrap {
+  position: relative;
+  height: 700px;
 }
 
-.rbc-event.event-reel {
-  background-color: #FF4081; /* Rosa para Reels */
+/* ── Main calendar container ─────────────────────────── */
+.sl-calendar-wrap .rbc-calendar {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  color: var(--cal-text);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--cal-border);
+  height: 100%;
 }
 
-.rbc-event.event-story {
-  background-color: #FFC107; /* Amarillo para Stories */
+/* ── Toolbar ─────────────────────────────────────────── */
+.sl-calendar-wrap .rbc-toolbar {
+  padding: 14px 20px;
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-bottom: 1px solid var(--cal-border);
+  margin-bottom: 0;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
-/* Estilos base para los eventos del calendario */
-.rbc-event {
-  padding: 5px 8px;
-  font-size: 0.85em;
+.sl-calendar-wrap .rbc-toolbar-label {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--cal-text);
+  letter-spacing: -0.2px;
+  text-transform: capitalize;
+}
+
+.sl-calendar-wrap .rbc-btn-group {
+  display: flex;
+  gap: 4px;
+}
+
+.sl-calendar-wrap .rbc-btn-group button,
+.sl-calendar-wrap .rbc-toolbar button {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid var(--cal-border) !important;
+  border-radius: 8px !important;
+  color: var(--cal-muted) !important;
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  padding: 6px 14px !important;
   cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); /* Sombra sutil */
-  transition: all 0.3s cubic-bezier(.25,.8,.25,1);
-  border: 2px solid transparent; /* Borde inicial transparente */
-  border-left-width: 8px; /* Ancho del borde para el estado */
-  box-sizing: border-box; /* Incluir padding y border en el ancho/alto */
+  transition: all var(--cal-t) var(--cal-ease);
 }
 
-.rbc-event.event-status-draft,
-.rbc-event.event-status-scheduled {
-  color: var(--text-dark); /* Color de texto para borrador y programado */
+.sl-calendar-wrap .rbc-btn-group button:hover:not(.rbc-active),
+.sl-calendar-wrap .rbc-toolbar button:hover:not(.rbc-active) {
+  background: rgba(255, 255, 255, 0.09) !important;
+  border-color: var(--cal-border-2) !important;
+  color: var(--cal-text) !important;
 }
 
-.rbc-event.event-status-published {
-  color: white; /* Color de texto para publicado */
+.sl-calendar-wrap .rbc-btn-group button.rbc-active,
+.sl-calendar-wrap .rbc-toolbar button.rbc-active {
+  background: linear-gradient(135deg, rgba(131, 58, 180, 0.4), rgba(253, 29, 29, 0.2)) !important;
+  border-color: rgba(131, 58, 180, 0.55) !important;
+  color: var(--cal-text) !important;
+  box-shadow: 0 2px 12px rgba(131, 58, 180, 0.25) !important;
 }
 
-.rbc-event:hover {
-  box-shadow: 0 3px 6px rgba(0,0,0,0.16), 0 3px 6px rgba(0,0,0,0.23);
+/* ── Month view: grid ────────────────────────────────── */
+.sl-calendar-wrap .rbc-month-view {
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--cal-border);
 }
 
-/* Colores y formas para estados de publicación */
-.rbc-event.event-status-draft {
-  background-color: rgba(255, 165, 0, 0.2); /* Naranja semitransparente */
-  border-color: #FFA500; /* Borde naranja sólido */
-  border-radius: 15px; /* Forma redondeada */
+/* Day name headers */
+.sl-calendar-wrap .rbc-header {
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--cal-border) !important;
+  padding: 10px 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--cal-muted);
 }
 
-.rbc-event.event-status-scheduled {
-  background-color: rgba(33, 150, 243, 0.2); /* Azul semitransparente */
-  border-color: #2196F3; /* Borde azul sólido */
-  border-radius: 10px; /* Esquinas redondeadas */
+.sl-calendar-wrap .rbc-header + .rbc-header {
+  border-left: 1px solid var(--cal-border) !important;
 }
 
-.rbc-event.event-status-published {
-  background-color: #4CAF50; /* Verde opaco */
-  border-color: #4CAF50; /* Borde verde sólido */
-  border-radius: 0; /* Forma cuadrada */
+/* Day cells */
+.sl-calendar-wrap .rbc-day-bg {
+  background: transparent;
+  transition: background var(--cal-t);
 }
 
-.rbc-event-content {
-  white-space: normal;
+.sl-calendar-wrap .rbc-day-bg + .rbc-day-bg {
+  border-left: 1px solid var(--cal-border);
 }
 
-/* Ajustes para la barra de herramientas del calendario */
-.rbc-toolbar button {
-  color: var(--text-dark);
-  border-color: var(--secondary-color);
+.sl-calendar-wrap .rbc-month-row + .rbc-month-row {
+  border-top: 1px solid var(--cal-border);
 }
 
-.rbc-toolbar button:hover {
-  background-color: var(--primary-color);
-  color: white;
+.sl-calendar-wrap .rbc-month-row {
+  border: none;
 }
 
-.rbc-toolbar button.rbc-active {
-  background-color: var(--primary-color);
-  color: white;
-  border-color: var(--primary-color);
+/* Today — purple radial glow */
+.sl-calendar-wrap .rbc-today {
+  background: radial-gradient(
+    ellipse 90% 70% at 50% 15%,
+    rgba(131, 58, 180, 0.28) 0%,
+    rgba(131, 58, 180, 0.1) 50%,
+    transparent 100%
+  ) !important;
 }
 
-/* Added to improve visibility */
-.rbc-month-view .rbc-day-bg.rbc-today {
-  background-color: #eaf2ff; /* Fondo azul claro para toda la celda */
+/* Off-range days */
+.sl-calendar-wrap .rbc-off-range-bg {
+  background: rgba(0, 0, 0, 0.18) !important;
 }
 
-.rbc-off-range-bg {
-  background-color: #f0f2f5; /* Un gris claro para atenuar */
+.sl-calendar-wrap .rbc-off-range .rbc-button-link {
+  color: rgba(240, 242, 248, 0.18) !important;
 }
 
-.rbc-off-range .rbc-date-cell {
-  color: #b0b8c4; /* Color de texto más claro para los números */
-  font-weight: 300;
+/* Date numbers */
+.sl-calendar-wrap .rbc-date-cell {
+  color: var(--cal-muted);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 8px;
+  text-align: right;
 }
 
-/* Número del día actual */
-.rbc-date-cell.rbc-now {
-  font-weight: 700; /* Negrita */
-  color: #667eea; /* Color azul primario para el número */
+.sl-calendar-wrap .rbc-button-link {
+  color: var(--cal-muted);
+  font-size: 12px;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-weight: 500;
+}
+
+.sl-calendar-wrap .rbc-button-link:hover {
+  color: var(--cal-text);
+}
+
+/* Today's date number — gradient circle, impossible to miss */
+.sl-calendar-wrap .rbc-now .rbc-button-link {
+  color: #fff !important;
+  background: linear-gradient(135deg, #833ab4, #fd1d1d) !important;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800 !important;
+  box-shadow: 0 0 18px rgba(131, 58, 180, 0.7), 0 2px 8px rgba(0,0,0,0.4);
+  line-height: 1;
+}
+
+/* ── Events ──────────────────────────────────────────── */
+.sl-calendar-wrap .rbc-event,
+.sl-calendar-wrap .rbc-background-event {
+  border-radius: 6px !important;
+  padding: 3px 8px !important;
+  font-size: 11.5px !important;
+  font-weight: 600;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  border: none !important;
+  border-left: 3px solid transparent !important;
+  transition: filter var(--cal-t) var(--cal-ease),
+              transform var(--cal-t) var(--cal-ease);
+}
+
+.sl-calendar-wrap .rbc-event:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(131, 58, 180, 0.5) !important;
+}
+
+.sl-calendar-wrap .rbc-event:hover {
+  filter: brightness(1.2);
+  transform: translateY(-1px);
+}
+
+.sl-calendar-wrap .rbc-event-content {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+/* Draft — amber glow */
+.sl-calendar-wrap .rbc-event.event-status-draft {
+  background: rgba(252, 176, 69, 0.18) !important;
+  border-left-color: #fcb045 !important;
+  color: #fde68a !important;
+  box-shadow: 0 0 14px rgba(252, 176, 69, 0.12) !important;
+}
+
+/* Scheduled — indigo glow */
+.sl-calendar-wrap .rbc-event.event-status-scheduled {
+  background: rgba(129, 140, 248, 0.2) !important;
+  border-left-color: #818cf8 !important;
+  color: #c7d2fe !important;
+  box-shadow: 0 0 14px rgba(129, 140, 248, 0.12) !important;
+}
+
+/* Published — emerald glow */
+.sl-calendar-wrap .rbc-event.event-status-published {
+  background: rgba(34, 197, 94, 0.2) !important;
+  border-left-color: #22c55e !important;
+  color: #86efac !important;
+  box-shadow: 0 0 14px rgba(34, 197, 94, 0.12) !important;
+}
+
+/* AI Proposal — purple dashed */
+.sl-calendar-wrap .rbc-event.event-proposal {
+  background: rgba(192, 132, 252, 0.12) !important;
+  border-left: 2px dashed #c084fc !important;
+  color: #e9d5ff !important;
+  box-shadow: 0 0 10px rgba(192, 132, 252, 0.1) !important;
+}
+
+/* "Show more" link */
+.sl-calendar-wrap .rbc-show-more {
+  color: #c084fc;
+  font-size: 11px;
+  font-weight: 600;
+  background: none;
+  padding-left: 8px;
+}
+
+/* ── Agenda view ─────────────────────────────────────── */
+.sl-calendar-wrap .rbc-agenda-view {
+  background: transparent;
+  color: var(--cal-text);
+}
+
+.sl-calendar-wrap .rbc-agenda-view table.rbc-agenda-table {
+  border-color: var(--cal-border);
+}
+
+.sl-calendar-wrap .rbc-agenda-view table.rbc-agenda-table thead {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.sl-calendar-wrap .rbc-agenda-view table.rbc-agenda-table thead th {
+  color: var(--cal-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  padding: 10px 16px;
+  border-color: var(--cal-border);
+}
+
+.sl-calendar-wrap .rbc-agenda-view table.rbc-agenda-table tbody > tr > td {
+  color: var(--cal-text);
+  border-color: var(--cal-border);
+  padding: 10px 16px;
+  font-size: 13px;
+}
+
+.sl-calendar-wrap .rbc-agenda-view table.rbc-agenda-table tbody > tr + tr > td {
+  border-top: 1px solid var(--cal-border);
+}
+
+.sl-calendar-wrap .rbc-agenda-date-cell,
+.sl-calendar-wrap .rbc-agenda-time-cell {
+  font-weight: 600;
+  color: var(--cal-muted);
+}
+
+.sl-calendar-wrap .rbc-agenda-empty {
+  color: var(--cal-muted);
+  text-align: center;
+  padding: 48px;
+  font-size: 14px;
+}
+
+/* ── Week / Day time grid ────────────────────────────── */
+.sl-calendar-wrap .rbc-time-view {
+  background: transparent;
+  border-color: var(--cal-border);
+}
+
+.sl-calendar-wrap .rbc-time-header {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--cal-border);
+}
+
+.sl-calendar-wrap .rbc-time-header-content {
+  border-color: var(--cal-border);
+}
+
+.sl-calendar-wrap .rbc-time-content {
+  border-color: var(--cal-border);
+}
+
+.sl-calendar-wrap .rbc-timeslot-group {
+  border-color: var(--cal-border);
+  min-height: 40px;
+}
+
+.sl-calendar-wrap .rbc-time-slot {
+  border-top-color: rgba(255, 255, 255, 0.03);
+}
+
+.sl-calendar-wrap .rbc-label,
+.sl-calendar-wrap .rbc-time-gutter .rbc-label {
+  color: var(--cal-muted);
+  font-size: 11px;
+  font-weight: 500;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+.sl-calendar-wrap .rbc-day-slot .rbc-time-slot {
+  border-top-color: rgba(255, 255, 255, 0.03);
+}
+
+.sl-calendar-wrap .rbc-day-slot .rbc-event {
+  border: none !important;
+}
+
+/* Current time indicator — gradient line */
+.sl-calendar-wrap .rbc-current-time-indicator {
+  background: linear-gradient(90deg, #833ab4, #fd1d1d);
+  height: 2px;
+  box-shadow: 0 0 8px rgba(131, 58, 180, 0.6);
+}
+
+.sl-calendar-wrap .rbc-allday-cell {
+  border-color: var(--cal-border);
+}
+
+/* ── Drag & drop ─────────────────────────────────────── */
+.sl-calendar-wrap .rbc-addons-dnd-over {
+  background: rgba(131, 58, 180, 0.07) !important;
+}
+
+.sl-calendar-wrap .rbc-addons-dnd-drag-preview {
+  opacity: 0.75;
+  filter: blur(0.5px);
+}
+
+/* ── Legend ──────────────────────────────────────────── */
+.sl-cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.sl-cal-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(240, 242, 248, 0.65);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+.sl-cal-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.sl-cal-legend-dot.draft     { background: #fcb045; box-shadow: 0 0 8px rgba(252,176,69,0.5); }
+.sl-cal-legend-dot.scheduled { background: #818cf8; box-shadow: 0 0 8px rgba(129,140,248,0.5); }
+.sl-cal-legend-dot.published { background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,0.5); }
+.sl-cal-legend-dot.proposal  { border: 2px dashed #c084fc; background: transparent; }
+
+/* ── Loading / error states ──────────────────────────── */
+.sl-cal-loading,
+.sl-cal-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 56px 24px;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.sl-cal-loading {
+  color: rgba(240, 242, 248, 0.55);
+}
+
+.sl-cal-error {
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.2);
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.sl-cal-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.08);
+  border-top-color: #833ab4;
+  border-radius: 50%;
+  animation: sl-cal-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes sl-cal-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Event hover photo tooltip ───────────────────────── */
+.sl-event-tooltip {
+  position: fixed;
+  z-index: 9999;
+  background: rgba(8, 12, 24, 0.96);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  width: 210px;
+  pointer-events: none;
+  animation: tooltip-in 0.12s ease;
+}
+
+@keyframes tooltip-in {
+  from { opacity: 0; transform: scale(0.94) translateY(6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.sl-event-tooltip-img {
+  width: 100%;
+  height: 158px;
+  object-fit: cover;
+  display: block;
+}
+
+.sl-event-tooltip-caption {
+  padding: 10px 12px 12px;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: rgba(240, 242, 248, 0.7);
+  margin: 0;
+  font-weight: 500;
+}
+
+/* ── Drag error toast ────────────────────────────────── */
+.sl-drag-error {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  background: rgba(8, 12, 24, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(252, 176, 69, 0.35);
+  border-radius: 10px;
+  padding: 10px 20px;
+  color: #fde68a;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4), 0 0 20px rgba(252, 176, 69, 0.1);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
