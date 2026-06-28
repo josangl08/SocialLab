@@ -81,7 +81,7 @@ class InstagramInsightsService:
         since_date = until_date - timedelta(days=days_back)
 
         # 2. Métricas con period=day y metric_type=total_value
-        day_metrics = ['profile_views', 'total_interactions']
+        day_metrics = ['total_interactions']
         try:
             request_params = {
                 'metric': ",".join(day_metrics),
@@ -120,12 +120,11 @@ class InstagramInsightsService:
         # Asegurar que todas las claves esperadas existan para evitar KeyErrors
         expected_metrics = [
             'follower_count', 'media_count', 'name', 'username', 'profile_picture_url',
-            'profile_views', 'total_interactions', 'reach'
+            'total_interactions', 'reach'
         ]
         for key in expected_metrics:
             if key not in insights:
-                # Asignar un valor por defecto apropiado
-                if any(k in key for k in ['count', 'views', 'reach', 'interactions']):
+                if any(k in key for k in ['count', 'reach', 'interactions']):
                     insights[key] = 0
                 else:
                     insights[key] = ''
@@ -158,15 +157,12 @@ class InstagramInsightsService:
             Dict con métricas de la cuenta
         """
         if metrics is None:
-            metrics = ['reach', 'profile_views', 'total_interactions', 'website_clicks']
+            metrics = ['reach', 'total_interactions']
 
-        # Configuración validada para cada métrica
-        # NOTA: impressions NO existe para account-level insights, solo para media-level
+        # Configuración validada para cada métrica (v22.0+, sin deprecated)
         metric_configs = {
             'reach': {'period': 'days_28'},
-            'profile_views': {'period': 'day', 'metric_type': 'total_value'},
             'total_interactions': {'period': 'day', 'metric_type': 'total_value'},
-            'website_clicks': {'period': 'day', 'metric_type': 'total_value'},
             'follower_count': {'period': 'day'}
         }
 
@@ -284,7 +280,42 @@ class InstagramInsightsService:
                 logger.warning(f"⚠️  No se pudo obtener {friendly_name}: {e}")
                 audience_data['demographics'][friendly_name] = {}
 
-        # 2. Horas de actividad de seguidores
+        # 2. Engaged audience demographics (who actually interacts, not just follows)
+        try:
+            params = {
+                'metric': 'engaged_audience_demographics',
+                'period': 'lifetime',
+                'breakdown': 'gender,age',
+                'metric_type': 'total_value'
+            }
+            data = self._make_request(endpoint, params)
+            if data.get('data') and len(data['data']) > 0:
+                item = data['data'][0]
+                if item.get('total_value') and item['total_value'].get('breakdowns'):
+                    breakdowns = item['total_value']['breakdowns']
+                    if breakdowns:
+                        results = breakdowns[0].get('results', [])
+                        parsed_data = {}
+                        for result in results:
+                            try:
+                                dimension_values = result.get('dimension_values', [])
+                                key = '.'.join(str(v) for v in dimension_values)
+                                parsed_data[key] = result.get('value', 0)
+                            except Exception:
+                                continue
+                        audience_data['demographics']['engaged_audience_demographics'] = parsed_data
+                        logger.info(f"📊 engaged_audience_demographics: {len(parsed_data)} entradas")
+                    else:
+                        audience_data['demographics']['engaged_audience_demographics'] = {}
+                else:
+                    audience_data['demographics']['engaged_audience_demographics'] = {}
+            else:
+                audience_data['demographics']['engaged_audience_demographics'] = {}
+        except Exception as e:
+            logger.warning(f"⚠️  No se pudo obtener engaged_audience_demographics: {e}")
+            audience_data['demographics']['engaged_audience_demographics'] = {}
+
+        # 3. Horas de actividad de seguidores
         try:
             params = {'metric': 'online_followers', 'period': 'lifetime'}
             data = self._make_request(endpoint, params)
@@ -312,10 +343,10 @@ class InstagramInsightsService:
         data = self._make_request(endpoint, params)
         return data.get('data', [])
 
-    def get_media_insights(self, media_id: str) -> Dict:
+    def get_media_insights(self, media_id: str, media_type: str = '') -> Dict:
         endpoint = f"{media_id}/insights"
-        metrics = ['reach', 'saved', 'total_interactions', 'views']
-        params = {'metric': ','.join(metrics)}
+        base_metrics = ['reach', 'saved', 'total_interactions', 'views']
+        params = {'metric': ','.join(base_metrics)}
         data = self._make_request(endpoint, params)
 
         insights = {}
@@ -331,6 +362,21 @@ class InstagramInsightsService:
             insights['impressions'] = insights['views']
         elif 'reach' in insights and 'impressions' not in insights:
             insights['impressions'] = insights['reach']
+
+        # Fetch Reels-specific watch time metrics for VIDEO/REEL posts
+        if media_type.upper() in ('VIDEO', 'REELS'):
+            try:
+                reel_params = {
+                    'metric': 'ig_reels_avg_watch_time,ig_reels_video_view_total_time'
+                }
+                reel_data = self._make_request(endpoint, reel_params)
+                for item in reel_data.get('data', []):
+                    metric_name = item.get('name')
+                    values = item.get('values', [])
+                    if values:
+                        insights[metric_name] = values[0].get('value', 0)
+            except Exception as e:
+                logger.debug(f"Watch time metrics not available for {media_id}: {e}")
 
         return insights
 
@@ -446,7 +492,8 @@ class InstagramInsightsService:
                 if post_date and post_date.replace(tzinfo=None) > cutoff_date:
                     recent_posts_count += 1
                     try:
-                        insights = self.get_media_insights(instagram_post_id)
+                        media_type = post_data.get('media_type', '')
+                        insights = self.get_media_insights(instagram_post_id, media_type)
                         shares = insights.get('shares', 0)
                         saves = insights.get('saved', 0)
                         impressions = insights.get('impressions', 0)
@@ -456,7 +503,7 @@ class InstagramInsightsService:
                             'shares': shares,
                             'saves': saves,
                             'reach': reach,
-                            'impressions': impressions
+                            'impressions': impressions,
                         })
 
                         if impressions > 0 or reach > 0:

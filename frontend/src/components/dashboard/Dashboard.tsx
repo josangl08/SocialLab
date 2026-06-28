@@ -37,6 +37,7 @@ interface ScheduledPost {
   post_type: string;
   scheduled_at: string | null;
   status: string;
+  media_url: string | null;
 }
 
 interface EngagementTrendItem {
@@ -468,21 +469,50 @@ const Dashboard: React.FC = () => {
                   <div className="sl-panel-header">
                     <i className="bi bi-calendar-event"></i>
                     Próximas Publicaciones
+                    {scheduledPosts.length > 0 && (
+                      <span className="sl-panel-count">{scheduledPosts.length}</span>
+                    )}
                   </div>
-                  <div className="sl-panel-body">
+                  <div className="sl-panel-body sl-panel-body--compact">
                     {scheduledPosts.length > 0 ? (
-                      <div className="sl-timeline">
+                      <div className="sl-sched-list">
                         {scheduledPosts.map((post) => (
-                          <div key={post.id} className="sl-timeline-item">
-                            <div className="sl-timeline-dot"></div>
-                            <div className="sl-timeline-icon">
-                              <i className={`bi ${getPostTypeIcon(post.post_type)}`}></i>
+                          <div key={post.id} className="sl-sched-card">
+                            <div className="sl-sched-thumb">
+                              {post.media_url ? (
+                                <img
+                                  src={post.media_url}
+                                  alt="preview"
+                                  className="sl-sched-thumb-img"
+                                />
+                              ) : (
+                                <div className="sl-sched-thumb-empty">
+                                  <i className={`bi ${getPostTypeIcon(post.post_type)}`}></i>
+                                </div>
+                              )}
+                              {(post.post_type === 'reel' || post.post_type === 'video') && (
+                                <div className="sl-sched-play-badge">
+                                  <i className="bi bi-play-fill"></i>
+                                </div>
+                              )}
+                              {post.post_type === 'carousel' && (
+                                <div className="sl-sched-play-badge">
+                                  <i className="bi bi-collection"></i>
+                                </div>
+                              )}
                             </div>
-                            <div className="sl-timeline-body">
-                              <p className="sl-timeline-text">
-                                {post.content.substring(0, 60)}{post.content.length > 60 ? '…' : ''}
+                            <div className="sl-sched-info">
+                              <div className="sl-sched-meta">
+                                <span className="sl-sched-type">
+                                  <i className={`bi ${getPostTypeIcon(post.post_type)}`}></i>
+                                  {post.post_type}
+                                </span>
+                                <span className="sl-sched-status">Programado</span>
+                              </div>
+                              <p className="sl-sched-caption">
+                                {post.content.substring(0, 80)}{post.content.length > 80 ? '…' : ''}
                               </p>
-                              <span className="sl-timeline-time">
+                              <span className="sl-sched-time">
                                 <i className="bi bi-clock"></i>
                                 {post.scheduled_at ? formatDate(post.scheduled_at) : 'Fecha no definida'}
                               </span>

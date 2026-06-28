@@ -19,12 +19,24 @@ interface FollowerGrowthData {
 interface FollowerGrowthChartProps {
   data: FollowerGrowthData[];
   loading?: boolean;
+  timeRange?: string;
 }
 
 export const FollowerGrowthChart: React.FC<FollowerGrowthChartProps> = ({
   data,
-  loading = false
+  loading = false,
+  timeRange = '30days'
 }) => {
+  const effectiveDays = timeRange === 'all' ? 365 : timeRange === '7days' ? 7 : timeRange === '30days' ? 30 : 90;
+  const xAxisInterval = Math.max(0, Math.floor(effectiveDays / 7) - 1);
+  const xAxisTickFormatter = (dateStr: string) => {
+    const d = new Date(dateStr + 'T12:00:00');
+    if (timeRange === '7days')
+      return d.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric' });
+    if (timeRange === 'all')
+      return d.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
+    return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+  };
   if (loading) {
     return (
       <div className="chart-loading">
@@ -43,14 +55,6 @@ export const FollowerGrowthChart: React.FC<FollowerGrowthChartProps> = ({
     );
   }
 
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('es-ES', {
-      day: 'numeric',
-      month: 'short'
-    });
-  };
-
   const formatNumber = (num: number) => {
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
     if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
@@ -62,24 +66,23 @@ export const FollowerGrowthChart: React.FC<FollowerGrowthChartProps> = ({
       const data = payload[0].payload;
       return (
         <div style={{
-          background: 'rgba(31, 41, 55, 0.95)',
+          background: 'rgba(8, 12, 24, 0.95)',
           padding: '12px',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
-          borderRadius: '8px',
-          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)'
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderRadius: '10px',
         }}>
-          <p style={{ color: '#d1d5db', marginBottom: '8px', fontSize: '13px' }}>
-            {formatDate(data.date)}
+          <p style={{ color: 'rgba(240,242,248,0.55)', marginBottom: '8px', fontSize: '12px' }}>
+            {xAxisTickFormatter(data.date)}
           </p>
-          <p style={{ color: '#fff', fontWeight: 'bold', margin: '4px 0', fontSize: '14px' }}>
+          <p style={{ color: '#f0f2f8', fontWeight: 700, margin: '4px 0', fontSize: '14px' }}>
             {formatNumber(data.follower_count)} seguidores
           </p>
           {data.change !== 0 && (
             <p style={{
-              color: data.change > 0 ? '#10b981' : '#ef4444',
-              fontWeight: 'bold',
-              marginTop: '8px',
-              fontSize: '13px'
+              color: data.change > 0 ? '#22c55e' : '#ef4444',
+              fontWeight: 600,
+              marginTop: '6px',
+              fontSize: '12px',
             }}>
               {data.change > 0 ? '+' : ''}{data.change} hoy
             </p>
@@ -91,35 +94,34 @@ export const FollowerGrowthChart: React.FC<FollowerGrowthChartProps> = ({
   };
 
   return (
-    <div className="follower-growth-chart">
-      <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={data}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-          <XAxis
-            dataKey="date"
-            tickFormatter={formatDate}
-            stroke="#6b7280"
-            style={{ fontSize: '12px' }}
-          />
-          <YAxis
-            tickFormatter={formatNumber}
-            stroke="#6b7280"
-            style={{ fontSize: '12px' }}
-          />
-          <Tooltip content={<CustomTooltip />} />
-          <Legend />
-          <Line
-            type="monotone"
-            dataKey="follower_count"
-            stroke="#8b5cf6"
-            strokeWidth={2}
-            name="Seguidores"
-            dot={{ fill: '#8b5cf6', r: 4 }}
-            activeDot={{ r: 6 }}
-          />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
+    <ResponsiveContainer width="100%" height={280}>
+      <LineChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+        <XAxis
+          dataKey="date"
+          tickFormatter={xAxisTickFormatter}
+          interval={xAxisInterval}
+          stroke="rgba(255,255,255,0.08)"
+          tick={{ fill: 'rgba(240,242,248,0.45)', fontSize: 11 }}
+        />
+        <YAxis
+          tickFormatter={formatNumber}
+          stroke="rgba(255,255,255,0.08)"
+          tick={{ fill: 'rgba(240,242,248,0.45)', fontSize: 11 }}
+        />
+        <Tooltip content={<CustomTooltip />} />
+        <Legend />
+        <Line
+          type="monotone"
+          dataKey="follower_count"
+          stroke="#833ab4"
+          strokeWidth={2}
+          name="Seguidores"
+          dot={false}
+          activeDot={{ r: 5 }}
+        />
+      </LineChart>
+    </ResponsiveContainer>
   );
 };
 

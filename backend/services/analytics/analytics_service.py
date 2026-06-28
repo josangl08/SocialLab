@@ -88,7 +88,11 @@ class AnalyticsService:
         posts = self._get_posts_from_db(instagram_account_id, days)
 
         if not posts:
-            return self._get_empty_analytics(account_info)
+            # Siempre incluir audiencia aunque no haya posts en el período
+            audience = self._analyze_audience(instagram_account_id, days)
+            result = self._get_empty_analytics(account_info)
+            result['data']['audience'] = audience
+            return result
 
         # 3. Calcular todas las métricas
         overview = self._calculate_overview(
@@ -267,26 +271,18 @@ class AnalyticsService:
         total_posts = len(posts)
 
         # Obtener métricas a nivel de cuenta desde la BD (ya sincronizadas)
-        # NOTA: Estas métricas vienen del último sync almacenado en instagram_accounts
         reach = account_info.get('reach', 0)
-        profile_views = account_info.get('profile_views', 0)
 
-        # Calcular total de interacciones
-        # Usar `or 0` en cada campo: .get(key, 0) devuelve None si el valor es NULL en DB
         def _perf_int(perf: dict, key: str) -> int:
             return int(perf.get(key) or 0)
 
-        total_interactions = sum(
-            _perf_int(p.get('post_performance') or {}, 'total_interactions') or (
-                _perf_int(p.get('post_performance') or {}, 'likes') +
-                _perf_int(p.get('post_performance') or {}, 'comments') +
-                _perf_int(p.get('post_performance') or {}, 'saves')
-            )
-            for p in posts
-        )
+        # Descomponer métricas individuales (fixes hardcoded-0 bug for comments/saves)
+        total_likes = sum(_perf_int(p.get('post_performance') or {}, 'likes') for p in posts)
+        total_comments = sum(_perf_int(p.get('post_performance') or {}, 'comments') for p in posts)
+        total_saves = sum(_perf_int(p.get('post_performance') or {}, 'saves') for p in posts)
+        total_interactions = total_likes + total_comments + total_saves
 
-        # Calcular impressions totales sumando las de todos los posts
-        # NOTA: impressions no existe a nivel de cuenta, solo a nivel de post
+        # Views = sum of post-level impressions (no account-level impressions in v22.0+)
         total_impressions = sum(
             _perf_int(p.get('post_performance') or {}, 'impressions') for p in posts
         )
@@ -310,12 +306,15 @@ class AnalyticsService:
         overview = {
             'total_posts': total_posts,
             'follower_count': account_info['follower_count'],
-            'profile_views': profile_views,
             'reach': reach,
-            'impressions': total_impressions,
+            'views': total_impressions,
+            'impressions': total_impressions,  # keep for backwards compat
+            'total_likes': total_likes,
+            'total_comments': total_comments,
+            'total_saves': total_saves,
+            'total_interactions': total_interactions,
             'avg_interactions_per_post': round(avg_interactions_per_post, 1),
             'engagement_rate': round(avg_engagement_rate, 2),
-            'total_interactions': total_interactions
         }
 
         # Preparar estructura para growth si se solicita
@@ -416,6 +415,7 @@ class AnalyticsService:
         audience_data = {
             "follower_growth": [],
             "demographics": {},
+            "engaged_demographics": {},
             "online_hours": {},
             "top_locations": {
                 "countries": [],
@@ -424,7 +424,9 @@ class AnalyticsService:
         }
 
         # 1. Crecimiento de seguidores (snapshots diarios)
-        cutoff_date = datetime.utcnow().date() - timedelta(days=days)
+        # Limitar a 365 días máximo para evitar payloads enormes con 'all'
+        display_days = min(days, 365)
+        cutoff_date = datetime.utcnow().date() - timedelta(days=display_days)
         try:
             growth_result = self.db.table('instagram_account_snapshots').select(
                 'date, follower_count'
@@ -435,18 +437,29 @@ class AnalyticsService:
             ).order('date', desc=False).execute()
 
             if growth_result.data:
-                # Calcular cambios día a día
                 snapshots = growth_result.data
-                for i, snapshot in enumerate(snapshots):
-                    change = 0
-                    if i > 0:
-                        change = snapshot['follower_count'] - snapshots[i-1]['follower_count']
+                snapshot_dict = {s['date']: s['follower_count'] for s in snapshots}
 
-                    audience_data["follower_growth"].append({
-                        'date': snapshot['date'],
-                        'follower_count': snapshot['follower_count'],
+                # Forward-fill: generar un punto por cada día del rango para que
+                # el eje X del gráfico siempre cubra el período seleccionado.
+                # Días sin sync heredan el último valor conocido (no se pone 0).
+                today = datetime.utcnow().date()
+                prev_count = snapshots[0]['follower_count']
+                result = []
+                current = cutoff_date + timedelta(days=1)
+                while current <= today:
+                    dk = current.isoformat()
+                    count = snapshot_dict.get(dk, prev_count)
+                    change = count - prev_count if result else 0
+                    result.append({
+                        'date': dk,
+                        'follower_count': count,
                         'change': change
                     })
+                    prev_count = count
+                    current += timedelta(days=1)
+
+                audience_data["follower_growth"] = result
 
         except Exception as e:
             logger.warning(f"No se pudo obtener el crecimiento de seguidores: {e}")
@@ -470,9 +483,11 @@ class AnalyticsService:
                             logger.warning(f"No se pudo decodificar el JSON para {metric_type}")
                             data = {}
 
-                    audience_data["demographics"][metric_type] = data
+                    if metric_type == 'engaged_audience_demographics':
+                        audience_data["engaged_demographics"] = data
+                    else:
+                        audience_data["demographics"][metric_type] = data
 
-                    # DEBUG: Ver qué datos tenemos para gender_age
                     if metric_type == 'audience_gender_age':
                         logger.info(f"📊 DEBUG audience_gender_age desde BD (primeras 5 keys): {list(data.keys())[:5] if data else 'vacío'}")
 
@@ -768,12 +783,15 @@ class AnalyticsService:
                 'media_url': post.get('media_url') or '',
                 'permalink': permalink,
                 'timestamp': post.get('publication_date') or '',
+                'post_type': (post.get('post_type') or 'IMAGE').upper(),
                 'likes': int(likes or 0),
                 'comments': int(comments or 0),
                 'engagement': int(engagement or 0),
                 'impressions': int(perf.get('impressions') or 0),
                 'reach': int(perf.get('reach') or 0),
-                'saved': int(perf.get('saves') or 0)
+                'saved': int(perf.get('saves') or 0),
+                'avg_watch_time_ms': 0,
+                'total_watch_time_ms': 0,
             })
 
         # Ordenar por engagement y tomar top N
@@ -805,12 +823,15 @@ class AnalyticsService:
                 'media_url': post.get('media_url') or '',
                 'permalink': permalink,
                 'timestamp': post.get('publication_date') or '',
+                'post_type': (post.get('post_type') or 'IMAGE').upper(),
                 'likes': int(likes or 0),
                 'comments': int(comments or 0),
                 'engagement': int((likes or 0) + (comments or 0)),
                 'impressions': int(perf.get('impressions') or 0),
                 'reach': int(perf.get('reach') or 0),
                 'saved': int(perf.get('saves') or 0),
+                'avg_watch_time_ms': 0,
+                'total_watch_time_ms': 0,
                 'has_stats': raw_perf is not None,
             })
 
@@ -931,10 +952,17 @@ class AnalyticsService:
                 logger.warning(f"Error procesando tendencia de post: {e}")
                 continue
 
-        # Convertir a lista y ordenar por fecha
-        trend = sorted(daily_engagement.values(), key=lambda x: x['date'])
+        # Zero-pad solo para rangos cortos/medios (<=180 días) para no generar payloads enormes
+        if days <= 180:
+            today = datetime.utcnow().date()
+            start_date = today - timedelta(days=days)
+            for i in range(days):
+                dk = (start_date + timedelta(days=i + 1)).isoformat()
+                daily_engagement.setdefault(dk, {
+                    'date': dk, 'likes': 0, 'comments': 0, 'engagement': 0, 'posts_count': 0
+                })
 
-        return trend
+        return sorted(daily_engagement.values(), key=lambda x: x['date'])
 
     def _analyze_best_times(self, posts: List[Dict]) -> List[Dict]:
         """
@@ -1129,13 +1157,15 @@ class AnalyticsService:
                 'overview': {
                     'total_posts': 0,
                     'follower_count': account_info['follower_count'],
-                    'profile_views': account_info.get('profile_views', 0),
                     'reach': account_info.get('reach', 0),
+                    'views': 0,
                     'impressions': 0,
+                    'total_likes': 0,
+                    'total_comments': 0,
+                    'total_saves': 0,
+                    'total_interactions': 0,
                     'avg_interactions_per_post': 0,
                     'engagement_rate': 0,
-                    'accounts_engaged': 0,
-                    'total_interactions': 0
                 },
                 'by_content_type': {},
                 'top_posts': [],

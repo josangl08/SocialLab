@@ -475,9 +475,11 @@ async def get_analytics_overview(
             if 'audience' in data:
                 audience = data['audience']
                 demographics = audience.get('demographics', {})
+                # follower demographics lives under audience.demographics.audience_gender_age
                 if 'follower_demographics' not in audience:
-                    audience['follower_demographics'] = demographics.get('follower_demographics', demographics)
-                if 'engaged_demographics' not in audience:
+                    audience['follower_demographics'] = demographics
+                # engaged_demographics is already set by analytics_service, but fall back
+                if not audience.get('engaged_demographics'):
                     audience['engaged_demographics'] = demographics.get('engaged_audience_demographics', {})
 
         return result

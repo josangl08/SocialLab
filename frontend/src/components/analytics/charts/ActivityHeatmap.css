@@ -16,7 +16,7 @@
   align-items: center;
   gap: 8px;
   font-size: 14px;
-  color: #6b7280;
+  color: #9ca3af;
 }
 
 .legend-dot {
@@ -74,13 +74,13 @@
 .best-times-list {
   margin-top: 24px;
   padding-top: 24px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .best-times-list h4 {
   font-size: 16px;
   font-weight: 600;
-  color: #111827;
+  color: #e8e9ed;
   margin: 0 0 16px 0;
 }
 
@@ -95,13 +95,14 @@
   align-items: center;
   gap: 12px;
   padding: 12px;
-  background: #f9fafb;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
   transition: background 0.2s;
 }
 
 .best-time-item:hover {
-  background: #f3f4f6;
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .best-time-rank {
@@ -120,7 +121,7 @@
 .best-time-hour {
   font-size: 16px;
   font-weight: 600;
-  color: #111827;
+  color: #e8e9ed;
 }
 
 .best-time-stats {
@@ -131,11 +132,11 @@
 
 .best-time-stats .stat {
   font-size: 12px;
-  color: #6b7280;
+  color: #9ca3af;
 }
 
 .best-time-stats .stat strong {
-  color: #111827;
+  color: #e8e9ed;
   font-weight: 600;
 }
 
@@ -146,14 +147,16 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 300px;
+  min-height: 200px;
   color: #6b7280;
+  text-align: center;
+  padding: 24px;
 }
 
 .chart-loading .spinner {
   width: 48px;
   height: 48px;
-  border: 4px solid #f3f4f6;
+  border: 4px solid rgba(255, 255, 255, 0.07);
   border-top-color: #8b5cf6;
   border-radius: 50%;
   animation: spin 1s linear infinite;
@@ -201,5 +204,20 @@
 
   .best-time-stats .stat {
     font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  .heatmap-grid {
+    grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+    gap: 3px;
+  }
+
+  .cell-hour {
+    font-size: 8px;
+  }
+
+  .cell-value {
+    display: none;
   }
 }

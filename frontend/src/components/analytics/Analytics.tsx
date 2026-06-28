@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   LineChart,
   Line,
@@ -17,6 +17,9 @@ import { FollowerGrowthChart } from './charts/FollowerGrowthChart';
 import { DemographicsChart } from './charts/DemographicsChart';
 import { ActivityHeatmap } from './charts/ActivityHeatmap';
 import { TopLocations } from './charts/TopLocations';
+import { KPIStrip } from './cards/KPIStrip';
+import { PostDetailModal } from './panels/PostDetailModal';
+import { DraftOptimizerPanel } from './panels/DraftOptimizerPanel';
 
 interface FollowerGrowthData {
   date: string;
@@ -33,6 +36,7 @@ interface LocationData {
 
 interface BestPostingTimeRaw {
   hour: string;
+  day_of_week?: string | number | null;
   score: number;
   online_followers: number;
   avg_engagement: number;
@@ -41,7 +45,8 @@ interface BestPostingTimeRaw {
 
 interface AudienceData {
   follower_growth: FollowerGrowthData[];
-  demographics: { audience_gender_age: Record<string, number> };
+  demographics: { audience_gender_age?: Record<string, number>; [key: string]: unknown };
+  engaged_demographics?: { audience_gender_age?: Record<string, number>; [key: string]: unknown };
   online_hours: Record<string, number>;
   top_locations: { countries: LocationData[]; cities: LocationData[] };
   best_posting_times_raw: BestPostingTimeRaw[];
@@ -56,373 +61,388 @@ interface ContentTypeStats {
   type_name: string;
 }
 
-interface GrowthData {
-  posts: number;
+interface TopPost {
+  id: string;
+  content: string;
+  media_url: string;
+  permalink: string;
+  post_type: string;
   likes: number;
   comments: number;
-  engagement: number;
+  saved: number;
+  views: number;
+  reach: number;
+  avg_watch_time_ms: number;
+  total_watch_time_ms: number;
+  date: string;
 }
 
 interface AnalyticsData {
   overview: {
     total_posts: number;
+    follower_count: number;
     total_likes: number;
     total_comments: number;
+    total_saves: number;
+    reach: number;
+    views: number;
+    total_interactions: number;
     engagement_rate: number;
-    growth?: GrowthData;
+    growth?: {
+      posts: number;
+      likes: number;
+      comments: number;
+      engagement: number;
+    };
   };
-  by_content_type?: { [key: string]: ContentTypeStats };
-  top_posts: Array<{
-    id: number;
-    content: string;
-    media_url: string;
-    likes: number;
-    comments: number;
-    date: string;
-  }>;
-  engagement_trend: Array<{
-    date: string;
-    likes: number;
-    comments: number;
-    engagement?: number;
-  }>;
-  best_posting_times: Array<{
-    time: string;
-    avg_engagement: number;
-  }>;
-  insights?: Array<{
-    type: string;
-    title: string;
-    description: string;
-    icon: string;
-  }>;
+  by_content_type?: Record<string, ContentTypeStats>;
+  top_posts: TopPost[];
+  engagement_trend: Array<{ date: string; likes: number; comments: number; engagement?: number }>;
+  best_posting_times: Array<{ time: string; avg_engagement: number }>;
+  best_posting_times_raw?: BestPostingTimeRaw[];
+  insights?: Array<{ type: string; title: string; description: string; icon: string }>;
   audience?: AudienceData;
 }
+
+type InnerTab = 'rendimiento' | 'audiencia' | 'contenido';
+type DemographicsMode = 'followers' | 'engaged';
+type TimeRange = '7days' | '30days' | '90days' | 'all';
+
+const COLORS = ['#833ab4', '#fd1d1d', '#fcb045', '#818cf8', '#6ee7b7'];
+const DAYS_MAP: Record<TimeRange, number> = { '7days': 7, '30days': 30, '90days': 90, 'all': 3650 };
+
+const TOOLTIP_STYLE = {
+  backgroundColor: 'rgba(8, 12, 24, 0.95)',
+  border: '1px solid rgba(255, 255, 255, 0.08)',
+  borderRadius: '10px',
+  color: '#f0f2f8',
+};
 
 const Analytics: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
-  const [timeRange, setTimeRange] = useState<string>('30days');
-  const [showComparison, setShowComparison] = useState<boolean>(false);
-  const isFetchingRef = useRef<boolean>(false);
+  const [timeRange, setTimeRange] = useState<TimeRange>('30days');
+  const [activeTab, setActiveTab] = useState<InnerTab>('rendimiento');
+  const [demographicsMode, setDemographicsMode] = useState<DemographicsMode>('followers');
+  const [selectedPost, setSelectedPost] = useState<TopPost | null>(null);
 
   useEffect(() => {
-    if (isFetchingRef.current) {
-      return;
-    }
-    fetchAnalytics();
-  }, [timeRange, showComparison]);
-
-  const fetchAnalytics = async () => {
     const token = localStorage.getItem('authToken');
-    if (!token) {
-      setLoading(false);
-      return;
-    }
+    if (!token) { setLoading(false); return; }
 
-    if (isFetchingRef.current) {
-      return;
-    }
-    isFetchingRef.current = true;
-
+    const controller = new AbortController();
     setLoading(true);
-    try {
-      const daysMap: { [key: string]: number } = {
-        '7days': 7,
-        '30days': 30,
-        '90days': 90,
-        'all': 3650
-      };
-      const days = daysMap[timeRange] || 365;
 
-      // Usar el endpoint optimizado con parámetro compare
-      const response = await fetch(
-        `http://localhost:8000/api/analytics/overview?days=${days}&compare=${showComparison}`,
-        {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }
-      );
+    async function load() {
+      try {
+        const days = DAYS_MAP[timeRange];
+        const response = await fetch(
+          `http://localhost:8000/api/analytics/overview?days=${days}&compare=true`,
+          { headers: { 'Authorization': `Bearer ${token}` }, signal: controller.signal }
+        );
 
-      if (!response.ok) {
-        throw new Error('Error fetching Instagram analytics');
+        if (!response.ok) throw new Error('Error fetching analytics');
+
+        const data = await response.json();
+        if (!data.success || !data.data) throw new Error('No data available');
+
+        const raw = data.data;
+        const ov = raw.overview ?? {};
+
+        setAnalytics({
+          overview: {
+            total_posts: ov.total_posts ?? 0,
+            follower_count: ov.follower_count ?? 0,
+            total_likes: ov.total_likes ?? 0,
+            total_comments: ov.total_comments ?? 0,
+            total_saves: ov.total_saves ?? 0,
+            reach: ov.reach ?? 0,
+            views: ov.views ?? ov.impressions ?? 0,
+            total_interactions: ov.total_interactions ?? 0,
+            engagement_rate: ov.engagement_rate ?? 0,
+            growth: ov.growth,
+          },
+          by_content_type: raw.by_content_type ?? {},
+          top_posts: (raw.top_posts ?? []).map((post: Record<string, unknown>) => ({
+            id: post.id ?? '',
+            content: post.caption ?? 'Sin descripción',
+            media_url: post.media_url ?? '',
+            permalink: post.permalink ?? '',
+            post_type: (post.post_type as string) ?? 'IMAGE',
+            likes: post.likes ?? 0,
+            comments: post.comments ?? 0,
+            saved: post.saved ?? 0,
+            views: post.impressions ?? 0,
+            reach: post.reach ?? 0,
+            avg_watch_time_ms: post.avg_watch_time_ms ?? 0,
+            total_watch_time_ms: post.total_watch_time_ms ?? 0,
+            date: post.timestamp ?? new Date().toISOString(),
+          })),
+          engagement_trend: (raw.engagement_trend ?? []).map((item: Record<string, unknown>) => ({
+            date: item.date as string,
+            likes: (item.likes as number) ?? 0,
+            comments: (item.comments as number) ?? 0,
+            engagement: (item.engagement as number) ?? 0,
+          })),
+          best_posting_times: (raw.best_posting_times ?? []).map((item: Record<string, unknown>) => ({
+            time: (item.hour as string) ?? '00:00',
+            avg_engagement: (item.avg_engagement as number) ?? 0,
+          })),
+          best_posting_times_raw: raw.best_posting_times ?? [],
+          insights: raw.insights ?? [],
+          audience: raw.audience ? {
+            follower_growth: raw.audience.follower_growth ?? [],
+            demographics: raw.audience.demographics ?? { audience_gender_age: {} },
+            engaged_demographics: raw.audience.engaged_demographics ?? {},
+            online_hours: raw.audience.online_hours ?? {},
+            top_locations: raw.audience.top_locations ?? { countries: [], cities: [] },
+            best_posting_times_raw: raw.best_posting_times ?? [],
+          } : undefined,
+        });
+      } catch (error) {
+        if ((error as Error).name === 'AbortError') return;
+        console.error('Error cargando analytics:', error);
+        setAnalytics(null);
+      } finally {
+        setLoading(false);
       }
-
-      const data = await response.json();
-
-      if (!data.success || !data.data) {
-        throw new Error('No data available');
-      }
-
-      // Mapear datos del backend al formato del frontend
-      const formattedData: AnalyticsData = {
-        overview: {
-          total_posts: data.data.overview.total_posts || 0,
-          total_likes: data.data.overview.total_interactions || 0,
-          total_comments: 0,
-          engagement_rate: data.data.overview.engagement_rate || 0,
-          growth: data.data.overview.growth
-        },
-        by_content_type: data.data.by_content_type || {},
-        top_posts: (data.data.top_posts || []).map((post: any) => ({
-          id: post.id,
-          content: post.caption || 'Sin descripción',
-          media_url: post.media_url || '',
-          likes: post.likes || 0,
-          comments: post.comments || 0,
-          date: post.timestamp || new Date().toISOString()
-        })),
-        engagement_trend: (data.data.engagement_trend || []).map((item: any) => ({
-          date: item.date,
-          likes: item.likes || 0,
-          comments: item.comments || 0,
-          engagement: item.engagement || 0
-        })),
-        best_posting_times: (data.data.best_posting_times || []).map((item: any) => ({
-          time: item.hour || '00:00',
-          avg_engagement: item.avg_engagement_rate || 0
-        })),
-        insights: data.data.insights || [],
-        audience: data.data.audience ? {
-          follower_growth: data.data.audience.follower_growth || [],
-          demographics: data.data.audience.demographics || { audience_gender_age: {} },
-          online_hours: data.data.audience.online_hours || {},
-          top_locations: data.data.audience.top_locations || { countries: [], cities: [] },
-          best_posting_times_raw: data.data.best_posting_times || []
-        } : undefined
-      };
-
-      setAnalytics(formattedData);
-    } catch (error) {
-      console.error('Error cargando analytics:', error);
-      setAnalytics(null);
-    } finally {
-      setLoading(false);
-      isFetchingRef.current = false;
     }
-  };
 
-  const formatGrowth = (value: number): string => {
-    const sign = value >= 0 ? '+' : '';
-    return `${sign}${value.toFixed(1)}%`;
-  };
-
-  const getGrowthColor = (value: number): string => {
-    return value >= 0 ? '#10b981' : '#ef4444';
-  };
+    load();
+    return () => controller.abort();
+  }, [timeRange]);
 
   if (loading) {
     return (
-      <div className="analytics-loading">
-        <div className="spinner"></div>
-        <p>Cargando analytics...</p>
+      <div className="an-container">
+        <div className="an-state-center" style={{ minHeight: '60vh' }}>
+          <div className="an-spinner"></div>
+          <p className="an-state-label">Cargando analytics...</p>
+        </div>
       </div>
     );
   }
 
   if (!analytics) {
     return (
-      <div className="analytics-empty">
-        <p><i className="bi bi-bar-chart-line me-2"></i>No hay datos de analytics disponibles</p>
-        <p className="text-muted">Conecta tu cuenta de Instagram para ver métricas</p>
+      <div className="an-container">
+        <div className="an-state-center" style={{ minHeight: '60vh' }}>
+          <i className="bi bi-bar-chart-line an-state-icon"></i>
+          <p className="an-state-label">No hay datos de analytics disponibles</p>
+          <p className="an-state-hint">Conecta tu cuenta de Instagram para ver métricas</p>
+        </div>
       </div>
     );
   }
 
-  // Preparar datos para gráfico de tipos de contenido
+  // X-axis helpers — ~7 ticks visible for any range
+  const effectiveDays = timeRange === 'all' ? 365 : DAYS_MAP[timeRange];
+  const xAxisInterval = Math.max(0, Math.floor(effectiveDays / 7) - 1);
+  const xAxisFormatter = (v: string) => {
+    const d = new Date(v + 'T12:00:00');
+    if (timeRange === '7days')
+      return d.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric' });
+    if (timeRange === 'all')
+      return d.toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
+    return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+  };
+
+  const kpiCards = [
+    { title: 'Seguidores',     value: analytics.overview.follower_count.toLocaleString('es-ES'),     icon: 'people-fill',    color: 'primary' as const },
+    { title: 'Alcance',        value: analytics.overview.reach.toLocaleString('es-ES'),              icon: 'broadcast',      color: 'info' as const },
+    { title: 'Visualizaciones',value: analytics.overview.views.toLocaleString('es-ES'),             icon: 'eye-fill',       color: 'purple' as const },
+    { title: 'Engagement',     value: `${analytics.overview.engagement_rate}%`,                     icon: 'graph-up-arrow', color: 'success' as const },
+    { title: 'Interacciones',  value: analytics.overview.total_interactions.toLocaleString('es-ES'), icon: 'heart-fill',     color: 'warning' as const },
+    { title: 'Guardados',      value: analytics.overview.total_saves.toLocaleString('es-ES'),        icon: 'bookmark-fill',  color: 'success' as const },
+  ];
+
   const contentTypeChartData = analytics.by_content_type
     ? Object.entries(analytics.by_content_type).map(([, stats]) => ({
         name: stats.type_name,
         engagement: stats.avg_engagement,
-        posts: stats.count
+        posts: stats.count,
       }))
     : [];
 
-  // Colores para el gráfico de tipos de contenido
-  const COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981'];
+  const periodLabel = timeRange === 'all'
+    ? 'todos los tiempos'
+    : `últimos ${DAYS_MAP[timeRange]} días`;
 
   return (
-    <div className="analytics-container">
-      <div className="analytics-header">
-        <div>
-          <h2><i className="bi bi-bar-chart-line me-2"></i>Analytics & Insights</h2>
-          <p className="analytics-description">
-            Métricas de rendimiento de tus publicaciones
+    <div className="an-container">
+      {/* ── Header ──────────────────────────────────────── */}
+      <div className="an-header">
+        <div className="an-header-info">
+          <h2 className="an-header-title">
+            <i className="bi bi-bar-chart-line"></i>
+            Analytics
+          </h2>
+          <p className="an-header-sub">
+            Métricas de rendimiento · {analytics.overview.total_posts} publicaciones · {periodLabel}
           </p>
         </div>
-        <div className="analytics-controls">
-          <div className="time-range-selector">
-            <select value={timeRange} onChange={(e) => setTimeRange(e.target.value)}>
-              <option value="7days">Últimos 7 días</option>
-              <option value="30days">Últimos 30 días</option>
-              <option value="90days">Últimos 90 días</option>
-              <option value="all">Todo el tiempo</option>
-            </select>
-          </div>
-          <label className="comparison-toggle">
-            <input
-              type="checkbox"
-              checked={showComparison}
-              onChange={(e) => setShowComparison(e.target.checked)}
-            />
-            <span>Mostrar crecimiento</span>
-          </label>
+        <div className="an-time-range">
+          {(['7days', '30days', '90days', 'all'] as TimeRange[]).map((range) => (
+            <button
+              key={range}
+              className={`an-time-btn${timeRange === range ? ' active' : ''}`}
+              onClick={() => setTimeRange(range)}
+            >
+              {range === '7days' ? '7d' : range === '30days' ? '30d' : range === '90days' ? '90d' : 'Todo'}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Overview Stats con Crecimiento */}
-      <div className="overview-grid">
-        <div className="stat-card-analytics">
-          <div className="stat-icon-analytics"><i className="bi bi-file-text"></i></div>
-          <div className="stat-content-analytics">
-            <span className="stat-value-analytics">{analytics.overview.total_posts}</span>
-            <span className="stat-label-analytics">Posts Publicados</span>
-            {analytics.overview.growth && (
-              <span
-                className="stat-growth"
-                style={{ color: getGrowthColor(analytics.overview.growth.posts) }}
-              >
-                {formatGrowth(analytics.overview.growth.posts)}
-              </span>
-            )}
-          </div>
-        </div>
+      {/* ── KPI Strip ───────────────────────────────────── */}
+      <div className="an-kpi-area">
+        <KPIStrip cards={kpiCards} />
+      </div>
 
-        <div className="stat-card-analytics">
-          <div className="stat-icon-analytics"><i className="bi bi-heart-fill"></i></div>
-          <div className="stat-content-analytics">
-            <span className="stat-value-analytics">
-              {analytics.overview.total_likes.toLocaleString()}
-            </span>
-            <span className="stat-label-analytics">Total Interacciones</span>
-            {analytics.overview.growth && (
-              <span
-                className="stat-growth"
-                style={{ color: getGrowthColor(analytics.overview.growth.likes) }}
-              >
-                {formatGrowth(analytics.overview.growth.likes)}
-              </span>
-            )}
-          </div>
+      {analytics.overview.total_posts === 0 && (
+        <div className="an-notice">
+          <i className="bi bi-info-circle"></i>
+          {timeRange === 'all'
+            ? 'No hay publicaciones registradas — los datos de audiencia y seguidores siguen disponibles abajo.'
+            : `No hay publicaciones en los últimos ${DAYS_MAP[timeRange]} días — los datos de audiencia y seguidores siguen disponibles abajo.`}
         </div>
+      )}
 
-        <div className="stat-card-analytics">
-          <div className="stat-icon-analytics"><i className="bi bi-chat-dots"></i></div>
-          <div className="stat-content-analytics">
-            <span className="stat-value-analytics">
-              {analytics.overview.total_comments.toLocaleString()}
-            </span>
-            <span className="stat-label-analytics">Comentarios</span>
-            {analytics.overview.growth && (
-              <span
-                className="stat-growth"
-                style={{ color: getGrowthColor(analytics.overview.growth.comments) }}
-              >
-                {formatGrowth(analytics.overview.growth.comments)}
-              </span>
-            )}
-          </div>
-        </div>
-
-        <div className="stat-card-analytics">
-          <div className="stat-icon-analytics"><i className="bi bi-graph-up"></i></div>
-          <div className="stat-content-analytics">
-            <span className="stat-value-analytics">{analytics.overview.engagement_rate}%</span>
-            <span className="stat-label-analytics">Engagement Rate</span>
-            {analytics.overview.growth && (
-              <span
-                className="stat-growth"
-                style={{ color: getGrowthColor(analytics.overview.growth.engagement) }}
-              >
-                {formatGrowth(analytics.overview.growth.engagement)}
-              </span>
-            )}
-          </div>
+      {/* ── Inner Tab Navigation ────────────────────────── */}
+      <div className="an-inner-tabs-container">
+        <div className="an-inner-tabs">
+          {([
+            { key: 'rendimiento', label: 'Rendimiento', icon: 'graph-up' },
+            { key: 'audiencia',   label: 'Audiencia',   icon: 'people' },
+            { key: 'contenido',   label: 'Contenido',   icon: 'collection' },
+          ] as { key: InnerTab; label: string; icon: string }[]).map(({ key, label, icon }) => (
+            <button
+              key={key}
+              className={`an-inner-tab${activeTab === key ? ' active' : ''}`}
+              onClick={() => setActiveTab(key)}
+            >
+              <i className={`bi bi-${icon}`}></i>
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Engagement Trend - Recharts */}
-      <div className="analytics-section">
-        <h3><i className="bi bi-graph-up me-2"></i>Tendencia de Engagement</h3>
-        <div className="chart-container">
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={analytics.engagement_trend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis
-                dataKey="date"
-                tickFormatter={(value) => {
-                  const date = new Date(value);
-                  return date.toLocaleDateString('es-ES', {
-                    day: 'numeric',
-                    month: 'short'
-                  });
-                }}
-                stroke="#6b7280"
-                style={{ fontSize: '12px' }}
-              />
-              <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#fff',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '8px'
-                }}
-                labelFormatter={(value) => {
-                  const date = new Date(value);
-                  return date.toLocaleDateString('es-ES', {
-                    weekday: 'long',
-                    day: 'numeric',
-                    month: 'long'
-                  });
-                }}
-              />
-              <Legend />
-              <Line
-                type="monotone"
-                dataKey="likes"
-                stroke="#ec4899"
-                strokeWidth={2}
-                name="Likes"
-                dot={{ fill: '#ec4899', r: 4 }}
-                activeDot={{ r: 6 }}
-              />
-              <Line
-                type="monotone"
-                dataKey="comments"
-                stroke="#8b5cf6"
-                strokeWidth={2}
-                name="Comentarios"
-                dot={{ fill: '#8b5cf6', r: 4 }}
-                activeDot={{ r: 6 }}
-              />
-              <Line
-                type="monotone"
-                dataKey="engagement"
-                stroke="#6366f1"
-                strokeWidth={2}
-                name="Engagement Total"
-                dot={{ fill: '#6366f1', r: 4 }}
-                activeDot={{ r: 6 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* Audience Charts */}
-      {analytics.audience && (
-        <>
-          <div className="analytics-section">
-            <h3><i className="bi bi-graph-up-arrow me-2"></i>Crecimiento de Seguidores</h3>
-            <FollowerGrowthChart data={analytics.audience.follower_growth} loading={loading} />
-          </div>
-
-          <div className="analytics-columns">
-            <div className="analytics-section">
-              <h3><i className="bi bi-people me-2"></i>Demografía de Audiencia</h3>
-              <DemographicsChart data={analytics.audience.demographics} loading={loading} />
+      {/* ── Tab: Rendimiento ────────────────────────────── */}
+      {activeTab === 'rendimiento' && (
+        <div className="an-content animate-fade-in">
+          <div className="an-section">
+            <div className="an-section-title">
+              <i className="bi bi-activity"></i>
+              Tendencia de Engagement
             </div>
-            <div className="analytics-section">
-              <h3><i className="bi bi-geo-alt me-2"></i>Ubicaciones Principales</h3>
+            <div className="an-chart-body">
+              <ResponsiveContainer width="100%" height={280}>
+                <LineChart data={analytics.engagement_trend}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                  <XAxis
+                    dataKey="date"
+                    tickFormatter={xAxisFormatter}
+                    interval={xAxisInterval}
+                    stroke="rgba(255,255,255,0.08)"
+                    tick={{ fill: 'rgba(240,242,248,0.45)', fontSize: 11 }}
+                  />
+                  <YAxis
+                    stroke="rgba(255,255,255,0.08)"
+                    tick={{ fill: 'rgba(240,242,248,0.45)', fontSize: 11 }}
+                  />
+                  <Tooltip
+                    contentStyle={TOOLTIP_STYLE}
+                    labelFormatter={(v) => new Date(v).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
+                  />
+                  <Legend />
+                  <Line type="monotone" dataKey="likes"      stroke="#fd1d1d" strokeWidth={2} name="Likes"        dot={false} activeDot={{ r: 5 }} />
+                  <Line type="monotone" dataKey="comments"   stroke="#833ab4" strokeWidth={2} name="Comentarios"  dot={false} activeDot={{ r: 5 }} />
+                  <Line type="monotone" dataKey="engagement" stroke="#fcb045" strokeWidth={2} name="Engagement"   dot={false} activeDot={{ r: 5 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {analytics.audience && (
+            <>
+              <div className="an-section">
+                <div className="an-section-title">
+                  <i className="bi bi-person-lines-fill"></i>
+                  Crecimiento de Seguidores
+                </div>
+                <div className="an-chart-body">
+                  <FollowerGrowthChart
+                    data={analytics.audience.follower_growth}
+                    loading={loading}
+                    timeRange={timeRange}
+                  />
+                </div>
+              </div>
+
+              <div className="an-section">
+                <div className="an-section-title">
+                  <i className="bi bi-clock"></i>
+                  Actividad de Seguidores
+                </div>
+                <ActivityHeatmap
+                  onlineHours={analytics.audience.online_hours}
+                  bestPostingTimes={analytics.audience.best_posting_times_raw}
+                  loading={loading}
+                />
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── Tab: Audiencia ──────────────────────────────── */}
+      {activeTab === 'audiencia' && analytics.audience && (
+        <div className="an-content animate-fade-in">
+          <div className="an-section">
+            <div className="an-section-title-row">
+              <div className="an-section-title">
+                <i className="bi bi-bar-chart-steps"></i>
+                Demografía
+              </div>
+              <div className="an-demographics-toggle">
+                <button
+                  className={`an-demographics-pill${demographicsMode === 'followers' ? ' active' : ''}`}
+                  onClick={() => setDemographicsMode('followers')}
+                >
+                  Seguidores
+                </button>
+                <button
+                  className={`an-demographics-pill${demographicsMode === 'engaged' ? ' active' : ''}`}
+                  onClick={() => setDemographicsMode('engaged')}
+                >
+                  Audiencia Activa
+                </button>
+              </div>
+            </div>
+            <div className="an-section-body">
+              <DemographicsChart
+                data={
+                  demographicsMode === 'followers'
+                    ? analytics.audience.demographics as { audience_gender_age: Record<string, number> }
+                    : (analytics.audience.engaged_demographics as { audience_gender_age: Record<string, number> } | null) ?? null
+                }
+                loading={loading}
+                emptyMessage={
+                  demographicsMode === 'engaged'
+                    ? 'Datos de audiencia activa no disponibles — sincroniza para ver'
+                    : undefined
+                }
+              />
+            </div>
+          </div>
+
+          <div className="an-section">
+            <div className="an-section-title">
+              <i className="bi bi-geo-alt"></i>
+              Ubicaciones Principales
+            </div>
+            <div className="an-section-body">
               <TopLocations
                 countries={analytics.audience.top_locations.countries}
                 cities={analytics.audience.top_locations.cities}
@@ -430,145 +450,127 @@ const Analytics: React.FC = () => {
               />
             </div>
           </div>
-
-          <div className="analytics-section">
-            <h3><i className="bi bi-clock-history me-2"></i>Actividad de Seguidores</h3>
-            <ActivityHeatmap
-              onlineHours={analytics.audience.online_hours}
-              bestPostingTimes={analytics.audience.best_posting_times_raw}
-              loading={loading}
-            />
-          </div>
-        </>
+        </div>
       )}
 
-      {/* Análisis por Tipo de Contenido */}
-      {contentTypeChartData.length > 0 && (
-        <div className="analytics-section">
-          <h3><i className="bi bi-collection me-2"></i>Análisis por Tipo de Contenido</h3>
-          <div className="content-type-analysis">
-            <div className="chart-container" style={{ height: '300px' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={contentTypeChartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis
-                    dataKey="name"
-                    stroke="#6b7280"
-                    style={{ fontSize: '12px' }}
-                  />
-                  <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#fff',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '8px'
-                    }}
-                  />
-                  <Legend />
-                  <Bar
-                    dataKey="engagement"
-                    fill="#6366f1"
-                    name="Engagement Promedio"
-                    radius={[8, 8, 0, 0]}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+      {/* ── Tab: Contenido ──────────────────────────────── */}
+      {activeTab === 'contenido' && (
+        <div className="an-content animate-fade-in">
+          {contentTypeChartData.length > 0 && (
+            <div className="an-section">
+              <div className="an-section-title">
+                <i className="bi bi-layers"></i>
+                Rendimiento por Tipo de Contenido
+              </div>
+              <div className="an-dashboard-grid">
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart data={contentTypeChartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                    <XAxis dataKey="name" stroke="rgba(255,255,255,0.08)" tick={{ fill: 'rgba(240,242,248,0.45)', fontSize: 11 }} />
+                    <YAxis stroke="rgba(255,255,255,0.08)" tick={{ fill: 'rgba(240,242,248,0.45)', fontSize: 11 }} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Bar dataKey="engagement" fill="#833ab4" name="Engagement Promedio" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+                <div style={{ padding: '20px 0' }}>
+                  {contentTypeChartData.map((item, index) => (
+                    <div key={index} style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+                      <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: COLORS[index % COLORS.length], flexShrink: 0 }}></div>
+                      <div>
+                        <div style={{ color: '#f0f2f8', fontSize: '0.85rem', fontWeight: 600 }}>{item.name}</div>
+                        <div style={{ color: 'rgba(240,242,248,0.45)', fontSize: '0.75rem' }}>
+                          {item.posts} posts · {item.engagement.toFixed(1)} engagement
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
-            <div className="content-type-stats">
-              {contentTypeChartData.map((item, index) => (
-                <div key={index} className="content-type-item">
-                  <div
-                    className="type-indicator"
-                    style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                  ></div>
-                  <div className="type-info">
-                    <span className="type-name">{item.name}</span>
-                    <span className="type-details">
-                      {item.posts} posts · {item.engagement.toFixed(1)} engagement promedio
-                    </span>
+          )}
+
+          <div className="an-section">
+            <div className="an-section-title">
+              <i className="bi bi-trophy"></i>
+              Posts Más Exitosos
+            </div>
+            <div className="an-top-posts-grid">
+              {analytics.top_posts.map((post) => (
+                <div
+                  key={post.id}
+                  className="an-post-card"
+                  onClick={() => setSelectedPost(post)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === 'Enter' && setSelectedPost(post)}
+                >
+                  {post.media_url ? (
+                    <img src={post.media_url} alt="Post" className="an-post-card-thumb" />
+                  ) : (
+                    <div className="an-post-card-thumb" style={{ background: 'rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <i className="bi bi-image" style={{ color: 'rgba(255,255,255,0.2)', fontSize: '2rem' }}></i>
+                    </div>
+                  )}
+                  <div className="an-post-card-body">
+                    <p className="an-post-card-caption">{post.content || 'Sin descripción'}</p>
+                    <div className="an-post-card-stats">
+                      <span><i className="bi bi-heart-fill me-1" style={{ color: '#fd1d1d' }}></i>{post.likes}</span>
+                      <span><i className="bi bi-chat-fill me-1" style={{ color: '#833ab4' }}></i>{post.comments}</span>
+                      <span><i className="bi bi-bookmark-fill me-1" style={{ color: '#6ee7b7' }}></i>{post.saved}</span>
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
           </div>
-        </div>
-      )}
 
-      {/* Two Column Layout */}
-      <div className="analytics-columns">
-        {/* Top Posts */}
-        <div className="analytics-section">
-          <h3><i className="bi bi-trophy me-2"></i>Posts Más Exitosos</h3>
-          <div className="top-posts-list">
-            {analytics.top_posts.map((post, index) => (
-              <div key={post.id} className="top-post-item">
-                <div className="post-rank">#{index + 1}</div>
-                <div className="post-info">
-                  <p className="post-content">{post.content}</p>
-                  <div className="post-metrics">
-                    <span><i className="bi bi-heart-fill me-1"></i>{post.likes}</span>
-                    <span><i className="bi bi-chat-dots me-1"></i>{post.comments}</span>
-                    <span className="post-date">
-                      {new Date(post.date).toLocaleDateString('es-ES')}
-                    </span>
-                  </div>
-                </div>
+          {analytics.best_posting_times.length > 0 && (
+            <div className="an-section">
+              <div className="an-section-title">
+                <i className="bi bi-alarm"></i>
+                Mejores Horarios para Publicar
               </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Best Posting Times */}
-        <div className="analytics-section">
-          <h3><i className="bi bi-clock me-2"></i>Mejores Horarios</h3>
-          <div className="chart-container" style={{ height: '250px' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={analytics.best_posting_times}
-                layout="vertical"
-                margin={{ left: 20, right: 20 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis type="number" stroke="#6b7280" style={{ fontSize: '12px' }} />
-                <YAxis
-                  type="category"
-                  dataKey="time"
-                  stroke="#6b7280"
-                  style={{ fontSize: '12px' }}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#fff',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '8px'
-                  }}
-                />
-                <Bar
-                  dataKey="avg_engagement"
-                  fill="#10b981"
-                  name="Engagement Promedio"
-                  radius={[0, 8, 8, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
-
-      {/* Insights Box */}
-      {analytics.insights && analytics.insights.length > 0 && (
-        <div className="insights-box">
-          <h4><i className="bi bi-lightbulb me-2"></i>Insights Clave</h4>
-          <ul>
-            {analytics.insights.map((insight, index) => (
-              <li key={index}>
-                <i className={`bi bi-${insight.icon} me-2`}></i>
-                <strong>{insight.title}:</strong> {insight.description}
-              </li>
-            ))}
-          </ul>
+              <div className="an-chart-body">
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={analytics.best_posting_times} layout="vertical" margin={{ left: 10, right: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                    <XAxis type="number" stroke="rgba(255,255,255,0.08)" tick={{ fill: 'rgba(240,242,248,0.45)', fontSize: 11 }} />
+                    <YAxis type="category" dataKey="time" stroke="rgba(255,255,255,0.08)" tick={{ fill: 'rgba(240,242,248,0.45)', fontSize: 11 }} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Bar dataKey="avg_engagement" fill="#6ee7b7" name="Engagement Promedio" radius={[0, 6, 6, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
         </div>
       )}
+
+      {/* ── Draft Optimizer ─────────────────────────────── */}
+      <DraftOptimizerPanel
+        bestPostingTimesRaw={analytics.best_posting_times_raw}
+        byContentType={analytics.by_content_type}
+      />
+
+      {/* ── Post Detail Modal ───────────────────────────── */}
+      <PostDetailModal
+        isOpen={selectedPost !== null}
+        onClose={() => setSelectedPost(null)}
+        post={selectedPost ? {
+          id: selectedPost.id,
+          caption: selectedPost.content,
+          media_url: selectedPost.media_url,
+          permalink: selectedPost.permalink,
+          post_type: selectedPost.post_type,
+          likes: selectedPost.likes,
+          comments: selectedPost.comments,
+          saved: selectedPost.saved,
+          views: selectedPost.views,
+          reach: selectedPost.reach,
+          avg_watch_time_ms: selectedPost.avg_watch_time_ms,
+          total_watch_time_ms: selectedPost.total_watch_time_ms,
+        } : null}
+      />
     </div>
   );
 };

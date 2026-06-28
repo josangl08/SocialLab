@@ -1,4 +1,7 @@
 import React from 'react';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+} from 'recharts';
 import './ActivityHeatmap.css';
 
 interface OnlineHoursData {
@@ -34,10 +37,35 @@ export const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
   }
 
   if (!onlineHours || Object.keys(onlineHours).length === 0) {
+    if (bestPostingTimes && bestPostingTimes.length > 0) {
+      return (
+        <div className="activity-heatmap">
+          <p style={{ color: '#6b7280', fontSize: '0.78rem', marginBottom: '16px' }}>
+            <i className="bi bi-info-circle me-1" style={{ color: '#818cf8' }}></i>
+            Datos de seguidores online no disponibles — mostrando rendimiento histórico por hora
+          </p>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={bestPostingTimes} layout="vertical" margin={{ left: 10, right: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <XAxis type="number" stroke="#374151" tick={{ fill: '#6b7280', fontSize: 11 }} />
+              <YAxis type="category" dataKey="hour" stroke="#374151" tick={{ fill: '#6b7280', fontSize: 11 }} width={50} />
+              <Tooltip
+                contentStyle={{ backgroundColor: 'rgba(8,12,24,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', color: '#f0f2f8' }}
+                formatter={(value: number) => [`${value.toFixed(1)}%`, 'Engagement promedio']}
+              />
+              <Bar dataKey="avg_engagement" fill="#833ab4" name="Engagement promedio" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      );
+    }
+
     return (
       <div className="chart-empty">
-        <i className="bi bi-clock" style={{ fontSize: '48px', color: '#d1d5db' }}></i>
-        <p>No hay datos de actividad disponibles</p>
+        <i className="bi bi-clock" style={{ fontSize: '48px', color: '#374151' }}></i>
+        <p style={{ color: '#6b7280', fontSize: '0.85rem' }}>
+          Sin datos de actividad — sincroniza tu cuenta para ver cuándo están online tus seguidores
+        </p>
       </div>
     );
   }
