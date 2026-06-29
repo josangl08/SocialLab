@@ -1,0 +1,366 @@
+/* ─────────────────────────────────────────────────────
+   SocialLab Settings — Dark Observatory Design System
+   ───────────────────────────────────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
+
+.st-container {
+  --sl-page:      #080c18;
+  --sl-surface:   rgba(255, 255, 255, 0.04);
+  --sl-surface-2: rgba(255, 255, 255, 0.07);
+  --sl-border:    rgba(255, 255, 255, 0.08);
+  --sl-border-2:  rgba(255, 255, 255, 0.14);
+  --sl-text:      #f0f2f8;
+  --sl-muted:     rgba(240, 242, 248, 0.55);
+  --sl-indigo:    #818cf8;
+  --sl-indigo-lt: #a5b4fc;
+  --sl-violet:    #c084fc;
+  --sl-green:     #6ee7b7;
+  --sl-red:       #fca5a5;
+  --sl-yellow:    #fbbf24;
+  --sl-blur:      blur(24px);
+  --sl-radius:    16px;
+  --sl-radius-sm: 10px;
+  --sl-ease:      cubic-bezier(0.4, 0, 0.2, 1);
+  --sl-t:         0.2s;
+
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  color: var(--sl-text);
+  padding-bottom: 48px;
+}
+
+/* ═══════════════════════════════════════════════════
+   HEADER BAR
+   ═══════════════════════════════════════════════════ */
+.st-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 24px;
+  background: var(--sl-surface);
+  backdrop-filter: var(--sl-blur);
+  -webkit-backdrop-filter: var(--sl-blur);
+  border-bottom: 1px solid var(--sl-border);
+  position: relative;
+  overflow: hidden;
+}
+
+.st-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(131, 58, 180, 0.06) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+.st-header-info { position: relative; z-index: 1; }
+
+.st-header-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--sl-text);
+  margin: 0 0 3px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  letter-spacing: -0.2px;
+}
+
+.st-header-title i { color: var(--sl-indigo); font-size: 16px; }
+
+.st-header-subtitle {
+  font-size: 12px;
+  color: var(--sl-muted);
+  margin: 0;
+  padding-left: 26px;
+}
+
+/* ═══════════════════════════════════════════════════
+   CONTENT LAYOUT
+   ═══════════════════════════════════════════════════ */
+.st-content {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ═══════════════════════════════════════════════════
+   GLASS PANEL
+   ═══════════════════════════════════════════════════ */
+.st-panel {
+  background: var(--sl-surface);
+  backdrop-filter: var(--sl-blur);
+  -webkit-backdrop-filter: var(--sl-blur);
+  border: 1px solid var(--sl-border);
+  border-radius: var(--sl-radius);
+  overflow: hidden;
+}
+
+.st-panel-body { padding: 20px 24px; }
+
+.st-panel-divider {
+  border: none;
+  border-top: 1px solid var(--sl-border);
+  margin: 16px 0;
+}
+
+/* ═══════════════════════════════════════════════════
+   SECTION LABEL
+   ═══════════════════════════════════════════════════ */
+.st-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sl-muted);
+  margin: 0 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ═══════════════════════════════════════════════════
+   PROFILE AVATAR
+   ═══════════════════════════════════════════════════ */
+.st-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.35rem;
+}
+
+/* ═══════════════════════════════════════════════════
+   ACCOUNTS AREA
+   ═══════════════════════════════════════════════════ */
+.st-accounts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.st-accounts-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--sl-text);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.st-accounts-title i { color: var(--sl-violet); }
+
+.st-accounts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(285px, 1fr));
+  gap: 16px;
+}
+
+/* ═══════════════════════════════════════════════════
+   ACCOUNT CARD
+   ═══════════════════════════════════════════════════ */
+.st-account-card {
+  background: var(--sl-surface);
+  border: 1px solid var(--sl-border);
+  border-radius: var(--sl-radius);
+  padding: 20px;
+  transition: border-color var(--sl-t) var(--sl-ease),
+              background   var(--sl-t) var(--sl-ease);
+}
+
+.st-account-card:hover {
+  border-color: var(--sl-border-2);
+  background: var(--sl-surface-2);
+}
+
+/* Micro-section within account card */
+.st-card-row {
+  border-top: 1px solid var(--sl-border);
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.st-card-row-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sl-muted);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ═══════════════════════════════════════════════════
+   BUTTONS
+   ═══════════════════════════════════════════════════ */
+.st-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--sl-radius-sm);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--sl-t) var(--sl-ease);
+  border: 1px solid transparent;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.st-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.st-btn-sm { padding: 5px 10px; font-size: 12px; }
+
+.st-btn-primary {
+  background: var(--sl-indigo);
+  color: #fff;
+  border-color: var(--sl-indigo);
+}
+.st-btn-primary:hover:not(:disabled) {
+  background: var(--sl-indigo-lt);
+  border-color: var(--sl-indigo-lt);
+}
+
+.st-btn-ghost {
+  background: transparent;
+  color: var(--sl-muted);
+  border-color: var(--sl-border-2);
+}
+.st-btn-ghost:hover:not(:disabled) {
+  background: var(--sl-surface-2);
+  color: var(--sl-text);
+}
+
+.st-btn-accent {
+  background: transparent;
+  color: var(--sl-indigo-lt);
+  border-color: rgba(165, 180, 252, 0.28);
+}
+.st-btn-accent:hover:not(:disabled) {
+  background: rgba(165, 180, 252, 0.08);
+  border-color: var(--sl-indigo-lt);
+}
+
+.st-btn-danger {
+  background: transparent;
+  color: var(--sl-red);
+  border-color: rgba(252, 165, 165, 0.28);
+}
+.st-btn-danger:hover:not(:disabled) {
+  background: rgba(252, 165, 165, 0.08);
+}
+
+/* ═══════════════════════════════════════════════════
+   BADGES
+   ═══════════════════════════════════════════════════ */
+.st-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.st-badge-success {
+  background: rgba(110, 231, 183, 0.12);
+  color: var(--sl-green);
+  border: 1px solid rgba(110, 231, 183, 0.25);
+}
+
+.st-badge-warning {
+  background: rgba(251, 191, 36, 0.1);
+  color: var(--sl-yellow);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+}
+
+.st-badge-danger {
+  background: rgba(252, 165, 165, 0.1);
+  color: var(--sl-red);
+  border: 1px solid rgba(252, 165, 165, 0.25);
+}
+
+/* ═══════════════════════════════════════════════════
+   FORM ELEMENTS
+   ═══════════════════════════════════════════════════ */
+.st-input {
+  width: 100%;
+  padding: 7px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--sl-border-2);
+  border-radius: var(--sl-radius-sm);
+  color: var(--sl-text);
+  font-family: inherit;
+  font-size: 13px;
+  transition: border-color var(--sl-t) var(--sl-ease);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.st-input::placeholder { color: var(--sl-muted); }
+
+.st-input:focus { border-color: var(--sl-indigo); }
+
+/* ═══════════════════════════════════════════════════
+   MISC ELEMENTS
+   ═══════════════════════════════════════════════════ */
+.st-code {
+  display: block;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--sl-indigo-lt);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  border: 1px solid var(--sl-border);
+  margin-top: 6px;
+}
+
+.st-success-msg {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--sl-green);
+  margin-top: 6px;
+}
+
+.st-meta {
+  font-size: 12px;
+  color: var(--sl-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.st-empty {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--sl-muted);
+  font-size: 14px;
+}
+
+.st-empty i {
+  font-size: 32px;
+  display: block;
+  margin-bottom: 12px;
+  opacity: 0.3;
+}

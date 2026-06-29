@@ -37,6 +37,11 @@ function getTokenStatus(expiresAt: string | null): TokenStatus {
   return 'valid';
 }
 
+function extractDriveFolderId(input: string): string {
+  const match = input.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  return match ? match[1] : input.trim();
+}
+
 const AccountsPage: React.FC = () => {
   const [accounts, setAccounts] = useState<InstagramAccount[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,6 +51,10 @@ const AccountsPage: React.FC = () => {
   const [telegramUnlinking, setTelegramUnlinking] = useState<number | null>(null);
   const [linkTokens, setLinkTokens] = useState<Record<number, string>>({});
   const [drawerAccount, setDrawerAccount] = useState<InstagramAccount | null>(null);
+  const [driveSaving, setDriveSaving] = useState<number | null>(null);
+  const [driveUnlinking, setDriveUnlinking] = useState<number | null>(null);
+  const [driveInputs, setDriveInputs] = useState<Record<number, string>>({});
+  const [driveSuccess, setDriveSuccess] = useState<Record<number, boolean>>({});
 
   const fetchAccounts = useCallback(async () => {
     const token = localStorage.getItem('authToken');
@@ -123,146 +132,278 @@ const AccountsPage: React.FC = () => {
     }
   };
 
+  const handleDriveSave = async (accountId: number, input: string) => {
+    const folderId = extractDriveFolderId(input);
+    if (!folderId) return;
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    setDriveSaving(accountId);
+    try {
+      const res = await fetch(`http://localhost:8000/instagram/accounts/${accountId}/config`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ drive_folder_id: folderId })
+      });
+      if (!res.ok) throw new Error('Error al vincular carpeta');
+      setAccounts(prev => prev.map(a => a.id === accountId ? { ...a, drive_folder_id: folderId } : a));
+      setDriveInputs(prev => { const next = { ...prev }; delete next[accountId]; return next; });
+      setDriveSuccess(prev => ({ ...prev, [accountId]: true }));
+      setTimeout(() => setDriveSuccess(prev => { const next = { ...prev }; delete next[accountId]; return next; }), 3000);
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setDriveSaving(null);
+    }
+  };
+
+  const handleDriveUnlink = async (accountId: number) => {
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    setDriveUnlinking(accountId);
+    try {
+      const res = await fetch(`http://localhost:8000/instagram/accounts/${accountId}/config`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ drive_folder_id: null })
+      });
+      if (!res.ok) throw new Error('Error al desvincular carpeta');
+      setAccounts(prev => prev.map(a => a.id === accountId ? { ...a, drive_folder_id: null } : a));
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setDriveUnlinking(null);
+    }
+  };
+
   const handleReconnect = () => {
     const token = localStorage.getItem('authToken');
     if (token) window.location.href = `http://localhost:8000/instagram/login?token=${token}`;
   };
 
   const statusBadge = (status: TokenStatus) => {
-    if (status === 'valid') return <span className="badge bg-success"><i className="bi bi-check-circle me-1"></i>Conectada</span>;
-    if (status === 'expiring') return <span className="badge bg-warning text-dark"><i className="bi bi-exclamation-triangle me-1"></i>Expira pronto</span>;
-    return <span className="badge bg-danger"><i className="bi bi-x-circle me-1"></i>Reconectar</span>;
+    if (status === 'valid') return (
+      <span className="st-badge st-badge-success">
+        <i className="bi bi-check-circle"></i>Conectada
+      </span>
+    );
+    if (status === 'expiring') return (
+      <span className="st-badge st-badge-warning">
+        <i className="bi bi-exclamation-triangle"></i>Expira pronto
+      </span>
+    );
+    return (
+      <span className="st-badge st-badge-danger">
+        <i className="bi bi-x-circle"></i>Reconectar
+      </span>
+    );
   };
 
-  if (loading) return <div className="d-flex justify-content-center p-5"><div className="spinner-border text-primary" role="status"></div></div>;
-  if (error) return <div className="alert alert-danger m-4">{error}</div>;
+  const spinner = <span className="spinner-border spinner-border-sm" role="status" style={{ width: 12, height: 12 }}></span>;
+
+  if (loading) return (
+    <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+      <div className="spinner-border" style={{ color: 'var(--sl-indigo)' }} role="status"></div>
+    </div>
+  );
+
+  if (error) return (
+    <div style={{ background: 'rgba(252,165,165,0.08)', border: '1px solid rgba(252,165,165,0.2)', borderRadius: 12, padding: '12px 16px', color: 'var(--sl-red)', fontSize: 14 }}>
+      {error}
+    </div>
+  );
 
   return (
-    <div className="container-fluid p-4">
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h2 className="mb-0" style={{ color: '#e8e9ed' }}><i className="bi bi-instagram me-2 text-primary"></i>Cuentas de Instagram</h2>
-        <button className="btn btn-primary" onClick={handleReconnect}>
-          <i className="bi bi-plus-circle me-2"></i>Conectar cuenta
+    <>
+      {/* Accounts header */}
+      <div className="st-accounts-header">
+        <h3 className="st-accounts-title">
+          <i className="bi bi-instagram"></i>
+          Cuentas de Instagram
+        </h3>
+        <button className="st-btn st-btn-primary st-btn-sm" onClick={handleReconnect}>
+          <i className="bi bi-plus-circle"></i>Conectar cuenta
         </button>
       </div>
 
       {accounts.length === 0 ? (
-        <div className="alert" style={{ background: 'rgba(99,102,241,0.12)', borderColor: '#667eea', color: '#e8e9ed' }}>
-          <i className="bi bi-info-circle me-2" style={{ color: '#818cf8' }}></i>
-          No tienes cuentas de Instagram conectadas.{' '}
-          <button className="btn btn-link p-0" style={{ color: '#818cf8' }} onClick={handleReconnect}>Conectar ahora</button>
+        <div className="st-empty">
+          <i className="bi bi-instagram"></i>
+          No tienes cuentas de Instagram conectadas.
+          <br />
+          <button className="st-btn st-btn-ghost st-btn-sm" style={{ marginTop: 12 }} onClick={handleReconnect}>
+            Conectar ahora
+          </button>
         </div>
       ) : (
-        <div className="row g-3">
+        <div className="st-accounts-grid">
           {accounts.map(account => {
             const status = getTokenStatus(account.expires_at);
             return (
-              <div key={account.id} className="col-12 col-md-6 col-lg-4">
-                <div className="card h-100" style={{ background: '#2a3038', borderColor: '#3d444d', color: '#e8e9ed' }}>
-                  <div className="card-body">
-                    <div className="d-flex align-items-center mb-3">
-                      {account.profile_picture_url ? (
-                        <img
-                          src={account.profile_picture_url}
-                          alt={account.username || ''}
-                          className="rounded-circle me-3"
-                          style={{ width: 48, height: 48, objectFit: 'cover' }}
-                        />
-                      ) : (
-                        <div className="rounded-circle bg-secondary me-3 d-flex align-items-center justify-content-center" style={{ width: 48, height: 48 }}>
-                          <i className="bi bi-person text-white fs-5"></i>
+              <div key={account.id} className="st-account-card">
+                {/* Profile row */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                  {account.profile_picture_url ? (
+                    <img
+                      src={account.profile_picture_url}
+                      alt={account.username || ''}
+                      style={{ width: 44, height: 44, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+                    />
+                  ) : (
+                    <div style={{
+                      width: 44, height: 44, borderRadius: '50%', flexShrink: 0,
+                      background: 'var(--sl-surface-2)', border: '1px solid var(--sl-border-2)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    }}>
+                      <i className="bi bi-person" style={{ color: 'var(--sl-muted)', fontSize: 18 }}></i>
+                    </div>
+                  )}
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      @{account.username || account.account_name || `Cuenta ${account.id}`}
+                    </div>
+                    {account.account_name && (
+                      <div className="st-meta">{account.account_name}</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Status + followers */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  {statusBadge(status)}
+                  {account.followers_count != null && (
+                    <span className="st-meta">
+                      <i className="bi bi-people"></i>
+                      {account.followers_count.toLocaleString()}
+                    </span>
+                  )}
+                </div>
+
+                {/* Expiry */}
+                {account.expires_at && (
+                  <div className="st-meta" style={{ marginBottom: 12 }}>
+                    <i className="bi bi-clock"></i>
+                    Expira: {new Date(account.expires_at).toLocaleDateString('es-ES')}
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {status !== 'valid' && (
+                    <button className="st-btn st-btn-accent st-btn-sm" style={{ flex: 1 }} onClick={handleReconnect}>
+                      <i className="bi bi-arrow-repeat"></i>Reconectar
+                    </button>
+                  )}
+                  <button
+                    className="st-btn st-btn-danger st-btn-sm"
+                    onClick={() => handleDisconnect(account.id, account.username)}
+                    disabled={disconnecting === account.id}
+                  >
+                    {disconnecting === account.id ? spinner : <><i className="bi bi-trash"></i>Desconectar</>}
+                  </button>
+                </div>
+
+                {/* Telegram */}
+                <div className="st-card-row">
+                  <div className="st-card-row-label">
+                    <i className="bi bi-telegram" style={{ color: '#29b6f6' }}></i>
+                    Telegram
+                  </div>
+                  {account.telegram_chat_id ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span className="st-badge st-badge-success">Vinculado</span>
+                      <button
+                        className="st-btn st-btn-ghost st-btn-sm"
+                        onClick={() => handleTelegramUnlink(account.id)}
+                        disabled={telegramUnlinking === account.id}
+                      >
+                        {telegramUnlinking === account.id ? spinner : 'Unlink'}
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        className="st-btn st-btn-ghost st-btn-sm"
+                        onClick={() => handleTelegramLink(account.id)}
+                        disabled={telegramLinking === account.id}
+                      >
+                        {telegramLinking === account.id ? spinner : <><i className="bi bi-telegram"></i>Link Telegram</>}
+                      </button>
+                      {linkTokens[account.id] && (
+                        <div style={{ marginTop: 8 }}>
+                          <div className="st-meta">Envía al bot:</div>
+                          <code className="st-code">/start {linkTokens[account.id]}</code>
                         </div>
                       )}
-                      <div>
-                        <h6 className="mb-0 fw-bold" style={{ color: '#e8e9ed' }}>@{account.username || account.account_name || `Cuenta ${account.id}`}</h6>
-                        {account.account_name && <small style={{ color: '#9ca3af' }}>{account.account_name}</small>}
+                    </>
+                  )}
+                </div>
+
+                {/* Google Drive */}
+                <div className="st-card-row">
+                  <div className="st-card-row-label">
+                    <i className="bi bi-google" style={{ color: '#ea4335' }}></i>
+                    Google Drive
+                  </div>
+                  {account.drive_folder_id ? (
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span className="st-badge st-badge-success">Vinculado</span>
+                        <button
+                          className="st-btn st-btn-ghost st-btn-sm"
+                          onClick={() => handleDriveUnlink(account.id)}
+                          disabled={driveUnlinking === account.id}
+                        >
+                          {driveUnlinking === account.id ? spinner : 'Unlink'}
+                        </button>
+                      </div>
+                      {driveSuccess[account.id] && (
+                        <div className="st-success-msg">
+                          <i className="bi bi-check-circle-fill"></i>
+                          Carpeta sincronizada correctamente
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input
+                          className="st-input"
+                          type="text"
+                          placeholder="URL o ID de carpeta de Google Drive"
+                          value={driveInputs[account.id] ?? ''}
+                          onChange={e => setDriveInputs(prev => ({ ...prev, [account.id]: e.target.value }))}
+                        />
+                        <button
+                          className="st-btn st-btn-ghost st-btn-sm"
+                          style={{ flexShrink: 0 }}
+                          onClick={() => handleDriveSave(account.id, driveInputs[account.id] ?? '')}
+                          disabled={driveSaving === account.id || !driveInputs[account.id]?.trim()}
+                        >
+                          {driveSaving === account.id ? spinner : <><i className="bi bi-folder-symlink"></i>Vincular</>}
+                        </button>
+                      </div>
+                      <div className="st-meta" style={{ marginTop: 5 }}>
+                        Puedes pegar la URL completa de la carpeta
                       </div>
                     </div>
+                  )}
+                </div>
 
-                    <div className="d-flex justify-content-between align-items-center mb-3">
-                      {statusBadge(status)}
-                      {account.followers_count != null && (
-                        <small style={{ color: '#9ca3af' }}>
-                          <i className="bi bi-people me-1"></i>
-                          {account.followers_count.toLocaleString()} seguidores
-                        </small>
-                      )}
-                    </div>
-
-                    {account.expires_at && (
-                      <small className="d-block mb-3" style={{ color: '#9ca3af' }}>
-                        <i className="bi bi-clock me-1"></i>
-                        Expira: {new Date(account.expires_at).toLocaleDateString('es-ES')}
-                      </small>
+                {/* Strategy */}
+                <div className="st-card-row">
+                  <button
+                    className="st-btn st-btn-accent"
+                    style={{ width: '100%', justifyContent: 'center' }}
+                    onClick={() => setDrawerAccount(account)}
+                  >
+                    <i className="bi bi-robot"></i>
+                    Configurar Estrategia
+                    {account.sector && (
+                      <span className="st-badge st-badge-success" style={{ fontSize: '0.65rem', marginLeft: 4 }}>
+                        Activa
+                      </span>
                     )}
-
-                    <div className="d-flex gap-2">
-                      {status !== 'valid' && (
-                        <button className="btn btn-sm btn-outline-primary flex-grow-1" onClick={handleReconnect}>
-                          <i className="bi bi-arrow-repeat me-1"></i>Reconectar
-                        </button>
-                      )}
-                      <button
-                        className="btn btn-sm btn-outline-danger"
-                        onClick={() => handleDisconnect(account.id, account.username)}
-                        disabled={disconnecting === account.id}
-                      >
-                        {disconnecting === account.id
-                          ? <span className="spinner-border spinner-border-sm" role="status"></span>
-                          : <><i className="bi bi-trash me-1"></i>Desconectar</>
-                        }
-                      </button>
-                    </div>
-
-                    <div className="mt-3 pt-3" style={{ borderTop: '1px solid #3d444d' }}>
-                      {account.telegram_chat_id ? (
-                        <div className="d-flex align-items-center gap-2">
-                          <span className="badge bg-success">Linked ✅</span>
-                          <button
-                            className="btn btn-sm btn-outline-secondary"
-                            onClick={() => handleTelegramUnlink(account.id)}
-                            disabled={telegramUnlinking === account.id}
-                          >
-                            {telegramUnlinking === account.id
-                              ? <span className="spinner-border spinner-border-sm" role="status"></span>
-                              : 'Unlink'
-                            }
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <button
-                            className="btn btn-sm btn-outline-primary"
-                            onClick={() => handleTelegramLink(account.id)}
-                            disabled={telegramLinking === account.id}
-                          >
-                            {telegramLinking === account.id
-                              ? <span className="spinner-border spinner-border-sm" role="status"></span>
-                              : <><i className="bi bi-telegram me-1"></i>Link Telegram</>
-                            }
-                          </button>
-                          {linkTokens[account.id] && (
-                            <div className="mt-2">
-                              <small className="d-block" style={{ color: '#9ca3af' }}>Send to bot:</small>
-                              <code className="d-block" style={{ background: '#1a1d23', color: '#a5b4fc', padding: '4px 8px', borderRadius: 6, fontSize: '0.82rem' }}>/start {linkTokens[account.id]}</code>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-
-                    <div className="mt-3 pt-3" style={{ borderTop: '1px solid #3d444d' }}>
-                      <button
-                        className="btn btn-sm btn-outline-info w-100"
-                        onClick={() => setDrawerAccount(account)}
-                      >
-                        <i className="bi bi-robot me-1"></i>Configurar Estrategia
-                        {account.sector && (
-                          <span className="badge bg-success ms-2" style={{ fontSize: '0.65rem' }}>Activa</span>
-                        )}
-                      </button>
-                    </div>
-                  </div>
+                  </button>
                 </div>
               </div>
             );
@@ -277,7 +418,7 @@ const AccountsPage: React.FC = () => {
         onHide={() => setDrawerAccount(null)}
         onSave={fetchAccounts}
       />
-    </div>
+    </>
   );
 };
 
