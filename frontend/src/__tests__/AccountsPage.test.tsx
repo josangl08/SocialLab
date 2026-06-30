@@ -104,7 +104,7 @@ describe('AccountsPage Component', () => {
       expect(screen.getByText('@active_user')).toBeInTheDocument();
     });
 
-    const activeUserCard = screen.getByText('@active_user').closest('.card') as HTMLElement;
+    const activeUserCard = screen.getByText('@active_user').closest('.st-account-card') as HTMLElement;
     const disconnectBtn = within(activeUserCard).getByRole('button', { name: /Desconectar/i });
 
     fireEvent.click(disconnectBtn);
@@ -147,12 +147,12 @@ describe('AccountsPage Component', () => {
       expect(screen.getByText('@active_user')).toBeInTheDocument();
     });
 
-    const activeUserCard = screen.getByText('@active_user').closest('.card') as HTMLElement;
-    const expiredUserCard = screen.getByText('@expired_user').closest('.card') as HTMLElement;
+    const activeUserCard = screen.getByText('@active_user').closest('.st-account-card') as HTMLElement;
+    const expiredUserCard = screen.getByText('@expired_user').closest('.st-account-card') as HTMLElement;
 
-    // Active user has telegram_chat_id: '12345' -> should show Linked badge and Unlink button
-    expect(within(activeUserCard).getByText(/Linked/i)).toBeInTheDocument();
-    expect(within(activeUserCard).getByRole('button', { name: /Unlink/i })).toBeInTheDocument();
+    // Active user has telegram_chat_id: '12345' AND drive_folder_id -> both show "Vinculado" and "Unlink"
+    expect(within(activeUserCard).getAllByText(/Vinculado/i).length).toBeGreaterThan(0);
+    expect(within(activeUserCard).getAllByRole('button', { name: /Unlink/i }).length).toBeGreaterThan(0);
 
     // Expired user has telegram_chat_id: null -> should show Link Telegram button
     expect(within(expiredUserCard).getByRole('button', { name: /Link Telegram/i })).toBeInTheDocument();
@@ -165,7 +165,7 @@ describe('AccountsPage Component', () => {
       expect(screen.getByText('@expired_user')).toBeInTheDocument();
     });
 
-    const expiredUserCard = screen.getByText('@expired_user').closest('.card') as HTMLElement;
+    const expiredUserCard = screen.getByText('@expired_user').closest('.st-account-card') as HTMLElement;
     const linkBtn = within(expiredUserCard).getByRole('button', { name: /Link Telegram/i });
 
     fireEvent.click(linkBtn);
@@ -191,8 +191,9 @@ describe('AccountsPage Component', () => {
       expect(screen.getByText('@active_user')).toBeInTheDocument();
     });
 
-    const activeUserCard = screen.getByText('@active_user').closest('.card') as HTMLElement;
-    const unlinkBtn = within(activeUserCard).getByRole('button', { name: /Unlink/i });
+    const activeUserCard = screen.getByText('@active_user').closest('.st-account-card') as HTMLElement;
+    // account has both Telegram and Drive linked — take first Unlink (Telegram)
+    const unlinkBtn = within(activeUserCard).getAllByRole('button', { name: /Unlink/i })[0];
 
     // Mock confirm dialog
     window.confirm = vi.fn().mockReturnValue(true);

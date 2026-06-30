@@ -252,3 +252,4 @@ async def get_post(post_id: int, current_user: User = Depends(get_current_user))
     except Exception as e:
         logger.error(f"Error getting post {post_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get post: {str(e)}")
+

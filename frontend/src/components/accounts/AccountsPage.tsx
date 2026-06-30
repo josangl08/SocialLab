@@ -273,7 +273,7 @@ const AccountsPage: React.FC = () => {
                   {account.followers_count != null && (
                     <span className="st-meta">
                       <i className="bi bi-people"></i>
-                      {account.followers_count.toLocaleString()}
+                      {account.followers_count.toLocaleString()} seguidores
                     </span>
                   )}
                 </div>
