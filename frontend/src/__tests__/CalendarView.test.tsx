@@ -86,21 +86,17 @@ describe('CalendarView Component', () => {
       created_at: '2026-06-27T10:00:00Z',
       publication_date: null,
     },
-  ];
-  const mockProposals = [
     {
-      id: 'proposal-abc',
-      account_id: '123',
-      week_start: '2026-06-29',
-      status: 'pending_approval',
-      slots: [
-        {
-          day: 'lunes',
-          theme: 'Lunes motivacional',
-          caption: '¡A por la semana!',
-          post_type: 'post',
-        },
-      ],
+      id: 2,
+      user_id: 'user-123',
+      content: 'AI proposal post',
+      media_url: null,
+      post_type: 'post',
+      status: 'draft',
+      scheduled_at: '2026-06-29T12:00:00Z',
+      created_at: '2026-06-27T10:00:00Z',
+      publication_date: null,
+      is_ai_generated: true,
     },
   ];
 
@@ -122,12 +118,6 @@ describe('CalendarView Component', () => {
           json: () => Promise.resolve([{ id: 123, username: 'test_account' }]),
         });
       }
-      if (url.includes('/api/agent/proposals')) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve(mockProposals),
-        });
-      }
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({}),
@@ -135,7 +125,7 @@ describe('CalendarView Component', () => {
     });
   });
 
-  test('renders calendar and loads events from /api/posts and /api/agent/proposals', async () => {
+  test('renders calendar and loads events from /api/posts', async () => {
     render(<CalendarView />);
 
     // Wait for the calendar to render and stop loading
@@ -143,19 +133,19 @@ describe('CalendarView Component', () => {
       expect(screen.getByTestId('mock-calendar')).toBeInTheDocument();
     });
 
-    // Check that post event and proposal event are rendered
+    // Check that both the regular post and the AI-generated draft post are rendered
     expect(screen.getByTestId('event-1')).toBeInTheDocument();
-    expect(screen.getByTestId('event-proposal-proposal-abc-0')).toBeInTheDocument();
+    expect(screen.getByTestId('event-2')).toBeInTheDocument();
   });
 
-  test('proposal events render with distinct class', async () => {
+  test('AI-generated draft posts render with distinct proposal class', async () => {
     render(<CalendarView />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('event-proposal-proposal-abc-0')).toBeInTheDocument();
+      expect(screen.getByTestId('event-2')).toBeInTheDocument();
     });
 
-    const proposalEvent = screen.getByTestId('event-proposal-proposal-abc-0');
+    const proposalEvent = screen.getByTestId('event-2');
     expect(proposalEvent.className).toContain('event-proposal');
   });
 
