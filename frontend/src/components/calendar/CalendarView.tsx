@@ -5,14 +5,13 @@ import format from 'date-fns/format';
 import parse from 'date-fns/parse';
 import startOfWeek from 'date-fns/startOfWeek';
 import getDay from 'date-fns/getDay';
-import es from 'date-fns/locale/es';
+import enUS from 'date-fns/locale/en-US';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
 import './CalendarView.css';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import PostDetailModal from '../posts/PostDetailModal';
-import ProposalModal, { type ContentProposal } from './ProposalModal';
 
 interface Post {
   id: number;
@@ -24,50 +23,31 @@ interface Post {
   scheduled_at: string | null;
   created_at: string;
   publication_date: string | null;
-}
-
-interface InstagramAccount {
-  id: number;
-  username: string;
+  is_ai_generated?: boolean;
+  drive_file_id?: string | null;
 }
 
 interface CalendarViewProps {
   onNewPost?: (date?: string) => void;
   onEdit?: (post: Post) => void;
   refreshSignal?: number;
+  onFocusProposalPost?: (postId: number) => void;
+  onDragSuccess?: () => void;
 }
 
-const locales = { 'es': es };
-const localizer = dateFnsLocalizer({ format, parse, startOfWeek, getDay, locales });
+const locales = { 'en-US': enUS };
+const localizer = dateFnsLocalizer({
+  format,
+  parse,
+  startOfWeek: (date: Date) => startOfWeek(date, { weekStartsOn: 1 }),
+  getDay,
+  locales,
+});
 
 // Must be created outside the component to avoid re-instantiation on every render.
 const DnDCalendar = withDragAndDrop(Calendar as any);
 
-const WEEKDAY_OFFSETS: Record<string, number> = {
-  Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3,
-  Friday: 4, Saturday: 5, Sunday: 6,
-};
-
-function proposalToEvents(proposal: ContentProposal): any[] {
-  const weekStart = new Date(proposal.week_start);
-  return proposal.slots.map((slot, i) => {
-    const offset = WEEKDAY_OFFSETS[slot.day] ?? 0;
-    const start = new Date(weekStart);
-    start.setDate(weekStart.getDate() + offset);
-    return {
-      id: `proposal-${proposal.id}-${i}`,
-      title: `[IA] ${slot.theme}`,
-      start,
-      end: start,
-      allDay: true,
-      type: 'proposal' as const,
-      resource: proposal,
-      className: 'event-proposal',
-    };
-  });
-}
-
-const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshSignal }) => {
+const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshSignal, onFocusProposalPost, onDragSuccess }) => {
   const { token, syncCompleted } = useAuth();
   const navigate = useNavigate();
   const [events, setEvents] = useState<any[]>([]);
@@ -76,6 +56,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
   const [error, setError] = useState<string | null>(null);
   const [dragError, setDragError] = useState<string | null>(null);
   const dragErrorTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasLoaded = React.useRef(false);
   const [tooltip, setTooltip] = useState<{ event: any; x: number; y: number } | null>(null);
 
   const showDragError = useCallback((message: string) => {
@@ -90,29 +71,23 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
   const [currentView, setCurrentView] = useState<string>('month');
   const [showPostModal, setShowPostModal] = useState<boolean>(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
-  const [showProposalModal, setShowProposalModal] = useState<boolean>(false);
-  const [selectedProposal, setSelectedProposal] = useState<ContentProposal | null>(null);
-
   useEffect(() => {
     const fetchCalendarData = async () => {
       if (!token) {
-        setError('No hay token de autenticación disponible.');
+        setError('No authentication token available.');
         setLoading(false);
         return;
       }
 
-      setLoading(true);
+      if (!hasLoaded.current) setLoading(true);
       try {
         const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
 
-        const [postsRes, accountsRes] = await Promise.all([
-          fetch('http://localhost:8000/api/posts', { headers }),
-          fetch('http://localhost:8000/instagram/accounts', { headers }),
-        ]);
+        const postsRes = await fetch('http://localhost:8000/api/posts', { headers });
 
         if (!postsRes.ok) {
           const err = await postsRes.json();
-          setError('Error al cargar publicaciones: ' + (err.detail || 'Error desconocido'));
+          setError('Error loading posts: ' + (err.detail || 'Unknown error'));
           return;
         }
 
@@ -131,29 +106,17 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
             allDay: false,
             type: 'post' as const,
             resource: post,
-            className: `event-${post.post_type} event-status-${post.status}`,
+            className: post.is_ai_generated && post.status === 'draft'
+              ? `event-${post.post_type} event-proposal`
+              : `event-${post.post_type} event-status-${post.status}`,
           };
         });
 
-        let proposalEvents: any[] = [];
-        if (accountsRes.ok) {
-          const accounts: InstagramAccount[] = await accountsRes.json();
-          const proposalFetches = accounts.map(acc =>
-            fetch(`http://localhost:8000/api/agent/proposals?account_id=${acc.id}`, { headers })
-              .then(r => (r.ok ? r.json() : []))
-              .catch(() => [])
-          );
-          const proposalArrays: ContentProposal[][] = await Promise.all(proposalFetches);
-          proposalEvents = proposalArrays
-            .flat()
-            .filter((p: ContentProposal) => p.status === 'pending_approval')
-            .flatMap((p: ContentProposal) => proposalToEvents(p));
-        }
-
-        setEvents([...postEvents, ...proposalEvents]);
+        setEvents(postEvents);
       } catch (err: any) {
-        setError('Error de red o servidor: ' + err.message);
+        setError('Network or server error: ' + err.message);
       } finally {
+        hasLoaded.current = true;
         setLoading(false);
       }
     };
@@ -170,7 +133,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       if (targetDate < today) {
-        showDragError('No puedes programar publicaciones en fechas pasadas.');
+        showDragError('Cannot schedule posts in the past.');
         return;
       }
 
@@ -189,11 +152,13 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
 
         if (!res.ok) {
           setEvents(prevEvents);
-          showDragError('No se pudo reprogramar la publicación.');
+          showDragError('Could not reschedule the post.');
+        } else {
+          onDragSuccess?.();
         }
       } catch {
         setEvents(prevEvents);
-        showDragError('Error al reprogramar la publicación.');
+        showDragError('Network error rescheduling post.');
       } finally {
         rescheduleInProgress.current.delete(event.id);
       }
@@ -209,21 +174,9 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
 
   const handleSelectEvent = useCallback((event: any) => {
     setTooltip(null);
-    if (event.type === 'proposal') {
-      setSelectedProposal(event.resource as ContentProposal);
-      setShowProposalModal(true);
-    } else {
-      setSelectedPost(event.resource as Post);
-      setShowPostModal(true);
-    }
+    setSelectedPost(event.resource as Post);
+    setShowPostModal(true);
   }, []);
-
-  const handleProposalAction = useCallback(
-    (proposalId: string) => {
-      setEvents(prev => prev.filter(e => !(e.type === 'proposal' && e.resource.id === proposalId)));
-    },
-    []
-  );
 
   const eventPropGetter = (event: any) => ({ className: event.className });
 
@@ -250,7 +203,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
     <div className="sl-calendar-wrap">
       <div className="sl-cal-loading">
         <div className="sl-cal-spinner"></div>
-        Cargando calendario...
+        Loading calendar...
       </div>
     </div>
   );
@@ -281,7 +234,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
           style={{ height: '100%' }}
           defaultView="month"
           views={['month', 'week', 'day', 'agenda']}
-          culture="es"
+          culture="en-US"
           selectable
           draggableAccessor={(event: any) => event.type === 'post'}
           onEventDrop={handleEventDrop}
@@ -294,39 +247,39 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
           view={currentView}
           onView={setCurrentView}
           messages={{
-            allDay: 'Todo el día',
-            previous: 'Anterior',
-            next: 'Siguiente',
-            today: 'Hoy',
-            month: 'Mes',
-            week: 'Semana',
-            day: 'Día',
+            allDay: 'All day',
+            previous: 'Previous',
+            next: 'Next',
+            today: 'Today',
+            month: 'Month',
+            week: 'Week',
+            day: 'Day',
             agenda: 'Agenda',
-            date: 'Fecha',
-            time: 'Hora',
-            event: 'Evento',
-            noEventsInRange: 'No hay publicaciones en este rango.',
-            showMore: (total: number) => `+ ${total} más`,
+            date: 'Date',
+            time: 'Time',
+            event: 'Event',
+            noEventsInRange: 'No posts in this range.',
+            showMore: (total: number) => `+${total} more`,
           }}
         />
       </div>
 
       <div className="sl-cal-legend">
         <span className="sl-cal-legend-item">
+          <span className="sl-cal-legend-dot proposal"></span>
+          AI Proposal
+        </span>
+        <span className="sl-cal-legend-item">
           <span className="sl-cal-legend-dot draft"></span>
-          Borrador
+          Draft
         </span>
         <span className="sl-cal-legend-item">
           <span className="sl-cal-legend-dot scheduled"></span>
-          Programado
+          Scheduled
         </span>
         <span className="sl-cal-legend-item">
           <span className="sl-cal-legend-dot published"></span>
-          Publicado
-        </span>
-        <span className="sl-cal-legend-item">
-          <span className="sl-cal-legend-dot proposal"></span>
-          Propuesta IA
+          Published
         </span>
       </div>
 
@@ -353,12 +306,9 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
         post={selectedPost}
         onEdit={onEdit && selectedPost ? () => { setShowPostModal(false); onEdit(selectedPost); } : undefined}
         onActionSuccess={() => setRefreshKey(k => k + 1)}
-      />
-      <ProposalModal
-        show={showProposalModal}
-        onHide={() => { setShowProposalModal(false); setSelectedProposal(null); }}
-        proposal={selectedProposal}
-        onActionSuccess={(proposalId) => handleProposalAction(proposalId)}
+        onViewProposal={selectedPost?.is_ai_generated && onFocusProposalPost
+          ? () => { setShowPostModal(false); setSelectedPost(null); onFocusProposalPost(selectedPost.id); }
+          : undefined}
       />
     </div>
   );

@@ -1,4 +1,14 @@
 :root {
+  /* SocialLab design tokens */
+  --sl-purple:        #8b5cf6;
+  --sl-purple-light:  #c084fc;
+  --sl-purple-bg:     rgba(139, 92, 246, 0.08);
+  --sl-purple-border: rgba(139, 92, 246, 0.22);
+  --sl-text-muted:    rgba(255, 255, 255, 0.55);
+  --sl-text-dim:      rgba(255, 255, 255, 0.35);
+  --sl-surface:       rgba(255, 255, 255, 0.04);
+  --sl-border:        rgba(255, 255, 255, 0.08);
+
   font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   line-height: 1.5;
   font-weight: 400;

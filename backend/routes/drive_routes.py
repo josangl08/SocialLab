@@ -3,14 +3,20 @@ Google Drive API Routes
 Endpoints para gestionar exports de PROJECT 1 desde Google Drive.
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+import io
+import os
+import logging
 from typing import List, Optional
 from pydantic import BaseModel
-import logging
 
-from auth.jwt_handler import get_current_user
+from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import Response
+from googleapiclient.http import MediaIoBaseDownload
+
+from auth.dependencies import get_current_user, get_current_user_from_query_token
+from database.supabase_client import get_supabase_client
+from models.schemas import User
 from services.google_drive_connector import get_drive_connector
-import os
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/drive", tags=["Google Drive"])
@@ -32,7 +38,7 @@ class DriveExport(BaseModel):
 
 @router.get("/exports", response_model=List[DriveExport])
 async def list_project1_exports(
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Lista todos los exports disponibles de PROJECT 1 en Google Drive.
@@ -59,12 +65,7 @@ async def list_project1_exports(
         # Intentar conectar a Google Drive
         try:
             logger.info("🔌 Intentando conectar a Google Drive...")
-            drive = get_drive_connector()
-
-            # Si el servicio no está autenticado, usar mock
-            if not drive.service:
-                logger.warning("❌ Google Drive no autenticado, devolviendo datos mock")
-                return get_mock_exports()
+            drive = get_drive_connector(str(current_user.id))
 
             logger.info("✅ Conectado a Google Drive correctamente")
 
@@ -130,7 +131,7 @@ async def list_project1_exports(
 
 @router.get("/sync")
 async def sync_drive_data(
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Fuerza una sincronización manual de Google Drive.
@@ -145,7 +146,7 @@ async def sync_drive_data(
                 detail="Google Drive no configurado. Configura GOOGLE_DRIVE_PROJECT1_FOLDER_ID"
             )
 
-        drive = get_drive_connector()
+        drive = get_drive_connector(str(current_user.id))
         exports_data = drive.list_project1_exports(project1_folder_id)
 
         return {
@@ -160,6 +161,60 @@ async def sync_drive_data(
             status_code=500,
             detail=f"Error sincronizando con Google Drive: {str(e)}"
         )
+
+
+@router.get("/images")
+async def list_drive_images(
+    account_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    """Returns the list of image files in the account's Drive folder."""
+    supabase = get_supabase_client()
+    acc_res = supabase.table('instagram_accounts').select('drive_folder_id, user_id').eq('id', account_id).execute()
+    if not acc_res.data:
+        raise HTTPException(status_code=404, detail="Cuenta no encontrada")
+    account = acc_res.data[0]
+    if str(account['user_id']) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Sin acceso a esta cuenta")
+    folder_id = account.get('drive_folder_id')
+    if not folder_id:
+        raise HTTPException(status_code=400, detail="No hay carpeta Drive configurada")
+
+    try:
+        drive = get_drive_connector(str(current_user.id))
+    except RuntimeError:
+        raise HTTPException(status_code=401, detail="Drive no conectado. Reconecta en Ajustes.")
+    try:
+        files = drive.list_files(folder_id=folder_id)
+        return [{'id': f['id'], 'name': f['name']} for f in files
+                if f.get('mimeType', '').startswith('image/')]
+    except Exception as e:
+        logger.error(f"Drive list images failed for account {account_id}: {e}")
+        raise HTTPException(status_code=502, detail=f"Error de Drive: {str(e)}")
+
+
+@router.get("/files/{file_id}/image")
+async def get_drive_file_image(
+    file_id: str,
+    token: str,
+    current_user: User = Depends(get_current_user_from_query_token),
+):
+    """Streams a Drive file as an image, authenticated via query token."""
+    try:
+        drive = get_drive_connector(str(current_user.id))
+    except RuntimeError:
+        raise HTTPException(status_code=401, detail="Drive no conectado. Reconecta en Ajustes.")
+    try:
+        meta = drive.service.files().get(fileId=file_id, fields="mimeType").execute()
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, drive.service.files().get_media(fileId=file_id))
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        return Response(content=fh.getvalue(), media_type=meta.get("mimeType", "image/jpeg"))
+    except Exception as e:
+        logger.error(f"Drive image fetch failed for file {file_id}: {e}")
+        raise HTTPException(status_code=502, detail=f"Error de Drive: {str(e)}")
 
 
 def get_mock_exports() -> List[DriveExport]:

@@ -190,7 +190,7 @@ def test_approve_proposal_success(mock_agent_supabase, mock_agent_admin_supabase
     response = client.post(f"/api/agent/proposals/{proposal_id}/approve")
 
     assert response.status_code == 200
-    assert response.json() == {"updated": True}
+    assert response.json() == {"updated": True, "scheduled": 0}
 
 
 def test_approve_proposal_not_found(mock_agent_supabase):

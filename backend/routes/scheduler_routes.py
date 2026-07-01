@@ -210,6 +210,36 @@ async def reschedule_post(post_id: int, request: ReschedulePostRequest):
             f"Rescheduling post {post_id} to {request.new_scheduled_time}"
         )
 
+        # AI-generated posts (no media_url yet) — just update DB, skip APScheduler
+        supabase = get_supabase_client()
+        post_res = supabase.table('posts').select('media_url').eq('id', post_id).execute()
+        if not post_res.data:
+            raise HTTPException(status_code=404, detail=f"Post {post_id} not found")
+
+        # Update slot day in any pending proposal that contains this post
+        new_day = request.new_scheduled_time.strftime('%A')
+        prop_res = supabase.table('content_proposals')\
+            .select('id, slots').eq('status', 'pending_approval').execute()
+        for row in (prop_res.data or []):
+            slots = row.get('slots', [])
+            for i, s in enumerate(slots):
+                if s.get('post_id') == post_id:
+                    slots[i]['day'] = new_day
+                    supabase.table('content_proposals').update({'slots': slots}).eq('id', row['id']).execute()
+                    break
+
+        if not post_res.data[0].get('media_url'):
+            supabase.table('posts').update({
+                'scheduled_at': request.new_scheduled_time.isoformat()
+            }).eq('id', post_id).execute()
+            return {
+                "success": True,
+                "job_id": None,
+                "post_id": post_id,
+                "new_scheduled_time": request.new_scheduled_time,
+                "message": "Scheduled time updated (no APScheduler job — post has no media yet)"
+            }
+
         # Reschedule the post
         job_id = get_scheduler().reschedule_post(
             post_id=post_id,
@@ -224,6 +254,8 @@ async def reschedule_post(post_id: int, request: ReschedulePostRequest):
             "message": "Post rescheduled successfully"
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error rescheduling post {post_id}: {e}")
         raise HTTPException(

@@ -19,7 +19,7 @@ class Token(BaseModel):
 # --- Modelos de Publicaciones (Posts) ---
 class PostBase(BaseModel):
     content: str
-    post_type: str  # "post", "reel", "story", "image", "video"
+    post_type: Optional[str] = None  # "post", "reel", "story", "image", "video"
     status: Literal["draft", "scheduled", "published", "failed"] = "draft"
     scheduled_at: Optional[datetime] = None
     instagram_account_id: Optional[int] = None
@@ -33,6 +33,8 @@ class Post(PostBase):
     media_url: Optional[str] = None
     created_at: datetime
     publication_date: Optional[datetime] = None
+    is_ai_generated: Optional[bool] = None
+    drive_file_id: Optional[str] = None
 
 # --- Modelos de Inteligencia Artificial ---
 class InstagramAccountConfigUpdate(BaseModel):
@@ -69,12 +71,20 @@ class TelegramChat(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
 
+class TelegramPhotoSize(BaseModel):
+    file_id: str
+    file_unique_id: str
+    width: int
+    height: int
+    file_size: Optional[int] = None
+
 class TelegramMessage(BaseModel):
     message_id: int
     from_user: Optional[TelegramUser] = Field(None, alias="from")
     chat: TelegramChat
     date: int
     text: Optional[str] = None
+    photo: Optional[list[TelegramPhotoSize]] = None
     reply_to_message: Optional['TelegramMessage'] = None
 
     class Config:
@@ -153,5 +163,14 @@ class AgentLog(BaseModel):
     posts_drafted: int = 0
     error: Optional[str] = None
     duration_ms: Optional[int] = None
+
+
+# --- Modelos de Google Drive ---
+class DriveToken(BaseModel):
+    user_id: str
+    connected: bool
+    scopes: Optional[list[str]] = None
+    connected_at: Optional[datetime] = None
+
 
 

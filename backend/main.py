@@ -98,22 +98,21 @@ def sync_all_accounts_metrics():
 
 def run_agent_for_all_accounts():
     """
-    Cron job semanal para ejecutar el agente en todas las cuentas de Instagram.
+    Cron job semanal (domingos 22:00) para ejecutar el agente en todas las cuentas.
     """
     logger.info("⏰ Iniciando ejecución automática semanal de agentes...")
     try:
-        from database.supabase_client import get_supabase_client
         from services.agent_service import run_agent
-        
+
         all_accounts = admin_supabase.table('instagram_accounts')\
             .select('id, is_active')\
             .execute()
-            
+
         accounts_data = [
             acc for acc in (all_accounts.data or [])
             if acc.get('is_active') is not False
         ]
-        
+
         for account in accounts_data:
             try:
                 run_agent(account['id'])
@@ -122,6 +121,37 @@ def run_agent_for_all_accounts():
                 logger.error(f"❌ Error ejecutando agente para cuenta {account['id']}: {e}")
     except Exception as e:
         logger.error(f"❌ Error en run_agent_for_all_accounts: {e}")
+
+
+def send_daily_briefings_for_all_accounts():
+    """
+    Cron job diario (09:00) que envía por Telegram las publicaciones de hoy.
+    """
+    logger.info("⏰ Enviando resúmenes diarios de publicaciones...")
+    try:
+        import asyncio
+        from services.telegram_service import TelegramService
+
+        all_accounts = admin_supabase.table('instagram_accounts')\
+            .select('id, telegram_chat_id, is_active')\
+            .execute()
+
+        accounts_data = [
+            acc for acc in (all_accounts.data or [])
+            if acc.get('is_active') is not False and acc.get('telegram_chat_id')
+        ]
+
+        for account in accounts_data:
+            try:
+                asyncio.run(TelegramService().send_daily_briefing(
+                    account['id'],
+                    str(account['telegram_chat_id'])
+                ))
+                logger.info(f"✅ Briefing enviado para cuenta {account['id']}")
+            except Exception as e:
+                logger.error(f"❌ Error enviando briefing para cuenta {account['id']}: {e}")
+    except Exception as e:
+        logger.error(f"❌ Error en send_daily_briefings_for_all_accounts: {e}")
 
 # --- Lifecycle Events ---
 @app.on_event("startup")
@@ -159,12 +189,21 @@ async def startup_event():
         
         scheduler.scheduler.add_job(
             run_agent_for_all_accounts,
-            trigger=CronTrigger(day_of_week='mon', hour=8),
+            trigger=CronTrigger(day_of_week='sun', hour=22),
             id='run_weekly_agents',
             replace_existing=True,
             max_instances=1
         )
-        logger.info("✅ Cron job de ejecución de agente semanal configurado (lunes 8:00)")
+        logger.info("✅ Cron job de agente semanal configurado (domingos 22:00)")
+
+        scheduler.scheduler.add_job(
+            send_daily_briefings_for_all_accounts,
+            trigger=CronTrigger(hour=9),
+            id='send_daily_briefings',
+            replace_existing=True,
+            max_instances=1
+        )
+        logger.info("✅ Cron job de briefing diario configurado (09:00)")
     except Exception as e:
         logger.error(f"❌ Error configurando cron job de métricas: {e}")
 
@@ -205,6 +244,7 @@ from routes.ai_routes import router as ai_router
 from routes.instagram_routes import router_no_prefix as instagram_router
 from routes.telegram_routes import router as telegram_router
 from routes.agent_routes import router as agent_router
+from routes.drive_oauth_routes import router as drive_oauth_router
 
 # --- Registrar todos los routers ---
 app.include_router(auth_router)
@@ -212,6 +252,7 @@ app.include_router(ai_router)
 app.include_router(instagram_router)
 app.include_router(telegram_router)
 app.include_router(agent_router)
+app.include_router(drive_oauth_router)
 
 app.include_router(templates_router)
 app.include_router(content_router)

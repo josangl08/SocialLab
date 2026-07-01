@@ -80,7 +80,36 @@ class PostCleanupService:
                     )
                     # Continuar de todas formas
 
-            # 3. Actualizar post con URL de Instagram
+            # 3. Archivar archivo de Drive si el post fue generado por el agente
+            drive_archived = False
+            try:
+                va_res = self.supabase.table('visual_analyses')\
+                    .select('drive_file_id')\
+                    .eq('suggested_caption', post.data.get('content', ''))\
+                    .execute()
+                # Fallback: lookup by account + match
+                if not va_res.data:
+                    va_res = self.supabase.table('visual_analyses')\
+                        .select('drive_file_id')\
+                        .eq('account_id', post.data.get('instagram_account_id'))\
+                        .order('created_at', desc=True)\
+                        .limit(1)\
+                        .execute()
+
+                if va_res.data:
+                    drive_file_id = va_res.data[0].get('drive_file_id')
+                    acc_res = self.supabase.table('instagram_accounts')\
+                        .select('drive_folder_id')\
+                        .eq('id', post.data.get('instagram_account_id'))\
+                        .execute()
+                    folder_id = (acc_res.data or [{}])[0].get('drive_folder_id')
+                    if drive_file_id and folder_id:
+                        from services.google_drive_connector import get_drive_connector
+                        drive_archived = get_drive_connector().archive_to_published(drive_file_id, folder_id)
+            except Exception as de:
+                logger.warning(f"⚠️  Drive archiving failed for post {post_id}: {de}")
+
+            # 4. Actualizar post con URL de Instagram
             self.supabase.table('posts').update({
                 'media_url': instagram_url,
                 'status': 'published'
@@ -94,7 +123,8 @@ class PostCleanupService:
                 'success': True,
                 'old_url': old_url,
                 'new_url': instagram_url,
-                'cleaned': is_supabase_storage
+                'cleaned': is_supabase_storage,
+                'drive_archived': drive_archived
             }
 
         except Exception as e:

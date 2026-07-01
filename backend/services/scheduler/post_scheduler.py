@@ -65,7 +65,7 @@ def publish_post_job(post_id: int) -> None:
 
         # Get Instagram account ID
         instagram_result = supabase.table('instagram_accounts')\
-            .select('id, telegram_chat_id')\
+            .select('id, telegram_chat_id, drive_folder_id')\
             .eq('user_id', post_data['user_id'])\
             .eq('is_active', True)\
             .single()\
@@ -104,6 +104,34 @@ def publish_post_job(post_id: int) -> None:
         }).eq('post_id', post_id).execute()
 
         logger.info(f"✅ Post {post_id} published successfully")
+
+        # Move Drive image to published/ subfolder so it leaves the candidate pool
+        try:
+            drive_folder_id = instagram_result.data.get('drive_folder_id')
+            if drive_folder_id:
+                proposals_res = supabase.table('content_proposals').select('slots').eq(
+                    'account_id', instagram_account_id
+                ).execute()
+                drive_file_id = None
+                for proposal in (proposals_res.data or []):
+                    for slot in (proposal.get('slots') or []):
+                        if slot.get('post_id') == post_id:
+                            drive_file_id = slot.get('image_id')
+                            break
+                    if drive_file_id:
+                        break
+                if drive_file_id:
+                    from services.google_drive_connector import get_drive_connector
+                    connector = get_drive_connector(str(post_data['user_id']))
+                    connector.archive_to_published(drive_file_id, drive_folder_id)
+        except Exception as de:
+            logger.warning(f"Drive archive skipped for post {post_id}: {de}")
+
+        try:
+            from services.post_cleanup import PostCleanupService
+            PostCleanupService().cleanup_after_publish(post_id, result.get('permalink', ''))
+        except Exception as ce:
+            logger.warning(f"Cleanup after publish failed for post {post_id}: {ce}")
 
         if telegram_chat_id:
             try:

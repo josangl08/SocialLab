@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
@@ -144,6 +144,12 @@ async def update_post(
         }
         response = supabase.table('posts').update(update_data).eq('id', post_id).execute()
         if response.data:
+            if status == 'scheduled' and scheduled_at:
+                from services.scheduler.post_scheduler import PostScheduler
+                try:
+                    PostScheduler().schedule_post(post_id, scheduled_at)
+                except Exception as e:
+                    logger.warning(f"No se pudo crear APScheduler job para post {post_id}: {e}")
             return response.data[0]
         raise HTTPException(status_code=500, detail="No se pudo actualizar la publicación.")
     except HTTPException:

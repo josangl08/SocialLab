@@ -39,7 +39,7 @@ vi.mock('react-big-calendar', () => {
             if (props.onEventDrop) {
               props.onEventDrop({
                 event: props.events[0],
-                start: new Date('2026-06-28T10:00:00Z'),
+                start: new Date('2030-06-28T10:00:00Z'),
               });
             }
           }}
@@ -176,7 +176,7 @@ describe('CalendarView Component', () => {
         expect.stringContaining('/api/scheduler/reschedule/1'),
         expect.objectContaining({
           method: 'PUT',
-          body: JSON.stringify({ new_scheduled_time: '2026-06-28T10:00:00.000Z' }),
+          body: JSON.stringify({ new_scheduled_time: '2030-06-28T10:00:00.000Z' }),
         })
       );
     });

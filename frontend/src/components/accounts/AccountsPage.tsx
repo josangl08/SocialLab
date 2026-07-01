@@ -55,6 +55,8 @@ const AccountsPage: React.FC = () => {
   const [driveUnlinking, setDriveUnlinking] = useState<number | null>(null);
   const [driveInputs, setDriveInputs] = useState<Record<number, string>>({});
   const [driveSuccess, setDriveSuccess] = useState<Record<number, boolean>>({});
+  const [driveConnected, setDriveConnected] = useState<boolean>(false);
+  const [driveConnectedBanner, setDriveConnectedBanner] = useState(false);
 
   const fetchAccounts = useCallback(async () => {
     const token = localStorage.getItem('authToken');
@@ -72,7 +74,28 @@ const AccountsPage: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
+  useEffect(() => {
+    fetchAccounts();
+
+    // Handle ?drive_connected=true redirect from OAuth callback
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('drive_connected') === 'true') {
+      setDriveConnectedBanner(true);
+      setTimeout(() => setDriveConnectedBanner(false), 5000);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+
+    // Fetch Drive connection status for the current user
+    const token = localStorage.getItem('authToken');
+    if (token) {
+      fetch('http://localhost:8000/api/drive/status', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => setDriveConnected(data.connected === true))
+        .catch(() => {});
+    }
+  }, [fetchAccounts]);
 
   const handleDisconnect = async (accountId: number, username: string | null) => {
     if (!confirm(`¿Desconectar la cuenta @${username || accountId}? Esta acción eliminará los datos de autenticación.`)) return;
@@ -175,6 +198,16 @@ const AccountsPage: React.FC = () => {
     }
   };
 
+  const handleDisconnectDrive = async () => {
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    await fetch('http://localhost:8000/api/drive/auth', {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    setDriveConnected(false);
+  };
+
   const handleReconnect = () => {
     const token = localStorage.getItem('authToken');
     if (token) window.location.href = `http://localhost:8000/instagram/login?token=${token}`;
@@ -214,6 +247,13 @@ const AccountsPage: React.FC = () => {
 
   return (
     <>
+      {driveConnectedBanner && (
+        <div className="st-success-msg" style={{ marginBottom: 16 }}>
+          <i className="bi bi-check-circle-fill"></i>
+          Google Drive conectado correctamente
+        </div>
+      )}
+
       {/* Accounts header */}
       <div className="st-accounts-header">
         <h3 className="st-accounts-title">
@@ -344,47 +384,66 @@ const AccountsPage: React.FC = () => {
                     <i className="bi bi-google" style={{ color: '#ea4335' }}></i>
                     Google Drive
                   </div>
-                  {account.drive_folder_id ? (
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span className="st-badge st-badge-success">Vinculado</span>
-                        <button
-                          className="st-btn st-btn-ghost st-btn-sm"
-                          onClick={() => handleDriveUnlink(account.id)}
-                          disabled={driveUnlinking === account.id}
-                        >
-                          {driveUnlinking === account.id ? spinner : 'Unlink'}
-                        </button>
-                      </div>
-                      {driveSuccess[account.id] && (
-                        <div className="st-success-msg">
-                          <i className="bi bi-check-circle-fill"></i>
-                          Carpeta sincronizada correctamente
-                        </div>
-                      )}
-                    </div>
+                  {!driveConnected ? (
+                    <a href={`http://localhost:8000/api/drive/auth?token=${localStorage.getItem('authToken')}&account_id=${account.id}`}>
+                      <button className="st-btn st-btn-ghost st-btn-sm">
+                        <i className="bi bi-google"></i>Conectar Drive
+                      </button>
+                    </a>
                   ) : (
                     <div>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <input
-                          className="st-input"
-                          type="text"
-                          placeholder="URL o ID de carpeta de Google Drive"
-                          value={driveInputs[account.id] ?? ''}
-                          onChange={e => setDriveInputs(prev => ({ ...prev, [account.id]: e.target.value }))}
-                        />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <span className="st-badge st-badge-success">Drive conectado</span>
                         <button
                           className="st-btn st-btn-ghost st-btn-sm"
-                          style={{ flexShrink: 0 }}
-                          onClick={() => handleDriveSave(account.id, driveInputs[account.id] ?? '')}
-                          disabled={driveSaving === account.id || !driveInputs[account.id]?.trim()}
+                          onClick={handleDisconnectDrive}
                         >
-                          {driveSaving === account.id ? spinner : <><i className="bi bi-folder-symlink"></i>Vincular</>}
+                          Desconectar
                         </button>
                       </div>
-                      <div className="st-meta" style={{ marginTop: 5 }}>
-                        Puedes pegar la URL completa de la carpeta
-                      </div>
+                      {account.drive_folder_id ? (
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span className="st-badge st-badge-success">Carpeta vinculada</span>
+                            <button
+                              className="st-btn st-btn-ghost st-btn-sm"
+                              onClick={() => handleDriveUnlink(account.id)}
+                              disabled={driveUnlinking === account.id}
+                            >
+                              {driveUnlinking === account.id ? spinner : 'Unlink'}
+                            </button>
+                          </div>
+                          {driveSuccess[account.id] && (
+                            <div className="st-success-msg">
+                              <i className="bi bi-check-circle-fill"></i>
+                              Carpeta sincronizada correctamente
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <input
+                              className="st-input"
+                              type="text"
+                              placeholder="URL o ID de carpeta de Google Drive"
+                              value={driveInputs[account.id] ?? ''}
+                              onChange={e => setDriveInputs(prev => ({ ...prev, [account.id]: e.target.value }))}
+                            />
+                            <button
+                              className="st-btn st-btn-ghost st-btn-sm"
+                              style={{ flexShrink: 0 }}
+                              onClick={() => handleDriveSave(account.id, driveInputs[account.id] ?? '')}
+                              disabled={driveSaving === account.id || !driveInputs[account.id]?.trim()}
+                            >
+                              {driveSaving === account.id ? spinner : <><i className="bi bi-folder-symlink"></i>Vincular</>}
+                            </button>
+                          </div>
+                          <div className="st-meta" style={{ marginTop: 5 }}>
+                            Puedes pegar la URL completa de la carpeta
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

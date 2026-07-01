@@ -12,6 +12,8 @@ interface Post {
   scheduled_at: string | null;
   created_at: string;
   publication_date?: string | null;
+  drive_file_id?: string | null;
+  is_ai_generated?: boolean | null;
 }
 
 interface PostDetailModalProps {
@@ -20,13 +22,14 @@ interface PostDetailModalProps {
   post: Post | null;
   onEdit?: () => void;
   onActionSuccess?: () => void;
+  onViewProposal?: () => void;
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  draft:     'Borrador',
-  scheduled: 'Programado',
-  published: 'Publicado',
-  failed:    'Fallido',
+  draft:     'Draft',
+  scheduled: 'Scheduled',
+  published: 'Published',
+  failed:    'Failed',
 };
 
 const STATUS_ICONS: Record<string, string> = {
@@ -49,7 +52,7 @@ const formatDate = (d: string) =>
   });
 
 const PostDetailModal: React.FC<PostDetailModalProps> = ({
-  show, onHide, post, onEdit, onActionSuccess,
+  show, onHide, post, onEdit, onActionSuccess, onViewProposal,
 }) => {
   const { token } = useAuth();
   const [actionStep, setActionStep]       = useState<'idle' | 'scheduling' | 'deleting'>('idle');
@@ -156,7 +159,7 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
       onClick={() => { onHide(); onEdit(); }}
       disabled={actionLoading}
     >
-      <i className="bi bi-pencil"></i>Editar
+      <i className="bi bi-pencil"></i>Edit
     </button>
   ) : null;
 
@@ -166,7 +169,7 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
       onClick={() => setActionStep('deleting')}
       disabled={actionLoading}
     >
-      <i className="bi bi-trash"></i>Eliminar
+      <i className="bi bi-trash"></i>Delete
     </button>
   );
 
@@ -178,7 +181,7 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
         <div className="pdm-footer">
           <p className="pdm-confirm-msg">
             <i className="bi bi-exclamation-triangle"></i>
-            Esta acción eliminará la publicación permanentemente.
+            This action will permanently delete the post.
           </p>
           <div className="pdm-footer-row">
             <button
@@ -186,7 +189,7 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
               onClick={() => setActionStep('idle')}
               disabled={actionLoading}
             >
-              Cancelar
+              Cancel
             </button>
             <button
               className="pdm-btn pdm-btn-delete-confirm"
@@ -195,7 +198,7 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
             >
               {actionLoading
                 ? <span className="pdm-spinner"></span>
-                : <><i className="bi bi-trash"></i>Eliminar</>
+                : <><i className="bi bi-trash"></i>Delete</>
               }
             </button>
           </div>
@@ -222,14 +225,14 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
             >
               {actionLoading
                 ? <span className="pdm-spinner"></span>
-                : <><i className="bi bi-check-lg"></i>Confirmar</>
+                : <><i className="bi bi-check-lg"></i>Confirm</>
               }
             </button>
             <button
               className="pdm-btn pdm-btn-cancel-step"
               onClick={() => setActionStep('idle')}
               disabled={actionLoading}
-              aria-label="Cancelar"
+              aria-label="Cancel"
             >
               <i className="bi bi-x-lg"></i>
             </button>
@@ -241,6 +244,25 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
     // Status-specific idle footers
     switch (post.status) {
       case 'draft':
+        // AI proposal: show "Ver en propuestas" to access all proposal actions
+        if (post.is_ai_generated && onViewProposal) {
+          return (
+            <div className="pdm-footer">
+              <p className="pdm-confirm-msg" style={{ fontSize: '12px', marginBottom: '8px' }}>
+                <i className="bi bi-stars"></i>
+                This post is part of an AI proposal
+              </p>
+              <div className="pdm-footer-row">
+                <button
+                  className="pdm-btn pdm-btn-schedule"
+                  onClick={() => { onHide(); onViewProposal(); }}
+                >
+                  <i className="bi bi-layout-text-window"></i>See in proposals
+                </button>
+              </div>
+            </div>
+          );
+        }
         return (
           <div className="pdm-footer">
             <div className="pdm-footer-row">
@@ -249,7 +271,7 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
                 onClick={() => { setScheduleDate(''); setActionStep('scheduling'); }}
                 disabled={actionLoading}
               >
-                <i className="bi bi-clock"></i>Programar
+                <i className="bi bi-clock"></i>Schedule
               </button>
             </div>
             <div className="pdm-footer-row">
@@ -268,7 +290,7 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
                 onClick={() => { setScheduleDate(''); setActionStep('scheduling'); }}
                 disabled={actionLoading}
               >
-                <i className="bi bi-calendar-event"></i>Cambiar fecha
+                <i className="bi bi-calendar-event"></i>Change date
               </button>
               <button
                 className="pdm-btn pdm-btn-cancel-pub"
@@ -277,7 +299,7 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
               >
                 {actionLoading
                   ? <span className="pdm-spinner"></span>
-                  : <><i className="bi bi-x-circle"></i>Cancelar</>
+                  : <><i className="bi bi-x-circle"></i>Cancel</>
                 }
               </button>
             </div>
@@ -309,7 +331,7 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
               >
                 {actionLoading
                   ? <span className="pdm-spinner"></span>
-                  : <><i className="bi bi-arrow-clockwise"></i>Reintentar</>
+                  : <><i className="bi bi-arrow-clockwise"></i>Retry</>
                 }
               </button>
               <button
@@ -317,7 +339,7 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
                 onClick={() => { setScheduleDate(''); setActionStep('scheduling'); }}
                 disabled={actionLoading}
               >
-                <i className="bi bi-calendar-event"></i>Cambiar fecha
+                <i className="bi bi-calendar-event"></i>Change date
               </button>
             </div>
             <div className="pdm-footer-row">
@@ -358,6 +380,17 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
                 onLoadedMetadata={e => { (e.target as HTMLVideoElement).currentTime = 0.001; }}
               />
             ) : null
+          ) : post.drive_file_id ? (
+            <img
+              src={`http://localhost:8000/api/drive/files/${post.drive_file_id}/image?token=${token}`}
+              alt="publicación"
+              className="pdm-media-img"
+              onError={(e) => {
+                const el = e.currentTarget as HTMLImageElement;
+                el.style.display = 'none';
+                el.parentElement?.querySelector<HTMLDivElement>('.pdm-media-none')?.style.setProperty('display', 'flex');
+              }}
+            />
           ) : (
             <div className="pdm-media-none">
               <i className="bi bi-image"></i>
@@ -388,20 +421,20 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
           <div className="pdm-meta">
             <div className="pdm-meta-row">
               <i className="bi bi-clock-history"></i>
-              <span className="pdm-meta-label">Creado</span>
+              <span className="pdm-meta-label">Created</span>
               <span className="pdm-meta-value">{formatDate(post.created_at)}</span>
             </div>
             {post.scheduled_at && (
               <div className="pdm-meta-row">
                 <i className="bi bi-calendar-event"></i>
-                <span className="pdm-meta-label">Programado</span>
+                <span className="pdm-meta-label">Scheduled</span>
                 <span className="pdm-meta-value">{formatDate(post.scheduled_at)}</span>
               </div>
             )}
             {post.publication_date && (
               <div className="pdm-meta-row">
                 <i className="bi bi-check2-circle"></i>
-                <span className="pdm-meta-label">Publicado</span>
+                <span className="pdm-meta-label">Published</span>
                 <span className="pdm-meta-value">{formatDate(post.publication_date)}</span>
               </div>
             )}
