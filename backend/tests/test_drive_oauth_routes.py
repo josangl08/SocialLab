@@ -34,7 +34,7 @@ client = TestClient(app)
 
 def test_drive_status_not_connected():
     mock_service = MagicMock()
-    mock_service.has_credentials.return_value = False
+    mock_service.get_credentials.return_value = None
     mock_oauth_service_cls.return_value = mock_service
 
     from routes.drive_oauth_routes import router as drive_oauth_router

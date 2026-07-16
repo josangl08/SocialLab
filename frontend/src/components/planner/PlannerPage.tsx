@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import CalendarView from '../calendar/CalendarView';
 import PostList from '../posts/PostList';
 import CreatePost from '../posts/CreatePost';
 import EditPostForm from '../posts/EditPostForm';
 import WeeklyProposalPanel from './WeeklyProposalPanel';
+import { MonthlyFocusBanner } from './MonthlyFocusBanner';
 import { useAuth } from '../../context/AuthContext';
 import './PlannerPage.css';
 
@@ -34,6 +35,7 @@ const PlannerPage: React.FC = () => {
   const [agentStartedAt, setAgentStartedAt] = useState<number | null>(null);
   const [isDriveError, setIsDriveError] = useState(false);
   const [focusPostId, setFocusPostId] = useState<number | null>(null);
+  const plannerViewDate = useMemo(() => new Date(), []);
   const proposalPanelRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const proposalCountRef = useRef<number>(0);
@@ -264,6 +266,7 @@ const PlannerPage: React.FC = () => {
         {view === 'calendar'
           ? (
             <>
+              <MonthlyFocusBanner accountId={primaryAccountId} currentDate={plannerViewDate} />
               <CalendarView
                 onNewPost={openDrawer}
                 onEdit={openEditDrawer}

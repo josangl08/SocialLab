@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status
 from pydantic import BaseModel
-from typing import Literal
+from typing import Literal, Optional
 from database.supabase_client import get_supabase_client, get_supabase_admin_client
-from models.schemas import User, AgentConfig, ContentProposal
+from models.schemas import User, AgentConfig, ContentProposal, MonthlyCampaign
 from auth.dependencies import get_current_user
 from datetime import datetime, timezone, timedelta
 import uuid
@@ -592,3 +592,92 @@ async def update_slot_image(
     slots[slot_index]['image_id'] = request.drive_file_id
     admin_supabase.table('content_proposals').update({'slots': slots}).eq('id', proposal_id).execute()
     return {"updated": True}
+
+
+@router.post("/campaign", response_model=MonthlyCampaign)
+async def upsert_monthly_campaign(
+    campaign: MonthlyCampaign,
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        # Verify account exists and belongs to current_user
+        acc_res = admin_supabase.table('instagram_accounts').select('user_id').eq('id', campaign.account_id).execute()
+        if not acc_res.data:
+            raise HTTPException(status_code=404, detail="Cuenta de Instagram no encontrada")
+        if str(acc_res.data[0]['user_id']) != str(current_user.id):
+            raise HTTPException(status_code=403, detail="No tienes acceso a esta cuenta")
+
+        payload = {
+            'account_id': campaign.account_id,
+            'month_date': campaign.month_date,
+            'strategy_mode': campaign.strategy_mode,
+            'title': campaign.title,
+            'description': campaign.description,
+            'milestones': campaign.milestones,
+            'weekly_focus': campaign.weekly_focus
+        }
+        if campaign.id:
+            payload['id'] = campaign.id
+
+        upsert_res = admin_supabase.table('monthly_campaigns').upsert(payload, on_conflict='account_id,month_date').execute()
+        if not upsert_res.data:
+            raise HTTPException(status_code=500, detail="Error al guardar la campaña mensual")
+        
+        row = upsert_res.data[0]
+        return MonthlyCampaign(
+            id=str(row['id']),
+            account_id=row['account_id'],
+            month_date=str(row['month_date']),
+            strategy_mode=row['strategy_mode'],
+            title=row['title'],
+            description=row['description'],
+            milestones=row.get('milestones') or [],
+            weekly_focus=row.get('weekly_focus') or {}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error upserting monthly campaign: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al guardar la campaña mensual: {str(e)}")
+
+
+@router.get("/campaign", response_model=Optional[MonthlyCampaign])
+async def get_monthly_campaign(
+    account_id: int,
+    month_date: str,
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        # Verify account exists and belongs to current_user
+        acc_res = admin_supabase.table('instagram_accounts').select('user_id').eq('id', account_id).execute()
+        if not acc_res.data:
+            raise HTTPException(status_code=404, detail="Cuenta de Instagram no encontrada")
+        if str(acc_res.data[0]['user_id']) != str(current_user.id):
+            raise HTTPException(status_code=403, detail="No tienes acceso a esta cuenta")
+
+        campaign_res = supabase.table('monthly_campaigns')\
+            .select('*')\
+            .eq('account_id', account_id)\
+            .eq('month_date', month_date)\
+            .execute()
+            
+        if not campaign_res.data:
+            return None
+            
+        row = campaign_res.data[0]
+        return MonthlyCampaign(
+            id=str(row['id']),
+            account_id=row['account_id'],
+            month_date=str(row['month_date']),
+            strategy_mode=row['strategy_mode'],
+            title=row['title'],
+            description=row['description'],
+            milestones=row.get('milestones') or [],
+            weekly_focus=row.get('weekly_focus') or {}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting monthly campaign: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener la campaña mensual: {str(e)}")
+

@@ -32,7 +32,7 @@ FREQ_RANGE: dict = {
 }
 
 
-def _ai_schedule(analyses: list, account: dict, min_posts: int, max_posts: int) -> Optional[list]:
+def _ai_schedule(analyses: list, account: dict, min_posts: int, max_posts: int, campaign_context: str = '') -> Optional[list]:
     """Ask Gemini to choose which days and post types to use. Returns list of CalendarSlot or None."""
     api_key = os.getenv("GOOGLE_API_KEY", "")
     if not api_key:
@@ -78,6 +78,7 @@ PERFIL DE CUENTA:
 - Mix preferido: {mix_desc}
 {preferred_hint}
 {strategy_hint}
+{campaign_context}
 
 IMÁGENES DISPONIBLES ({len(analyses)} total):
 {chr(10).join(image_list)}
@@ -147,6 +148,14 @@ def run_agent(account_id: int) -> AgentLog:
         logger.info(f"[Agent] Started — account_id={account_id}, username={account.get('username', 'unknown')}")
 
         user_id = str(account.get('user_id', ''))
+        week_start = _get_next_unplanned_week(account_id, supabase)
+        campaign_res = supabase.table('monthly_campaigns').select('*') \
+            .eq('account_id', account_id) \
+            .eq('month_date', week_start.replace(day=1).isoformat()) \
+            .execute()
+        campaign_row = campaign_res.data[0] if campaign_res.data else None
+        campaign_context = _build_campaign_context(campaign_row, week_start)
+
         all_files, new_files = _scan_drive(account, user_id)
         images_scanned = len(all_files)
         logger.info(f"[Agent] Drive scan complete — total_files={images_scanned}, new_files={len(new_files)}")
@@ -182,7 +191,7 @@ def run_agent(account_id: int) -> AgentLog:
         new_analyses: list = []
         if new_files:
             logger.info(f"[Agent] Analyzing {len(new_files)} new images for account_id={account_id}...")
-            new_analyses = _analyze_images(str(account_id), new_files, account, user_id)
+            new_analyses = _analyze_images(str(account_id), new_files, account, user_id, campaign_context)
             logger.info(f"[Agent] Image analysis complete — analyzed={len(new_analyses)} of {len(new_files)}")
 
         analyses = cached_analyses + new_analyses
@@ -207,12 +216,12 @@ def run_agent(account_id: int) -> AgentLog:
         if len(available_analyses) < len(analyses):
             logger.info(f"[Agent] Excluded {len(analyses) - len(available_analyses)} already-pending images")
 
-        slots = _build_calendar(available_analyses, account)
+        slots = _build_calendar(available_analyses, account, campaign_context)
         logger.info(f"[Agent] Calendar slots built — count={len(slots)}")
         best_times = account.get('best_times') or ['12:00']
         if isinstance(best_times, str):
             best_times = json.loads(best_times)
-        proposal = _create_drafts(slots, account_id, user_id, best_times)
+        proposal = _create_drafts(slots, account_id, user_id, best_times, week_start)
         posts_drafted = len(proposal.slots)
         logger.info(f"[Agent] Proposal created — id={proposal.id}, week_start={proposal.week_start}, slots={posts_drafted}")
 
@@ -277,7 +286,7 @@ def _scan_drive(account: dict, user_id: str) -> tuple:
     return all_files, new_files
 
 
-def _build_strategy_context(account: dict) -> str:
+def _build_strategy_context(account: dict, campaign_context: str = '') -> str:
     account_type = account.get('account_type', 'personal')
     tone = account.get('default_tone', 'energetic')
     style_guide = account.get('style_guide') or ''
@@ -286,7 +295,7 @@ def _build_strategy_context(account: dict) -> str:
     hashtag_range = {'minimal': '3-5', 'moderate': '3-5', 'maximum': '3-5'}.get(hashtag_strategy, '3-5')
 
     if account_type == 'professional':
-        return (
+        base = (
             f"Voz de marca de tono {tone}, semiformal, emojis mínimos (0-1). "
             f"Empieza con el beneficio principal o propuesta de valor. "
             f"CTA de conversión al final ('Contáctanos', 'Reserva ahora', 'Link en bio'). "
@@ -295,7 +304,7 @@ def _build_strategy_context(account: dict) -> str:
             f"Guía de estilo: {style_guide or 'profesional y directo'}."
         )
     else:
-        return (
+        base = (
             f"Voz en primera persona, tono {tone}, emojis moderados. "
             f"Cuenta una historia auténtica o comparte un momento real. "
             f"Termina con una pregunta que invite a comentar ('¿Qué opinas?', '¡Cuéntame!'). "
@@ -304,9 +313,49 @@ def _build_strategy_context(account: dict) -> str:
             f"Usa {hashtag_range} hashtags de nicho + community + trending. "
             f"Guía de estilo: {style_guide or 'cercano e inspirador'}."
         )
+    return f"{base} {campaign_context}" if campaign_context else base
 
 
-def _analyze_images(account_id: str, files: list, account: dict = None, user_id: str = '') -> list:
+def _build_campaign_context(campaign: Optional[dict], week_start: date) -> str:
+    """Turn a monthly_campaigns row into a prompt fragment describing this week's
+    narrative/commercial focus and any milestone landing in this week. Returns ''
+    when there's no campaign configured, so behavior is unchanged (see design.md
+    §Architecture Decisions #3 — this is prompt context, not a new code branch)."""
+    if not campaign:
+        return ''
+
+    week_of_month = min(((week_start.day - 1) // 7) + 1, 4)
+    focus = (campaign.get('weekly_focus') or {}).get(str(week_of_month), '').strip()
+
+    week_end = week_start + timedelta(days=6)
+    milestones_in_range = [
+        m for m in (campaign.get('milestones') or [])
+        if m.get('date') and week_start.isoformat() <= m['date'] <= week_end.isoformat()
+    ]
+
+    if not focus and not milestones_in_range:
+        return ''
+
+    strategy_mode = campaign.get('strategy_mode', 'personal_storyline')
+    title = campaign.get('title', '')
+
+    if strategy_mode == 'commercial_campaign':
+        parts = [f"ENFOQUE DE CAMPAÑA DEL MES: '{title}' (campaña comercial)."]
+        if focus:
+            parts.append(f"Foco de esta semana: {focus}. Alinea el lenguaje y las CTAs con este objetivo del embudo.")
+    else:
+        parts = [f"HILO NARRATIVO DEL MES: '{title}' (historia personal)."]
+        if focus:
+            parts.append(f"Esta semana el hilo se centra en: {focus}. Continúa la narrativa en primera persona.")
+
+    if milestones_in_range:
+        events = '; '.join(f"{m['date']}: {m['event']}" for m in milestones_in_range)
+        parts.append(f"Hitos de esta semana ({events}) — asegúrate de que al menos un post los mencione explícitamente.")
+
+    return ' '.join(parts)
+
+
+def _analyze_images(account_id: str, files: list, account: dict = None, user_id: str = '', campaign_context: str = '') -> list:
     logger.info(f"_analyze_images: starting for account {account_id} with {len(files)} files")
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
@@ -319,7 +368,7 @@ def _analyze_images(account_id: str, files: list, account: dict = None, user_id:
     from services.google_drive_connector import get_drive_connector
     connector = get_drive_connector(user_id)
 
-    strategy_context = _build_strategy_context(account) if account else (
+    strategy_context = _build_strategy_context(account, campaign_context) if account else (
         "Voz natural, primera persona, tono inspirador, emojis moderados. "
         "Termina con una pregunta de engagement. Usa 3-5 hashtags relevantes."
     )
@@ -386,12 +435,12 @@ def _analyze_images(account_id: str, files: list, account: dict = None, user_id:
     return analyses
 
 
-def _build_calendar(analyses: list, account: dict) -> list:
+def _build_calendar(analyses: list, account: dict, campaign_context: str = '') -> list:
     freq = account.get('posting_frequency', 'few_times_week')
     min_posts, max_posts = FREQ_RANGE.get(freq, (3, 5))
 
     # Try AI scheduling first
-    ai_slots = _ai_schedule(analyses, account, min_posts, max_posts)
+    ai_slots = _ai_schedule(analyses, account, min_posts, max_posts, campaign_context)
     if ai_slots:
         return ai_slots
 
@@ -442,9 +491,10 @@ def _get_next_unplanned_week(account_id: int, supabase) -> date:
     return candidate
 
 
-def _create_drafts(slots: list, account_id: int, user_id: str, best_times: list = None) -> ContentProposal:
+def _create_drafts(slots: list, account_id: int, user_id: str, best_times: list = None, week_start: date = None) -> ContentProposal:
     supabase = get_supabase_admin_client()
-    week_start = _get_next_unplanned_week(account_id, supabase)
+    if week_start is None:
+        week_start = _get_next_unplanned_week(account_id, supabase)
     times = best_times if best_times else ['12:00']
 
     updated_slots = []

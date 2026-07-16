@@ -164,6 +164,17 @@ class AgentLog(BaseModel):
     error: Optional[str] = None
     duration_ms: Optional[int] = None
 
+class MonthlyCampaign(BaseModel):
+    id: Optional[str] = None
+    account_id: int
+    month_date: str
+    strategy_mode: Literal["commercial_campaign", "personal_storyline"]
+    title: str
+    description: Optional[str] = None
+    milestones: list[dict] = []
+    weekly_focus: dict = {}
+
+
 
 # --- Modelos de Google Drive ---
 class DriveToken(BaseModel):

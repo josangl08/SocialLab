@@ -55,12 +55,16 @@ async def google_callback(code: str, state: str):
 
 @router.get("/status", response_model=DriveToken)
 async def drive_status(current_user: User = Depends(get_current_user)):
-    """Returns Google Drive connection status for the current user."""
+    """Returns Google Drive connection status for the current user.
+
+    Actually attempts to refresh the token (via get_credentials) instead of just
+    checking that a drive_tokens row exists, so a revoked/expired refresh token
+    is reported as disconnected rather than showing a stale 'connected' badge."""
     from services.drive_oauth_service import DriveOAuthService
     svc = DriveOAuthService()
-    connected = svc.has_credentials(str(current_user.id))
+    creds = svc.get_credentials(str(current_user.id))
 
-    if not connected:
+    if not creds:
         return DriveToken(user_id=current_user.id, connected=False, scopes=None, connected_at=None)
 
     try:

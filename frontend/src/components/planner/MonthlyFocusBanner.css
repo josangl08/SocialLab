@@ -1,0 +1,57 @@
+.monthly-focus-banner {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(168, 85, 247, 0.1) 100%);
+  border: 1px solid rgba(129, 140, 248, 0.25);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  transition: all 0.3s ease;
+}
+
+.monthly-focus-banner:hover {
+  border-color: rgba(129, 140, 248, 0.4);
+  box-shadow: 0 4px 25px rgba(129, 140, 248, 0.15);
+}
+
+.banner-badge {
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  background-color: rgba(99, 102, 241, 0.2);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.banner-title {
+  font-size: 0.95rem;
+}
+
+.banner-description {
+  font-size: 0.8rem;
+  max-width: 500px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.banner-week-chip {
+  background-color: rgba(255, 255, 255, 0.03);
+  border-left: 3px solid rgba(129, 140, 248, 0.25);
+  min-width: 160px;
+}
+
+.banner-week-chip.active {
+  background: linear-gradient(135deg, rgba(131, 58, 180, 0.2), rgba(253, 29, 29, 0.2));
+  border-left: 3px solid #fd1d1d;
+  box-shadow: 0 0 14px rgba(253, 29, 29, 0.25);
+}
+
+.banner-week-chip.active .focus-label {
+  color: #ff8a9e !important;
+}
+
+.focus-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.05em;
+}
+
+.focus-text {
+  font-size: 0.85rem;
+  margin-top: 2px;
+}

@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import type { ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 interface AuthContextType {
   token: string | null;
@@ -18,6 +20,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const navigate = useNavigate();
   const [token, setToken] = useState<string | null>(localStorage.getItem('authToken'));
   const [isInstagramConnected, setInstagramConnected] = useState<boolean>(() => {
     return localStorage.getItem('isInstagramConnected') === 'true';
@@ -51,6 +54,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const isAuthenticated = !!token;
+
+  // Force logout + redirect on any 401 from our API, instead of leaving the
+  // app silently rendering empty data with a stale/expired token.
+  useEffect(() => {
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const response = await originalFetch(...args);
+      if (response.status === 401 && localStorage.getItem('authToken')) {
+        logout();
+        navigate('/login', { replace: true });
+      }
+      return response;
+    };
+    return () => { window.fetch = originalFetch; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigate]);
 
   const contextValue = useMemo(
     () => ({

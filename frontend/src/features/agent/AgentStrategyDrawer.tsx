@@ -27,6 +27,38 @@ export interface AgentStrategyConfig {
   content_type_mix: ContentTypeMix;
 }
 
+export interface Milestone {
+  date: string;
+  event: string;
+}
+
+export interface MonthlyCampaign {
+  id?: string;
+  account_id: number;
+  month_date: string;
+  strategy_mode: 'commercial_campaign' | 'personal_storyline';
+  title: string;
+  description: string;
+  milestones: Milestone[];
+  weekly_focus: Record<string, string>;
+}
+
+export const getFirstOfDayOfMonth = (date: Date): string => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}-01`;
+};
+
+const emptyCampaign = (accountId: number, month_date: string): MonthlyCampaign => ({
+  account_id: accountId,
+  month_date,
+  strategy_mode: 'commercial_campaign',
+  title: '',
+  description: '',
+  milestones: [],
+  weekly_focus: { '1': '', '2': '', '3': '', '4': '' },
+});
+
 const DEFAULT: AgentStrategyConfig = {
   account_type: 'personal', sector: '', purpose: '', target_audience: '',
   style_guide: '', default_tone: 'energetic', default_language: 'es',
@@ -183,6 +215,51 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
   const [suggestingTimes, setSuggestingTimes] = useState(false);
   const [wizard, setWizard] = useState<WizardState>({ dedica: [], contenido: [], objetivo: [], referentes: [] });
 
+  const [campaign, setCampaign] = useState<MonthlyCampaign>(() => emptyCampaign(accountId, getFirstOfDayOfMonth(new Date())));
+  const [newMilestoneDate, setNewMilestoneDate] = useState('');
+  const [newMilestoneEvent, setNewMilestoneEvent] = useState('');
+
+  const addMilestone = () => {
+    const date = newMilestoneDate;
+    const event = newMilestoneEvent.trim();
+    if (date && event) {
+      setCampaign(prev => ({
+        ...prev,
+        milestones: [...prev.milestones, { date, event }].sort((a, b) => a.date.localeCompare(b.date))
+      }));
+      setNewMilestoneDate('');
+      setNewMilestoneEvent('');
+    }
+  };
+
+  useEffect(() => {
+    if (accountId) {
+      setCampaign(emptyCampaign(accountId, getFirstOfDayOfMonth(new Date())));
+    }
+  }, [accountId]);
+
+  // ── Load monthly campaign for the selected month whenever the drawer opens or the month changes ──
+  useEffect(() => {
+    if (!show || !accountId) return;
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    const monthDate = campaign.month_date;
+    fetch(`http://localhost:8000/api/agent/campaign?account_id=${accountId}&month_date=${monthDate}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then((data: Partial<MonthlyCampaign> | null) => {
+        const base = emptyCampaign(accountId, monthDate);
+        setCampaign(data ? {
+          ...base, ...data,
+          weekly_focus: { ...base.weekly_focus, ...data.weekly_focus },
+          milestones: data.milestones ?? base.milestones,
+        } : base);
+      })
+      .catch(() => setCampaign(emptyCampaign(accountId, monthDate)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show, accountId, campaign.month_date]);
+
   // ── Load strategy directly from API every time the drawer opens ──
   useEffect(() => {
     if (!show || !accountId) return;
@@ -310,6 +387,17 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error('Error al guardar');
+
+      if (campaign.title.trim()) {
+        const campaignRes = await fetch('http://localhost:8000/api/agent/campaign', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...campaign, account_id: accountId }),
+        });
+        if (!campaignRes.ok) throw new Error('Error al guardar el enfoque mensual');
+        setCampaign(await campaignRes.json());
+      }
+
       setSaved(true);
       setTimeout(() => setSaved(false), 4000);
       onSave();
@@ -610,6 +698,126 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
                   <input className="form-control form-control-sm" style={{ ...inp, borderLeft: 'none' }} value={newRef} onChange={e => setNewRef(e.target.value)} onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addRef())} placeholder="cuenta_referente" />
                 </div>
                 <button type="button" className="btn btn-sm btn-outline-secondary" onClick={addRef} style={{ flexShrink: 0 }}><i className="bi bi-plus" /></button>
+              </div>
+
+              <Sep />
+
+              {/* Enfoque del Mes */}
+              <SL icon="bi-calendar3-range" label="Enfoque del Mes" />
+              
+              <div className="mb-3">
+                <FL icon="bi-calendar-date" label="Mes Objetivo" />
+                <input 
+                  type="month" 
+                  className="form-control form-control-sm" 
+                  style={{ ...inp, colorScheme: 'dark' }} 
+                  value={campaign.month_date.substring(0, 7)}
+                  onChange={e => {
+                    const val = e.target.value;
+                    if (val) {
+                      setCampaign(prev => ({ ...prev, month_date: `${val}-01` }));
+                    }
+                  }} 
+                />
+              </div>
+
+              <div className="mb-3">
+                <FL icon="bi-sliders" label="Modo de Estrategia" />
+                <div className="d-flex gap-2">
+                  {(['commercial_campaign', 'personal_storyline'] as const).map(mode => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`btn btn-sm flex-grow-1 ${campaign.strategy_mode === mode ? 'btn-primary' : 'btn-outline-secondary'}`}
+                      onClick={() => setCampaign(prev => ({ ...prev, strategy_mode: mode }))}
+                    >
+                      {mode === 'commercial_campaign' ? 'Campaña Comercial' : 'Hilo Personal'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mb-3">
+                <FL icon="bi-type" label="Título del Enfoque" />
+                <input 
+                  className="form-control form-control-sm" 
+                  style={inp} 
+                  value={campaign.title} 
+                  onChange={e => setCampaign(prev => ({ ...prev, title: e.target.value }))} 
+                  placeholder="Ej: Lanzamiento Producto X / Viaje a Japón" 
+                />
+              </div>
+
+              <div className="mb-3">
+                <FL icon="bi-justify-left" label="Descripción" />
+                <textarea 
+                  className="form-control form-control-sm" 
+                  style={{ ...inp, resize: 'none' }} 
+                  rows={2} 
+                  value={campaign.description} 
+                  onChange={e => setCampaign(prev => ({ ...prev, description: e.target.value }))} 
+                  placeholder="Ej: Foco en dar a conocer las ventajas de X..." 
+                />
+              </div>
+
+              <div className="mb-3">
+                <FL icon="bi-flag" label="Hitos (Milestones)" />
+                <div className="d-flex flex-column gap-2 mb-2">
+                  {campaign.milestones.map((m, i) => (
+                    <div key={i} className="d-flex align-items-center gap-2" style={{ backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, padding: '4px 8px' }}>
+                      <span style={{ fontSize: '0.75rem', color: '#a5b4fc', fontFamily: 'monospace' }}>{m.date}</span>
+                      <span style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.8)', flexGrow: 1 }}>{m.event}</span>
+                      <button 
+                        type="button" 
+                        onClick={() => setCampaign(prev => ({ ...prev, milestones: prev.milestones.filter((_, j) => j !== i) }))} 
+                        style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', opacity: 0.8 }}
+                      >
+                        <i className="bi bi-trash" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="d-flex gap-2">
+                  <input 
+                    type="date" 
+                    className="form-control form-control-sm" 
+                    style={{ ...inp, colorScheme: 'dark', maxWidth: 130 }} 
+                    value={newMilestoneDate} 
+                    onChange={e => setNewMilestoneDate(e.target.value)} 
+                  />
+                  <input 
+                    className="form-control form-control-sm" 
+                    style={inp} 
+                    value={newMilestoneEvent} 
+                    onChange={e => setNewMilestoneEvent(e.target.value)} 
+                    placeholder="Nuevo hito..." 
+                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addMilestone())}
+                  />
+                  <button type="button" className="btn btn-sm btn-outline-secondary" onClick={addMilestone}>
+                    <i className="bi bi-plus" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="mb-4">
+                <FL icon="bi-calendar-week" label="Enfoque por Semana" />
+                <div className="d-flex flex-column gap-2">
+                  {(['1', '2', '3', '4'] as const).map(weekNum => (
+                    <div key={weekNum} className="d-flex align-items-center gap-2">
+                      <span className="small text-white-50" style={{ minWidth: 60 }}>Semana {weekNum}:</span>
+                      <input 
+                        className="form-control form-control-sm" 
+                        style={inp} 
+                        value={campaign.weekly_focus[weekNum] || ''} 
+                        onChange={e => setCampaign(prev => ({
+                          ...prev,
+                          weekly_focus: { ...prev.weekly_focus, [weekNum]: e.target.value }
+                        }))} 
+                        placeholder={`Foco para la semana ${weekNum}`} 
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
 
               {error && <div className="alert alert-danger py-2 px-3 mt-3 small" style={{ borderRadius: 8 }}><i className="bi bi-exclamation-circle me-2" />{error}</div>}
