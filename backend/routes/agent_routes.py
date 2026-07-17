@@ -20,7 +20,7 @@ class TriggerRequest(BaseModel):
     account_id: int
 
 @router.post("/trigger")
-async def trigger_agent(
+def trigger_agent(
     request: TriggerRequest,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user)
@@ -62,7 +62,7 @@ async def trigger_agent(
         raise HTTPException(status_code=500, detail=f"Error al iniciar el agente: {str(e)}")
 
 @router.get("/proposals", response_model=list[ContentProposal])
-async def list_proposals(
+def list_proposals(
     account_id: int,
     current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
@@ -101,7 +101,7 @@ async def list_proposals(
         raise HTTPException(status_code=500, detail=f"Error al obtener las propuestas: {str(e)}")
 
 @router.post("/proposals/{proposal_id}/approve")
-async def approve_proposal(
+def approve_proposal(
     proposal_id: str,
     current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
@@ -149,7 +149,7 @@ async def approve_proposal(
 
 
 @router.post("/proposals/{proposal_id}/reject")
-async def reject_proposal(
+def reject_proposal(
     proposal_id: str,
     current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
@@ -184,7 +184,7 @@ STRATEGY_FIELDS = (
 )
 
 @router.get("/config/{account_id}")
-async def get_agent_config(
+def get_agent_config(
     account_id: int,
     current_user: User = Depends(get_current_user)
 ):
@@ -220,7 +220,7 @@ async def get_agent_config(
 
 
 @router.put("/config/{account_id}")
-async def update_agent_config(
+def update_agent_config(
     account_id: int,
     config: AgentConfig,
     current_user: User = Depends(get_current_user)
@@ -271,7 +271,7 @@ class SuggestTimesRequest(BaseModel):
 
 
 @router.post("/suggest-times")
-async def suggest_times(
+def suggest_times(
     request: SuggestTimesRequest,
     current_user: User = Depends(get_current_user)
 ):
@@ -324,7 +324,7 @@ class GenerateStrategyRequest(BaseModel):
 
 
 @router.post("/generate-strategy")
-async def generate_strategy(
+def generate_strategy(
     request: GenerateStrategyRequest,
     current_user: User = Depends(get_current_user)
 ):
@@ -408,7 +408,7 @@ def _get_proposal_and_slot(proposal_id: str, slot_index: int, user_id: str, supa
 
 
 @router.post("/proposals/{proposal_id}/slots/{slot_index}/regenerate")
-async def regenerate_slot(
+def regenerate_slot(
     proposal_id: str,
     slot_index: int,
     current_user: User = Depends(get_current_user),
@@ -455,7 +455,7 @@ async def regenerate_slot(
 
 
 @router.post("/proposals/{proposal_id}/slots/{slot_index}/skip")
-async def skip_slot(
+def skip_slot(
     proposal_id: str,
     slot_index: int,
     current_user: User = Depends(get_current_user),
@@ -478,7 +478,7 @@ class SlotTypeRequest(BaseModel):
 
 
 @router.post("/proposals/{proposal_id}/slots/{slot_index}/type")
-async def update_slot_type(
+def update_slot_type(
     proposal_id: str,
     slot_index: int,
     request: SlotTypeRequest,
@@ -509,7 +509,7 @@ class SlotReorderRequest(BaseModel):
 
 
 @router.patch("/proposals/{proposal_id}/slots/reorder")
-async def reorder_proposal_slot(
+def reorder_proposal_slot(
     proposal_id: str,
     request: SlotReorderRequest,
     current_user: User = Depends(get_current_user),
@@ -584,7 +584,7 @@ class SlotImageRequest(BaseModel):
 
 
 @router.patch("/proposals/{proposal_id}/slots/{slot_index}/image")
-async def update_slot_image(
+def update_slot_image(
     proposal_id: str,
     slot_index: int,
     request: SlotImageRequest,
@@ -603,7 +603,7 @@ async def update_slot_image(
 
 
 @router.post("/campaign", response_model=MonthlyCampaign)
-async def upsert_monthly_campaign(
+def upsert_monthly_campaign(
     campaign: MonthlyCampaign,
     current_user: User = Depends(get_current_user)
 ):
@@ -650,7 +650,7 @@ async def upsert_monthly_campaign(
 
 
 @router.get("/campaign", response_model=Optional[MonthlyCampaign])
-async def get_monthly_campaign(
+def get_monthly_campaign(
     account_id: int,
     month_date: str,
     current_user: User = Depends(get_current_user),

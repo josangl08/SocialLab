@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from main import app
 from auth.dependencies import get_current_user, get_user_supabase_client
 from models.schemas import User
@@ -81,6 +81,87 @@ def test_create_post(mock_supabase, mock_admin_supabase):
     assert response.json()["id"] == 1
     assert response.json()["content"] == "Test post content"
     assert response.json()["instagram_account_id"] == 123
+
+
+def test_create_post_with_media_file(mock_supabase, mock_admin_supabase):
+    mock_post = {
+        "id": 1,
+        "user_id": USER_ID,
+        "content": "Test post with media",
+        "media_url": "https://mock.storage.test/drafts/test.png",
+        "post_type": "post",
+        "status": "draft",
+        "scheduled_at": None,
+        "instagram_account_id": None,
+        "created_at": "2026-06-27T12:00:00"
+    }
+
+    mock_execute = MagicMock()
+    mock_execute.execute.return_value = MagicMock(data=[mock_post])
+    mock_supabase.table.return_value.insert.return_value = mock_execute
+
+    mock_supabase.storage.from_.return_value.get_public_url.return_value = mock_post["media_url"]
+
+    response = client.post(
+        "/api/posts",
+        data={
+            "content": "Test post with media",
+            "post_type": "post",
+            "status": "draft"
+        },
+        files={
+            "media_file": ("test.png", b"fake binary data", "image/png")
+        }
+    )
+
+    assert response.status_code == 200
+    assert response.json()["media_url"] == mock_post["media_url"]
+
+    # Assert the raw bytes were passed through to storage upload (media_file.file.read() path)
+    upload_call = mock_supabase.storage.from_.return_value.upload.call_args
+    assert upload_call.args[1] == b"fake binary data"
+
+
+def test_create_post_schedules_telegram_notification(mock_supabase, mock_admin_supabase):
+    mock_post = {
+        "id": 1,
+        "user_id": USER_ID,
+        "content": "Test post content",
+        "media_url": None,
+        "post_type": "post",
+        "status": "draft",
+        "scheduled_at": None,
+        "instagram_account_id": 123,
+        "created_at": "2026-06-27T12:00:00"
+    }
+
+    mock_execute = MagicMock()
+    mock_execute.execute.return_value = MagicMock(data=[mock_post])
+    mock_supabase.table.return_value.insert.return_value = mock_execute
+
+    # Mock instagram_accounts select to return a linked Telegram chat
+    mock_account_exec = MagicMock()
+    mock_account_exec.execute.return_value = MagicMock(data=[{"telegram_chat_id": "chat-42"}])
+    mock_admin_supabase.table.return_value.select.return_value.eq.return_value = mock_account_exec
+
+    with patch("services.telegram_service.TelegramService") as MockTelegramService:
+        mock_service_instance = MockTelegramService.return_value
+        mock_service_instance.send_approval_message = AsyncMock(return_value=None)
+
+        response = client.post(
+            "/api/posts",
+            data={
+                "content": "Test post content",
+                "post_type": "post",
+                "status": "draft",
+                "instagram_account_id": 123
+            }
+        )
+
+    assert response.status_code == 200
+    # BackgroundTasks runs the queued task before TestClient returns the response,
+    # so by this point send_approval_message must have fired with (post_id, chat_id, post).
+    mock_service_instance.send_approval_message.assert_awaited_once_with(1, "chat-42", mock_post)
 
 
 def test_list_posts(mock_supabase):

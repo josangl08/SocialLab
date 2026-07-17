@@ -25,7 +25,7 @@ INSTAGRAM_APP_SECRET = os.environ.get("INSTAGRAM_APP_SECRET")
 INSTAGRAM_REDIRECT_URI = os.environ.get("INSTAGRAM_REDIRECT_URI")
 
 @router.get("/login")
-async def instagram_login(token: str, current_user: User = Depends(get_current_user_from_query_token)):
+def instagram_login(token: str, current_user: User = Depends(get_current_user_from_query_token)):
     if not INSTAGRAM_APP_ID:
         raise HTTPException(status_code=500, detail="INSTAGRAM_APP_ID no configurado.")
 
@@ -55,7 +55,7 @@ async def instagram_login(token: str, current_user: User = Depends(get_current_u
 router_no_prefix = APIRouter(tags=["Instagram Integration"])
 
 @router_no_prefix.get("/instagram/login")
-async def instagram_login_np(token: str, current_user: User = Depends(get_current_user_from_query_token)):
+def instagram_login_np(token: str, current_user: User = Depends(get_current_user_from_query_token)):
     if not INSTAGRAM_APP_ID:
         raise HTTPException(status_code=500, detail="INSTAGRAM_APP_ID no configurado.")
     state_param = generate_state_token(current_user.id)
@@ -69,7 +69,7 @@ async def instagram_login_np(token: str, current_user: User = Depends(get_curren
     return RedirectResponse(auth_url)
 
 @router_no_prefix.get("/callback/instagram")
-async def instagram_callback(
+def instagram_callback(
     code: Optional[str] = None,
     error: Optional[str] = None,
     state: Optional[str] = None
@@ -178,7 +178,7 @@ async def instagram_callback(
         raise HTTPException(status_code=500, detail=f"Error durante el proceso de autenticación de Instagram: {e}")
 
 @router_no_prefix.get("/instagram/sync")
-async def instagram_sync(
+def instagram_sync(
     instagram_account_id: Optional[str] = None,
     current_user: User = Depends(get_current_user)
 ):
@@ -327,7 +327,7 @@ async def instagram_sync(
         raise HTTPException(status_code=500, detail=f"Error durante la sincronización: {str(e)}")
 
 @router_no_prefix.get("/instagram/status")
-async def instagram_status(current_user: User = Depends(get_current_user)):
+def instagram_status(current_user: User = Depends(get_current_user)):
     try:
         # Usar admin client: RLS bloquea instagram_accounts con cliente anon
         admin_db = get_supabase_admin_client()
@@ -391,7 +391,7 @@ async def instagram_status(current_user: User = Depends(get_current_user)):
         return []
 
 @router_no_prefix.post("/instagram/publish/{post_id}")
-async def publish_to_instagram(post_id: int, current_user: User = Depends(get_current_user)):
+def publish_to_instagram(post_id: int, current_user: User = Depends(get_current_user)):
     try:
         post_response = supabase.table('posts').select('*').eq('id', post_id).eq('user_id', current_user.id).single().execute()
 
@@ -498,7 +498,7 @@ async def publish_to_instagram(post_id: int, current_user: User = Depends(get_cu
         raise HTTPException(status_code=500, detail=f"Error al publicar en Instagram: {str(e)}")
 
 @router_no_prefix.post("/instagram/schedule/{post_id}")
-async def schedule_instagram_post(
+def schedule_instagram_post(
     post_id: int,
     scheduled_time: datetime,
     current_user: User = Depends(get_current_user)
@@ -533,7 +533,7 @@ async def schedule_instagram_post(
         raise HTTPException(status_code=500, detail=f"Error al programar post: {str(e)}")
 
 @router_no_prefix.get("/instagram/scheduled-posts")
-async def get_scheduled_posts(current_user: User = Depends(get_current_user)):
+def get_scheduled_posts(current_user: User = Depends(get_current_user)):
     try:
         response = supabase.table('posts').select('*').eq('user_id', current_user.id).eq('status', 'scheduled').not_.is_('scheduled_at', 'null').order('scheduled_at', desc=False).execute()
         return response.data
@@ -541,7 +541,7 @@ async def get_scheduled_posts(current_user: User = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"Error al obtener posts programados: {str(e)}")
 
 @router_no_prefix.get("/instagram/accounts")
-async def get_instagram_accounts(current_user: User = Depends(get_current_user)):
+def get_instagram_accounts(current_user: User = Depends(get_current_user)):
     """
     Retorna la lista de cuentas de Instagram conectadas del usuario autenticado.
     """
@@ -555,7 +555,7 @@ async def get_instagram_accounts(current_user: User = Depends(get_current_user))
         raise HTTPException(status_code=500, detail=f"Error al obtener las cuentas de Instagram: {str(e)}")
 
 @router_no_prefix.put("/instagram/accounts/{account_id}/config")
-async def update_account_config(
+def update_account_config(
     account_id: str,
     config: InstagramAccountConfigUpdate,
     current_user: User = Depends(get_current_user)
@@ -570,7 +570,7 @@ async def update_account_config(
     return {"success": True}
 
 @router_no_prefix.delete("/instagram/accounts/{account_id}")
-async def disconnect_account(
+def disconnect_account(
     account_id: str,
     current_user: User = Depends(get_current_user)
 ):

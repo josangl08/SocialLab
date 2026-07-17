@@ -1,10 +1,9 @@
-import asyncio
 import uuid
 import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, BackgroundTasks
 from fastapi import status as http_status
 from pydantic import BaseModel, Field
 
@@ -34,7 +33,8 @@ class PublishPostResponse(BaseModel):
 
 
 @router.post("", response_model=Post)
-async def create_post(
+def create_post(
+    background_tasks: BackgroundTasks,
     content: str = Form(...),
     post_type: str = Form(...),
     status: str = Form(...),
@@ -57,7 +57,7 @@ async def create_post(
             folder_map = {'draft': 'drafts', 'scheduled': 'scheduled', 'published': 'published'}
             folder = folder_map.get(status, 'drafts')
             unique_filename = f"{folder}/{uuid.uuid4()}.{file_extension}"
-            file_content = await media_file.read()
+            file_content = media_file.file.read()
             supabase.storage.from_("posts").upload(unique_filename, file_content, {"content-type": media_file.content_type})
             media_url = supabase.storage.from_("posts").get_public_url(unique_filename)
         except Exception as e:
@@ -82,7 +82,7 @@ async def create_post(
                 if account_res.data and account_res.data[0].get('telegram_chat_id'):
                     from services.telegram_service import TelegramService
                     chat_id = account_res.data[0]['telegram_chat_id']
-                    asyncio.create_task(TelegramService().send_approval_message(post['id'], chat_id, post))
+                    background_tasks.add_task(TelegramService().send_approval_message, post['id'], chat_id, post)
             return post
         raise HTTPException(status_code=500, detail="No se pudo crear la publicación.")
     except HTTPException:
@@ -92,7 +92,7 @@ async def create_post(
 
 
 @router.get("", response_model=list[Post])
-async def get_posts(
+def get_posts(
     current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
@@ -111,7 +111,7 @@ async def get_posts(
 
 
 @router.put("/{post_id}", response_model=Post)
-async def update_post(
+def update_post(
     post_id: int,
     content: str = Form(...),
     post_type: str = Form(...),
@@ -144,7 +144,7 @@ async def update_post(
             folder_map = {'draft': 'drafts', 'scheduled': 'scheduled', 'published': 'published'}
             folder = folder_map.get(status, 'drafts')
             unique_filename = f"{folder}/{uuid.uuid4()}.{file_extension}"
-            file_content = await media_file.read()
+            file_content = media_file.file.read()
             supabase.storage.from_("posts").upload(unique_filename, file_content, {"content-type": media_file.content_type})
             media_url = supabase.storage.from_("posts").get_public_url(unique_filename)
         except Exception as e:
@@ -176,7 +176,7 @@ async def update_post(
 
 
 @router.delete("/{post_id}", status_code=http_status.HTTP_204_NO_CONTENT)
-async def delete_post(
+def delete_post(
     post_id: int,
     current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
@@ -196,7 +196,7 @@ async def delete_post(
 
 
 @router.post("/{post_id}/publish", response_model=PublishPostResponse)
-async def publish_post_now(
+def publish_post_now(
     post_id: int,
     request: PublishPostRequest = PublishPostRequest(),
     current_user: User = Depends(get_current_user),
@@ -263,7 +263,7 @@ async def publish_post_now(
 
 
 @router.get("/{post_id}")
-async def get_post(
+def get_post(
     post_id: int,
     current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)

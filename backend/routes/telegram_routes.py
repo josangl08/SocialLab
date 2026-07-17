@@ -47,7 +47,7 @@ async def telegram_webhook(token: str, update: TelegramUpdate):
     return {"ok": True}
 
 @router.post("/generate-link-token", response_model=TelegramLinkTokenResponse)
-async def generate_link_token(current_user: User = Depends(get_current_user)):
+def generate_link_token(current_user: User = Depends(get_current_user)):
     """
     Generates a temporary UUID link token for the user's active Instagram account.
     """
@@ -101,7 +101,7 @@ async def generate_link_token(current_user: User = Depends(get_current_user)):
         )
 
 @router.post("/link-account")
-async def link_account(payload: LinkAccountRequest):
+def link_account(payload: LinkAccountRequest):
     """
     Links a telegram chat ID to an Instagram account using a valid link token.
     Internal endpoint used by the Telegram bot handler.
