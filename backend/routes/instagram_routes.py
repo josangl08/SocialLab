@@ -13,6 +13,7 @@ from database.supabase_client import get_supabase_admin_client
 from models.schemas import User, InstagramAccountConfigUpdate
 from auth.dependencies import get_current_user, get_current_user_from_query_token
 from utils.encryption import encrypt_token, decrypt_token
+from utils.oauth_state import generate_state_token, verify_state_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/instagram", tags=["Instagram Integration"])
@@ -27,9 +28,9 @@ INSTAGRAM_REDIRECT_URI = os.environ.get("INSTAGRAM_REDIRECT_URI")
 async def instagram_login(token: str, current_user: User = Depends(get_current_user_from_query_token)):
     if not INSTAGRAM_APP_ID:
         raise HTTPException(status_code=500, detail="INSTAGRAM_APP_ID no configurado.")
-    
-    state_param = current_user.id
-    
+
+    state_param = generate_state_token(current_user.id)
+
     auth_url = (
         f"https://graph.facebook.com/oauth/authorize?client_id={INSTAGRAM_APP_ID}"
         f"&redirect_uri={INSTAGRAM_REDIRECT_URI}"
@@ -57,7 +58,7 @@ router_no_prefix = APIRouter(tags=["Instagram Integration"])
 async def instagram_login_np(token: str, current_user: User = Depends(get_current_user_from_query_token)):
     if not INSTAGRAM_APP_ID:
         raise HTTPException(status_code=500, detail="INSTAGRAM_APP_ID no configurado.")
-    state_param = current_user.id
+    state_param = generate_state_token(current_user.id)
     auth_url = (
         f"https://graph.facebook.com/oauth/authorize?client_id={INSTAGRAM_APP_ID}"
         f"&redirect_uri={INSTAGRAM_REDIRECT_URI}"
@@ -82,7 +83,10 @@ async def instagram_callback(
     if not state:
         raise HTTPException(status_code=400, detail="No se recibió el ID de usuario en el parámetro state.")
 
-    sociallab_user_id = state
+    try:
+        sociallab_user_id = verify_state_token(state)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Parámetro state inválido o expirado.")
 
     if not INSTAGRAM_APP_ID or not INSTAGRAM_APP_SECRET or not INSTAGRAM_REDIRECT_URI:
         raise HTTPException(status_code=500, detail="Credenciales de Instagram no configuradas.")

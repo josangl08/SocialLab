@@ -16,6 +16,7 @@ from main import app
 from auth.dependencies import get_current_user, get_current_user_from_query_token
 from models.schemas import User
 from tests.conftest import USER_ID
+from utils.oauth_state import generate_state_token
 
 # Mock current user
 async def mock_get_current_user():
@@ -93,10 +94,21 @@ def test_callback_stores_credentials_and_redirects():
     if "/api/drive/status" not in route_paths:
         app.include_router(drive_oauth_router)
 
-    response = client.get("/api/drive/callback/google?code=auth_code&state=" + USER_ID, follow_redirects=False)
+    state_token = generate_state_token(USER_ID)
+    response = client.get("/api/drive/callback/google?code=auth_code&state=" + state_token, follow_redirects=False)
     assert response.status_code in [302, 307]
     assert "drive_connected=true" in response.headers.get("location", "")
-    
+
     if mock_service.build_flow.called:
         mock_flow.fetch_token.assert_called_once_with(code="auth_code")
         mock_service.save_credentials.assert_called_once()
+
+
+def test_callback_invalid_state_returns_400():
+    from routes.drive_oauth_routes import router as drive_oauth_router
+    route_paths = [route.path for route in app.routes]
+    if "/api/drive/status" not in route_paths:
+        app.include_router(drive_oauth_router)
+
+    response = client.get("/api/drive/callback/google?code=auth_code&state=not-a-valid-token", follow_redirects=False)
+    assert response.status_code == 400

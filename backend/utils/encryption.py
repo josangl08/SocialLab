@@ -10,7 +10,7 @@ from cryptography.fernet import Fernet, InvalidToken
 logger = logging.getLogger(__name__)
 
 
-def _get_fernet_key() -> bytes:
+def get_fernet_key() -> bytes:
     """Return a valid Fernet key: TOKENS_ENCRYPTION_KEY if set, else derived from SUPABASE_KEY."""
     explicit_key = os.environ.get("TOKENS_ENCRYPTION_KEY")
     if explicit_key:
@@ -24,14 +24,14 @@ def _get_fernet_key() -> bytes:
 def encrypt_token(value: str) -> str:
     if not value:
         return value
-    fernet = Fernet(_get_fernet_key())
+    fernet = Fernet(get_fernet_key())
     return fernet.encrypt(value.encode("utf-8")).decode("utf-8")
 
 
 def decrypt_token(value: str) -> str:
     if not value:
         return value
-    fernet = Fernet(_get_fernet_key())
+    fernet = Fernet(get_fernet_key())
     try:
         return fernet.decrypt(value.encode("utf-8")).decode("utf-8")
     except (InvalidToken, ValueError) as e:

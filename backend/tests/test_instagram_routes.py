@@ -6,6 +6,7 @@ from main import app
 from auth.dependencies import get_current_user
 from models.schemas import User
 from tests.conftest import USER_ID
+from utils.oauth_state import generate_state_token
 
 # Mock current user
 async def mock_get_current_user():
@@ -197,3 +198,36 @@ def test_publish_to_instagram_expired_token(mock_supabase, mock_admin_supabase):
 
     assert response.status_code == 401
     assert "El token de Instagram ha expirado" in response.json()["detail"]
+
+def test_callback_instagram_valid_state_succeeds(mock_admin_supabase):
+    state_token = generate_state_token(USER_ID)
+
+    mock_post_response = MagicMock()
+    mock_post_response.json.return_value = {"access_token": "short-lived-token"}
+
+    mock_get_responses = [
+        MagicMock(json=MagicMock(return_value={"access_token": "long-lived-token", "expires_in": 5184000})),
+        MagicMock(json=MagicMock(return_value={"data": [{"id": "fb-page-1"}]})),
+        MagicMock(json=MagicMock(return_value={"instagram_business_account": {"id": "ig-account-1"}})),
+    ]
+
+    mock_upsert_execute = MagicMock()
+    mock_admin_supabase.table.return_value.upsert.return_value.execute.return_value = mock_upsert_execute
+
+    with patch("routes.instagram_routes.requests.post", return_value=mock_post_response), \
+         patch("routes.instagram_routes.requests.get", side_effect=mock_get_responses), \
+         patch("routes.instagram_routes.get_supabase_admin_client", return_value=mock_admin_supabase):
+        response = client.get(
+            f"/callback/instagram?code=auth_code&state={state_token}",
+            follow_redirects=False
+        )
+
+    assert response.status_code in [302, 307]
+    assert "instagram_connected=true" in response.headers.get("location", "")
+
+def test_callback_instagram_invalid_state_returns_400():
+    response = client.get(
+        "/callback/instagram?code=auth_code&state=not-a-valid-token",
+        follow_redirects=False
+    )
+    assert response.status_code == 400

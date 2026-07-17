@@ -7,6 +7,7 @@ from fastapi.responses import RedirectResponse
 
 from auth.dependencies import get_current_user, get_current_user_from_query_token
 from models.schemas import DriveToken, User
+from utils.oauth_state import generate_state_token, verify_state_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/drive", tags=["Drive OAuth"])
@@ -30,7 +31,7 @@ async def drive_auth(
     auth_url, _ = flow.authorization_url(
         access_type='offline',
         include_granted_scopes='true',
-        state=current_user.id,
+        state=generate_state_token(current_user.id),
         prompt='consent',
     )
     return RedirectResponse(url=auth_url)
@@ -40,7 +41,10 @@ async def drive_auth(
 async def google_callback(code: str, state: str):
     """Exchanges OAuth code for credentials and stores them in DB."""
     from services.drive_oauth_service import DriveOAuthService
-    user_id = state
+    try:
+        user_id = verify_state_token(state)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Parámetro state inválido o expirado.")
     try:
         svc = DriveOAuthService()
         flow = svc.build_flow()
