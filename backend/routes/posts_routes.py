@@ -44,6 +44,12 @@ async def create_post(
     current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
+    if instagram_account_id is not None:
+        account_check = admin_supabase.table('instagram_accounts')\
+            .select('id').eq('id', instagram_account_id).eq('user_id', current_user.id).execute()
+        if not account_check.data:
+            raise HTTPException(status_code=403, detail="No tienes permiso para usar esta cuenta de Instagram.")
+
     media_url = None
     if media_file:
         try:
@@ -119,6 +125,12 @@ async def update_post(
     response = supabase.table('posts').select('id, media_url').eq('id', post_id).eq('user_id', current_user.id).execute()
     if not response.data:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Publicación no encontrada")
+
+    if instagram_account_id is not None:
+        account_check = admin_supabase.table('instagram_accounts')\
+            .select('id').eq('id', instagram_account_id).eq('user_id', current_user.id).execute()
+        if not account_check.data:
+            raise HTTPException(status_code=403, detail="No tienes permiso para usar esta cuenta de Instagram.")
 
     existing_media_url = response.data[0].get('media_url')
     media_url = existing_media_url

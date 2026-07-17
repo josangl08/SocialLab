@@ -162,6 +162,69 @@ def test_delete_post(mock_supabase):
     assert response.status_code == 204
 
 
+def test_create_post_with_foreign_instagram_account_forbidden(mock_supabase, mock_admin_supabase):
+    # Mock admin_supabase instagram_accounts ownership query to return empty list (not owned)
+    mock_ownership_exec = MagicMock()
+    mock_ownership_exec.execute.return_value = MagicMock(data=[])
+    mock_admin_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value = mock_ownership_exec
+
+    response = client.post(
+        "/api/posts",
+        data={
+            "content": "Test content",
+            "post_type": "post",
+            "status": "draft",
+            "instagram_account_id": 999
+        },
+        files={
+            "media_file": ("test.png", b"fake binary data", "image/png")
+        }
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "No tienes permiso para usar esta cuenta de Instagram."
+
+    # Assert that insert was never called on supabase table posts
+    mock_supabase.table.assert_not_called()
+    # Assert that storage upload was never called
+    mock_supabase.storage.from_.assert_not_called()
+
+
+def test_update_post_with_foreign_instagram_account_forbidden(mock_supabase, mock_admin_supabase):
+    # Mock post lookup select to return the existing post (so it passes the 404 check)
+    mock_select_exec = MagicMock()
+    mock_select_exec.execute.return_value = MagicMock(data=[{"id": 1, "media_url": "https://mock.storage.test/drafts/test.png"}])
+    mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value = mock_select_exec
+
+    # Mock admin_supabase instagram_accounts ownership query to return empty list (not owned)
+    mock_ownership_exec = MagicMock()
+    mock_ownership_exec.execute.return_value = MagicMock(data=[])
+    mock_admin_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value = mock_ownership_exec
+
+    response = client.put(
+        "/api/posts/1",
+        data={
+            "content": "Updated content",
+            "post_type": "post",
+            "status": "draft",
+            "instagram_account_id": 999
+        },
+        files={
+            "media_file": ("new_test.png", b"new fake binary data", "image/png")
+        }
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "No tienes permiso para usar esta cuenta de Instagram."
+
+    # Assert that update was never called
+    mock_supabase.table.return_value.update.assert_not_called()
+    # Assert that existing media was not removed
+    mock_supabase.storage.from_.return_value.remove.assert_not_called()
+    # Assert that new media was not uploaded
+    mock_supabase.storage.from_.return_value.upload.assert_not_called()
+
+
 # ==============================================================================
 # Agent proposal approval/rejection endpoints under /api/agent/proposals
 # ==============================================================================
