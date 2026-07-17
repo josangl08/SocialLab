@@ -11,7 +11,7 @@ import httpx
 
 import google.generativeai as genai
 
-from database.supabase_client import get_supabase_client
+from database.supabase_client import get_supabase_admin_client
 from models.schemas import TelegramMessage, TelegramCallbackQuery
 from services.scheduler.post_scheduler import PostScheduler
 
@@ -119,7 +119,7 @@ class TelegramService:
         chat_id: str,
         message_id: Optional[int]
     ) -> None:
-        supabase = get_supabase_client()
+        supabase = get_supabase_admin_client()
         post_result = supabase.table('posts').select('id, scheduled_at').eq('id', post_id).execute()
 
         if not post_result.data:
@@ -152,7 +152,7 @@ class TelegramService:
         chat_id: str,
         message_id: Optional[int]
     ) -> None:
-        supabase = get_supabase_client()
+        supabase = get_supabase_admin_client()
         supabase.table('posts').update({"status": "failed"}).eq('id', post_id).execute()
 
         if message_id:
@@ -252,7 +252,7 @@ class TelegramService:
                 })
                 return
 
-            supabase = get_supabase_client()
+            supabase = get_supabase_admin_client()
             proposal_res = supabase.table('content_proposals').select('slots, account_id').eq('id', proposal_id).execute()
             if not proposal_res.data:
                 return
@@ -334,7 +334,7 @@ class TelegramService:
                 })
                 return
 
-            supabase = get_supabase_client()
+            supabase = get_supabase_admin_client()
             proposal_res = supabase.table('content_proposals').select('slots').eq('id', proposal_id).execute()
             if not proposal_res.data:
                 return
@@ -361,7 +361,7 @@ class TelegramService:
             })
 
     async def _handle_edit_reply(self, chat_id: str, post_id: int, new_content: str) -> None:
-        supabase = get_supabase_client()
+        supabase = get_supabase_admin_client()
         supabase.table('posts').update({"content": new_content, "status": "draft"}).eq('id', post_id).execute()
 
         post_result = supabase.table('posts').select('*').eq('id', post_id).execute()
@@ -380,7 +380,7 @@ class TelegramService:
                 })
             return
 
-        supabase = get_supabase_client()
+        supabase = get_supabase_admin_client()
         supabase.table('posts').update({
             "scheduled_at": scheduled_at.isoformat(),
             "status": "draft"
@@ -434,7 +434,7 @@ class TelegramService:
         return await asyncio.get_event_loop().run_in_executor(None, _sync)
 
     async def send_proposal_card(self, chat_id: str, proposal_id: str, slots: list, user_id: str = None) -> None:
-        supabase = get_supabase_client()
+        supabase = get_supabase_admin_client()
 
         # 1. Header message with global approve/reject buttons
         async with httpx.AsyncClient() as client:
@@ -512,7 +512,7 @@ class TelegramService:
             return
         action, proposal_id = parts[1], parts[2]
 
-        supabase = get_supabase_client()
+        supabase = get_supabase_admin_client()
         proposal_res = supabase.table('content_proposals').select('*').eq('id', proposal_id).execute()
         if not proposal_res.data:
             logger.error(f"Proposal {proposal_id} not found")
@@ -577,7 +577,7 @@ class TelegramService:
         chat_id: str,
         message_id: Optional[int]
     ) -> None:
-        supabase = get_supabase_client()
+        supabase = get_supabase_admin_client()
         proposal_res = supabase.table('content_proposals').select('*').eq('id', proposal_id).execute()
         if not proposal_res.data:
             return
@@ -759,7 +759,7 @@ class TelegramService:
         chat_id: str,
         message_id: Optional[int]
     ) -> None:
-        supabase = get_supabase_client()
+        supabase = get_supabase_admin_client()
         proposal_res = supabase.table('content_proposals').select('*').eq('id', proposal_id).execute()
         if not proposal_res.data:
             return
@@ -786,7 +786,7 @@ class TelegramService:
         slot_index: int,
         photos: list
     ) -> None:
-        supabase = get_supabase_client()
+        supabase = get_supabase_admin_client()
         proposal_res = supabase.table('content_proposals').select('*').eq('id', proposal_id).execute()
         if not proposal_res.data:
             return
@@ -847,7 +847,7 @@ class TelegramService:
             logger.error(f"Photo swap failed for proposal {proposal_id} slot {slot_index}: {e}")
 
     async def send_daily_briefing(self, account_id: int, chat_id: str) -> None:
-        supabase = get_supabase_client()
+        supabase = get_supabase_admin_client()
         today = date.today().isoformat()
         posts_res = supabase.table('posts')\
             .select('id, content, post_type, scheduled_at')\

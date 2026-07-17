@@ -8,7 +8,9 @@ from typing import Dict
 from pydantic import BaseModel
 
 from auth.jwt_handler import get_current_user
+from auth.dependencies import get_user_supabase_client
 from services.template_sync import get_template_sync
+from supabase import Client
 
 router = APIRouter(prefix="/templates", tags=["Template Sync"])
 
@@ -25,7 +27,8 @@ class SyncResponse(BaseModel):
 
 @router.post("/sync-from-drive", response_model=SyncResponse)
 async def sync_templates_from_drive(
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
 ):
     """
     Sincroniza templates desde Google Drive/TEMPLATES_SOCIALLAB/.
@@ -41,7 +44,7 @@ async def sync_templates_from_drive(
     try:
         user_id = current_user['id']
 
-        sync_service = get_template_sync()
+        sync_service = get_template_sync(supabase_client=supabase)
         result = sync_service.sync_templates_from_drive(user_id)
 
         if result['success']:

@@ -15,7 +15,7 @@ def mock_supabase():
 
 @pytest.fixture
 def mock_tg_supabase():
-    with patch("services.telegram_service.get_supabase_client") as mock_get_sup:
+    with patch("services.telegram_service.get_supabase_admin_client") as mock_get_sup:
         mock_sup = MagicMock()
         mock_get_sup.return_value = mock_sup
         yield mock_sup

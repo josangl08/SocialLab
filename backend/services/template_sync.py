@@ -19,15 +19,19 @@ logger = logging.getLogger(__name__)
 class TemplateSyncService:
     """Servicio para sincronizar templates desde Google Drive."""
 
-    def __init__(self, use_admin=False):
+    def __init__(self, use_admin=False, supabase_client=None):
         """
         Inicializa el servicio de sincronización.
 
         Args:
             use_admin: Si True, usa service_role key (bypass RLS).
                       Solo para scripts administrativos.
+            supabase_client: Cliente ya construido (p.ej. JWT-scoped desde una
+                      ruta autenticada). Si se pasa, tiene prioridad sobre use_admin.
         """
-        if use_admin:
+        if supabase_client is not None:
+            self.supabase = supabase_client
+        elif use_admin:
             self.supabase = get_supabase_admin_client()
             logger.info("🔑 Usando admin client (service_role)")
         else:
@@ -284,14 +288,16 @@ class TemplateSyncService:
             return False
 
 
-def get_template_sync(use_admin=False) -> TemplateSyncService:
+def get_template_sync(use_admin=False, supabase_client=None) -> TemplateSyncService:
     """
     Factory function para obtener servicio de sincronización.
 
     Args:
         use_admin: Si True, usa service_role key (bypass RLS)
+        supabase_client: Cliente ya construido (p.ej. JWT-scoped desde una
+            ruta autenticada). Si se pasa, tiene prioridad sobre use_admin.
     """
-    return TemplateSyncService(use_admin=use_admin)
+    return TemplateSyncService(use_admin=use_admin, supabase_client=supabase_client)
 
 
 # Testing

@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 from main import app
-from auth.dependencies import get_current_user
+from auth.dependencies import get_current_user, get_user_supabase_client
 from models.schemas import User
 from tests.conftest import USER_ID
 
@@ -18,8 +18,10 @@ client = TestClient(app)
 
 @pytest.fixture
 def mock_supabase():
-    with patch("routes.posts_routes.supabase") as mock_sup:
-        yield mock_sup
+    mock_sup = MagicMock()
+    app.dependency_overrides[get_user_supabase_client] = lambda: mock_sup
+    yield mock_sup
+    app.dependency_overrides.pop(get_user_supabase_client, None)
 
 @pytest.fixture
 def mock_admin_supabase():
@@ -28,8 +30,10 @@ def mock_admin_supabase():
 
 @pytest.fixture
 def mock_agent_supabase():
-    with patch("routes.agent_routes.supabase") as mock_sup:
-        yield mock_sup
+    mock_sup = MagicMock()
+    app.dependency_overrides[get_user_supabase_client] = lambda: mock_sup
+    yield mock_sup
+    app.dependency_overrides.pop(get_user_supabase_client, None)
 
 @pytest.fixture
 def mock_agent_admin_supabase():

@@ -8,16 +8,16 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from fastapi import status as http_status
 from pydantic import BaseModel, Field
 
-from auth.dependencies import get_current_user
-from database.supabase_client import get_supabase_client, get_supabase_admin_client
+from auth.dependencies import get_current_user, get_user_supabase_client
+from database.supabase_client import get_supabase_admin_client
 from models.schemas import User, Post
 from services.publisher.instagram_publisher import InstagramPublisher, InstagramPublishError
+from supabase import Client
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/posts", tags=["posts"])
 
-supabase = get_supabase_client()
 admin_supabase = get_supabase_admin_client()
 
 
@@ -41,7 +41,8 @@ async def create_post(
     scheduled_at: Optional[datetime] = Form(None),
     media_file: Optional[UploadFile] = File(None),
     instagram_account_id: Optional[int] = Form(None),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
 ):
     media_url = None
     if media_file:
@@ -85,7 +86,10 @@ async def create_post(
 
 
 @router.get("", response_model=list[Post])
-async def get_posts(current_user: User = Depends(get_current_user)):
+async def get_posts(
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
+):
     try:
         response = (
             supabase.table('posts')
@@ -109,7 +113,8 @@ async def update_post(
     scheduled_at: Optional[datetime] = Form(None),
     media_file: Optional[UploadFile] = File(None),
     instagram_account_id: Optional[int] = Form(None),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
 ):
     response = supabase.table('posts').select('id, media_url').eq('id', post_id).eq('user_id', current_user.id).execute()
     if not response.data:
@@ -159,7 +164,11 @@ async def update_post(
 
 
 @router.delete("/{post_id}", status_code=http_status.HTTP_204_NO_CONTENT)
-async def delete_post(post_id: int, current_user: User = Depends(get_current_user)):
+async def delete_post(
+    post_id: int,
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
+):
     response = supabase.table('posts').select('id, media_url').eq('id', post_id).eq('user_id', current_user.id).execute()
     if not response.data:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Publicación no encontrada")
@@ -178,7 +187,8 @@ async def delete_post(post_id: int, current_user: User = Depends(get_current_use
 async def publish_post_now(
     post_id: int,
     request: PublishPostRequest = PublishPostRequest(),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
 ):
     try:
         logger.info(f"User {current_user.id} attempting to publish post {post_id}")
@@ -241,7 +251,11 @@ async def publish_post_now(
 
 
 @router.get("/{post_id}")
-async def get_post(post_id: int, current_user: User = Depends(get_current_user)):
+async def get_post(
+    post_id: int,
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
+):
     try:
         result = supabase.table('posts').select('*').eq('id', post_id).single().execute()
 

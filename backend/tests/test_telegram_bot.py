@@ -30,7 +30,7 @@ def mock_supabase():
 
 @pytest.fixture
 def mock_service_supabase():
-    with patch("services.telegram_service.get_supabase_client") as mock_get_sup:
+    with patch("services.telegram_service.get_supabase_admin_client") as mock_get_sup:
         mock_sup = MagicMock()
         mock_get_sup.return_value = mock_sup
         yield mock_sup
@@ -226,7 +226,7 @@ async def test_send_approval_message_text_fallback(mock_post):
 
 @pytest.mark.asyncio
 @patch("httpx.AsyncClient.post")
-@patch("services.telegram_service.get_supabase_client")
+@patch("services.telegram_service.get_supabase_admin_client")
 @patch("services.telegram_service.PostScheduler")
 async def test_handle_callback_query_approve(mock_scheduler_cls, mock_get_supabase, mock_post):
     # Mock scheduler
@@ -275,7 +275,7 @@ async def test_handle_callback_query_approve(mock_scheduler_cls, mock_get_supaba
 
 @pytest.mark.asyncio
 @patch("httpx.AsyncClient.post")
-@patch("services.telegram_service.get_supabase_client")
+@patch("services.telegram_service.get_supabase_admin_client")
 async def test_handle_callback_query_reject(mock_get_supabase, mock_post):
     mock_supabase = MagicMock()
     mock_get_supabase.return_value = mock_supabase
@@ -349,7 +349,7 @@ async def test_handle_callback_query_edit(mock_post):
 
 @pytest.mark.asyncio
 @patch("httpx.AsyncClient.post")
-@patch("services.telegram_service.get_supabase_client")
+@patch("services.telegram_service.get_supabase_admin_client")
 @patch.object(TelegramService, "send_approval_message", new_callable=AsyncMock)
 async def test_handle_message_edit_reply(mock_send_approval, mock_get_supabase, mock_post):
     mock_supabase = MagicMock()

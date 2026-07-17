@@ -1,9 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status
 from pydantic import BaseModel
 from typing import Literal, Optional
-from database.supabase_client import get_supabase_client, get_supabase_admin_client
+from database.supabase_client import get_supabase_admin_client
 from models.schemas import User, AgentConfig, ContentProposal, MonthlyCampaign
-from auth.dependencies import get_current_user
+from auth.dependencies import get_current_user, get_user_supabase_client
+from supabase import Client
 from datetime import datetime, timezone, timedelta
 import uuid
 import json
@@ -13,7 +14,6 @@ import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["Agent"])
-supabase = get_supabase_client()
 admin_supabase = get_supabase_admin_client()
 
 class TriggerRequest(BaseModel):
@@ -64,7 +64,8 @@ async def trigger_agent(
 @router.get("/proposals", response_model=list[ContentProposal])
 async def list_proposals(
     account_id: int,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
 ):
     """
     Lists all content proposals for the authenticated user's Instagram account.
@@ -102,7 +103,8 @@ async def list_proposals(
 @router.post("/proposals/{proposal_id}/approve")
 async def approve_proposal(
     proposal_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
 ):
     proposal_res = supabase.table('content_proposals').select('*').eq('id', proposal_id).execute()
     if not proposal_res.data:
@@ -149,7 +151,8 @@ async def approve_proposal(
 @router.post("/proposals/{proposal_id}/reject")
 async def reject_proposal(
     proposal_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
 ):
     proposal_res = supabase.table('content_proposals').select('*').eq('id', proposal_id).execute()
     if not proposal_res.data:
@@ -389,9 +392,9 @@ Solo el JSON, sin texto adicional."""
 
 # ── Slot-level endpoints ─────────────────────────────────────────────────────
 
-def _get_proposal_and_slot(proposal_id: str, slot_index: int, user_id: str):
+def _get_proposal_and_slot(proposal_id: str, slot_index: int, user_id: str, supabase_client: Client):
     """Shared helper: validates ownership and returns (proposal_row, slot_dict)."""
-    proposal_res = supabase.table('content_proposals').select('*').eq('id', proposal_id).execute()
+    proposal_res = supabase_client.table('content_proposals').select('*').eq('id', proposal_id).execute()
     if not proposal_res.data:
         raise HTTPException(status_code=404, detail="Propuesta no encontrada")
     proposal = proposal_res.data[0]
@@ -408,9 +411,10 @@ def _get_proposal_and_slot(proposal_id: str, slot_index: int, user_id: str):
 async def regenerate_slot(
     proposal_id: str,
     slot_index: int,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
 ):
-    proposal, slots = _get_proposal_and_slot(proposal_id, slot_index, str(current_user.id))
+    proposal, slots = _get_proposal_and_slot(proposal_id, slot_index, str(current_user.id), supabase)
     slot = slots[slot_index]
     post_id = slot.get('post_id')
     if not post_id:
@@ -454,9 +458,10 @@ async def regenerate_slot(
 async def skip_slot(
     proposal_id: str,
     slot_index: int,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
 ):
-    proposal, slots = _get_proposal_and_slot(proposal_id, slot_index, str(current_user.id))
+    proposal, slots = _get_proposal_and_slot(proposal_id, slot_index, str(current_user.id), supabase)
     slot = slots[slot_index]
     post_id = slot.get('post_id')
 
@@ -477,9 +482,10 @@ async def update_slot_type(
     proposal_id: str,
     slot_index: int,
     request: SlotTypeRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
 ):
-    proposal, slots = _get_proposal_and_slot(proposal_id, slot_index, str(current_user.id))
+    proposal, slots = _get_proposal_and_slot(proposal_id, slot_index, str(current_user.id), supabase)
     slot = slots[slot_index]
     post_id = slot.get('post_id')
 
@@ -506,7 +512,8 @@ class SlotReorderRequest(BaseModel):
 async def reorder_proposal_slot(
     proposal_id: str,
     request: SlotReorderRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
 ):
     """Move a slot from one day to another (or swap two slots)."""
     proposal_res = supabase.table('content_proposals').select('*').eq('id', proposal_id).execute()
@@ -581,9 +588,10 @@ async def update_slot_image(
     proposal_id: str,
     slot_index: int,
     request: SlotImageRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
 ):
-    proposal, slots = _get_proposal_and_slot(proposal_id, slot_index, str(current_user.id))
+    proposal, slots = _get_proposal_and_slot(proposal_id, slot_index, str(current_user.id), supabase)
     post_id = slots[slot_index].get('post_id')
 
     if post_id:
@@ -645,7 +653,8 @@ async def upsert_monthly_campaign(
 async def get_monthly_campaign(
     account_id: int,
     month_date: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
 ):
     try:
         # Verify account exists and belongs to current_user

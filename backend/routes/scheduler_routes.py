@@ -15,7 +15,8 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field, validator
 
 from services.scheduler.post_scheduler import PostScheduler
-from database.supabase_client import get_supabase_client
+from auth.dependencies import get_user_supabase_client
+from supabase import Client
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +188,11 @@ async def cancel_scheduled_post(post_id: int):
 
 
 @router.put("/reschedule/{post_id}")
-async def reschedule_post(post_id: int, request: ReschedulePostRequest):
+async def reschedule_post(
+    post_id: int,
+    request: ReschedulePostRequest,
+    supabase: Client = Depends(get_user_supabase_client)
+):
     """
     Reschedule a post to a new time.
 
@@ -211,7 +216,6 @@ async def reschedule_post(post_id: int, request: ReschedulePostRequest):
         )
 
         # AI-generated posts (no media_url yet) — just update DB, skip APScheduler
-        supabase = get_supabase_client()
         post_res = supabase.table('posts').select('media_url').eq('id', post_id).execute()
         if not post_res.data:
             raise HTTPException(status_code=404, detail=f"Post {post_id} not found")
@@ -347,7 +351,10 @@ async def get_job_status(job_id: str):
 
 
 @router.get("/posts/{post_id}/status")
-async def get_post_schedule_status(post_id: int):
+async def get_post_schedule_status(
+    post_id: int,
+    supabase: Client = Depends(get_user_supabase_client)
+):
     """
     Get scheduling status for a specific post.
 
@@ -364,8 +371,6 @@ async def get_post_schedule_status(post_id: int):
     - status: Current status
     """
     try:
-        supabase = get_supabase_client()
-
         # Get post data
         post_result = supabase.table('posts')\
             .select('status, scheduled_at')\

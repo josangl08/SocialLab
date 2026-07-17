@@ -11,7 +11,9 @@ from datetime import datetime
 import logging
 
 from auth.jwt_handler import get_current_user
+from auth.dependencies import get_user_supabase_client
 from database.supabase_client import get_supabase_client
+from supabase import Client
 from services.google_drive_connector import get_drive_connector
 from services.template_selector import get_template_selector
 from services.image_composer import get_image_composer
@@ -77,7 +79,8 @@ class QueueStatusResponse(BaseModel):
 async def generate_content(
     request: ContentGenerationRequest,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
 ):
     """
     Genera contenido automáticamente desde export de PROJECT 1.
@@ -91,7 +94,6 @@ async def generate_content(
     6. Opcionalmente: publica en Instagram
     """
     try:
-        supabase = get_supabase_client()
         user_id = current_user['id']
 
         if not request.export_id and not request.topic:
@@ -328,11 +330,11 @@ async def generate_content(
 
 @router.get("/queue/status", response_model=QueueStatusResponse)
 async def get_queue_status(
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
 ):
     """Obtiene estado de la cola de generación."""
     try:
-        supabase = get_supabase_client()
         user_id = current_user['id']
 
         # Contar por estado
@@ -380,11 +382,11 @@ async def get_queue_status(
 @router.get("/history", response_model=List[dict])
 async def get_generation_history(
     limit: int = 50,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
 ):
     """Obtiene historial de generaciones."""
     try:
-        supabase = get_supabase_client()
         user_id = current_user['id']
 
         result = supabase.table('content_generation_history').select(

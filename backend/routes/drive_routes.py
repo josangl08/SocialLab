@@ -13,8 +13,8 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import Response
 from googleapiclient.http import MediaIoBaseDownload
 
-from auth.dependencies import get_current_user, get_current_user_from_query_token
-from database.supabase_client import get_supabase_client
+from auth.dependencies import get_current_user, get_current_user_from_query_token, get_user_supabase_client
+from supabase import Client
 from models.schemas import User
 from services.google_drive_connector import get_drive_connector
 
@@ -167,9 +167,9 @@ async def sync_drive_data(
 async def list_drive_images(
     account_id: int,
     current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client),
 ):
     """Returns the list of image files in the account's Drive folder."""
-    supabase = get_supabase_client()
     acc_res = supabase.table('instagram_accounts').select('drive_folder_id, user_id').eq('id', account_id).execute()
     if not acc_res.data:
         raise HTTPException(status_code=404, detail="Cuenta no encontrada")

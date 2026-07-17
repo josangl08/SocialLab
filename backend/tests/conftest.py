@@ -183,3 +183,35 @@ def mock_caption_generator() -> MagicMock:
     gen.generate_caption.return_value = "Caption de prueba #futbol #test"
     gen.generate_caption_fallback.return_value = "Caption fallback #test"
     return gen
+
+
+@pytest.fixture(autouse=True)
+def override_supabase_client(mock_supabase_client):
+    from auth.dependencies import get_user_supabase_client
+    from main import app
+    from fastapi import Request
+
+    def _mock_get_user_supabase_client(request: Request = None):
+        if request:
+            path = request.url.path
+            if path.startswith("/api/posts"):
+                try:
+                    from routes import posts_routes
+                    if hasattr(posts_routes, "supabase"):
+                        return posts_routes.supabase
+                except ImportError:
+                    pass
+            elif path.startswith("/api/agent"):
+                try:
+                    from routes import agent_routes
+                    if hasattr(agent_routes, "supabase"):
+                        return agent_routes.supabase
+                except ImportError:
+                    pass
+        return mock_supabase_client
+
+    app.dependency_overrides[get_user_supabase_client] = _mock_get_user_supabase_client
+    yield
+    if get_user_supabase_client in app.dependency_overrides:
+        del app.dependency_overrides[get_user_supabase_client]
+

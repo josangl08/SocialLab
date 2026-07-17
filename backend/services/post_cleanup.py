@@ -5,7 +5,7 @@ Limpia imágenes temporales de Supabase Storage después de publicar.
 
 import logging
 from typing import Dict, Optional
-from database.supabase_client import get_supabase_client
+from database.supabase_client import get_supabase_admin_client
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ class PostCleanupService:
     """Servicio para limpiar storage temporal de posts."""
 
     def __init__(self):
-        self.supabase = get_supabase_client()
+        self.supabase = get_supabase_admin_client()
 
     def cleanup_after_publish(
         self,
