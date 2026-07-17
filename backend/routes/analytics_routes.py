@@ -19,6 +19,7 @@ from database import supabase
 from database.supabase_client import get_supabase_admin_client
 from services.instagram_insights import InstagramInsightsService
 from services.analytics import AnalyticsService
+from utils.encryption import decrypt_token
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ def get_instagram_service(
                     detail="El token de Instagram ha expirado. Por favor vuelve a conectar tu cuenta."
                 )
 
-        access_token = instagram_account.get('long_lived_access_token')
+        access_token = decrypt_token(instagram_account.get('long_lived_access_token'))
         instagram_id = instagram_account.get('instagram_business_account_id')
 
         if not access_token or not instagram_id:
@@ -259,7 +260,7 @@ async def sync_instagram_analytics(
             )
 
         instagram_service = InstagramInsightsService(
-            account['long_lived_access_token'],
+            decrypt_token(account['long_lived_access_token']),
             account['instagram_business_account_id']
         )
 

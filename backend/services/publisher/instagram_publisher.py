@@ -20,6 +20,7 @@ import requests
 from requests.exceptions import RequestException
 
 from database.supabase_client import get_supabase_admin_client
+from utils.encryption import decrypt_token
 
 logger = logging.getLogger(__name__)
 
@@ -679,7 +680,7 @@ class InstagramPublisher:
             if result.data:
                 # Map to expected field names for compatibility
                 return {
-                    'access_token': result.data['long_lived_access_token'],
+                    'access_token': decrypt_token(result.data['long_lived_access_token']),
                     'instagram_user_id': result.data[
                         'instagram_business_account_id'
                     ]

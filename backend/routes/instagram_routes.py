@@ -12,6 +12,7 @@ from database.supabase_client import get_supabase_client
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import User, InstagramAccountConfigUpdate
 from auth.dependencies import get_current_user, get_current_user_from_query_token
+from utils.encryption import encrypt_token, decrypt_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/instagram", tags=["Instagram Integration"])
@@ -158,7 +159,7 @@ async def instagram_callback(
             admin_supabase.table('instagram_accounts').upsert({
                 'user_id': sociallab_user_id,
                 'instagram_business_account_id': instagram_business_account_id,
-                'long_lived_access_token': long_lived_access_token,
+                'long_lived_access_token': encrypt_token(long_lived_access_token),
                 'expires_at': expires_at.isoformat() + 'Z'
             }, on_conflict='user_id,instagram_business_account_id').execute()
             logger.info("Instagram account details saved to Supabase.")
@@ -199,7 +200,7 @@ async def instagram_sync(
             )
 
         account_id = response.data[0]['id']
-        access_token = response.data[0]['long_lived_access_token']
+        access_token = decrypt_token(response.data[0]['long_lived_access_token'])
 
         user_accounts_url = f"https://graph.facebook.com/v19.0/me/accounts?access_token={access_token}"
         user_accounts_response = requests.get(user_accounts_url)
@@ -418,7 +419,7 @@ async def publish_to_instagram(post_id: int, current_user: User = Depends(get_cu
                 raise HTTPException(status_code=401, detail="El token de Instagram ha expirado. Vuelve a conectar esta cuenta.")
 
         ig_account_id = ig_data['instagram_business_account_id']
-        access_token = ig_data['long_lived_access_token']
+        access_token = decrypt_token(ig_data['long_lived_access_token'])
 
         media_url = post.get('media_url')
         if not media_url:

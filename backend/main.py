@@ -27,6 +27,7 @@ sys.stdout.flush()
 
 # Importar cliente de Supabase
 from database.supabase_client import get_supabase_client, get_supabase_admin_client
+from utils.encryption import decrypt_token
 supabase = get_supabase_client()
 admin_supabase = get_supabase_admin_client()
 
@@ -69,7 +70,7 @@ def sync_all_accounts_metrics():
         for account in accounts_data:
             try:
                 instagram_service = InstagramInsightsService(
-                    access_token=account['long_lived_access_token'],
+                    access_token=decrypt_token(account['long_lived_access_token']),
                     instagram_account_id=account['instagram_business_account_id']
                 )
 
