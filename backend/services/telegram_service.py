@@ -41,9 +41,74 @@ class TelegramService:
         async with httpx.AsyncClient() as client:
             resp = await client.post(self._bot_url("setWebhook"), json={"url": webhook_url})
             if resp.status_code == 200 and resp.json().get("ok"):
-                logger.info(f"Telegram webhook registered: {webhook_url}")
+                sanitized_url = f"{base_url}/api/telegram/webhook/<REDACTED>" if token else webhook_url
+                logger.info(f"Telegram webhook registered: {sanitized_url}")
             else:
-                logger.error(f"Failed to register Telegram webhook: {resp.text}")
+                error_detail = resp.text.replace(token, "<REDACTED>") if token else resp.text
+                logger.error(f"Failed to register Telegram webhook: {error_detail}")
+
+    async def _chat_owns_account(self, account_id: str, chat_id: str) -> bool:
+        if not account_id or not chat_id:
+            return False
+        try:
+            supabase = get_supabase_admin_client()
+            acc_res = supabase.table('instagram_accounts')\
+                .select('telegram_chat_id').eq('id', account_id).execute()
+            if not acc_res.data:
+                return False
+            db_chat_id = acc_res.data[0].get('telegram_chat_id')
+            if db_chat_id is None:
+                return False
+            return str(db_chat_id) == str(chat_id)
+        except Exception as e:
+            logger.error(f"Error checking chat ownership of account {account_id}: {e}")
+            return False
+
+    async def _verify_post_owner(self, post_id: int, chat_id: str) -> bool:
+        if not post_id or not chat_id:
+            return False
+        try:
+            supabase = get_supabase_admin_client()
+            post_res = supabase.table('posts')\
+                .select('instagram_account_id').eq('id', post_id).execute()
+            if not post_res.data:
+                logger.warning(f"Post {post_id} not found when verifying owner")
+                return False
+            account_id = post_res.data[0].get('instagram_account_id')
+            if not account_id:
+                logger.warning(f"Post {post_id} has no instagram_account_id")
+                return False
+            
+            is_owner = await self._chat_owns_account(account_id, chat_id)
+            if not is_owner:
+                logger.warning(f"Unauthorized access attempt: chat {chat_id} does not own post {post_id} (account {account_id})")
+            return is_owner
+        except Exception as e:
+            logger.error(f"Error verifying post owner for post {post_id}: {e}")
+            return False
+
+    async def _verify_proposal_owner(self, proposal_id: str, chat_id: str) -> bool:
+        if not proposal_id or not chat_id:
+            return False
+        try:
+            supabase = get_supabase_admin_client()
+            prop_res = supabase.table('content_proposals')\
+                .select('account_id').eq('id', proposal_id).execute()
+            if not prop_res.data:
+                logger.warning(f"Proposal {proposal_id} not found when verifying owner")
+                return False
+            account_id = prop_res.data[0].get('account_id')
+            if not account_id:
+                logger.warning(f"Proposal {proposal_id} has no account_id")
+                return False
+            
+            is_owner = await self._chat_owns_account(account_id, chat_id)
+            if not is_owner:
+                logger.warning(f"Unauthorized access attempt: chat {chat_id} does not own proposal {proposal_id} (account {account_id})")
+            return is_owner
+        except Exception as e:
+            logger.error(f"Error verifying proposal owner for proposal {proposal_id}: {e}")
+            return False
 
     async def send_approval_message(self, post_id: int, chat_id: str, post_data: dict) -> None:
         caption = post_data.get("content", "")
@@ -87,29 +152,48 @@ class TelegramService:
             })
 
             if data.startswith("proposal:"):
+                parts = data.split(":")
+                if len(parts) >= 3:
+                    proposal_id = parts[2]
+                    if not await self._verify_proposal_owner(proposal_id, chat_id):
+                        return
                 await self._handle_proposal_callback(callback_query)
             elif data.startswith("slot_type:"):
                 parts = data.split(":", 3)
                 if len(parts) == 4:
+                    if not await self._verify_proposal_owner(parts[1], chat_id):
+                        return
                     await self._handle_slot_type(client, parts[1], int(parts[2]), parts[3], chat_id, message_id)
             elif data.startswith("slot:"):
                 parts = data.split(":", 3)
                 if len(parts) == 4:
+                    if not await self._verify_proposal_owner(parts[1], chat_id):
+                        return
                     await self._handle_slot_callback(client, parts[1], int(parts[2]), parts[3], chat_id, message_id)
             elif data.startswith("approve:"):
                 post_id = int(data.split(":", 1)[1])
+                if not await self._verify_post_owner(post_id, chat_id):
+                    return
                 await self._handle_approve(client, post_id, chat_id, message_id)
             elif data.startswith("reject:"):
                 post_id = int(data.split(":", 1)[1])
+                if not await self._verify_post_owner(post_id, chat_id):
+                    return
                 await self._handle_reject(client, post_id, chat_id, message_id)
             elif data.startswith("edit:"):
                 post_id = int(data.split(":", 1)[1])
+                if not await self._verify_post_owner(post_id, chat_id):
+                    return
                 await self._handle_edit(client, post_id, chat_id)
             elif data.startswith("edit_text:"):
                 post_id = int(data.split(":", 1)[1])
+                if not await self._verify_post_owner(post_id, chat_id):
+                    return
                 await self._handle_edit_text(client, post_id, chat_id)
             elif data.startswith("edit_date:"):
                 post_id = int(data.split(":", 1)[1])
+                if not await self._verify_post_owner(post_id, chat_id):
+                    return
                 await self._handle_edit_date(client, post_id, chat_id)
 
     async def _handle_approve(
@@ -207,20 +291,30 @@ class TelegramService:
             if swap_match and message.photo:
                 proposal_id = swap_match.group(1)
                 slot_index = int(swap_match.group(2))
+                if not await self._verify_proposal_owner(proposal_id, chat_id):
+                    return
                 await self._handle_photo_swap_reply(chat_id, proposal_id, slot_index, message.photo)
             elif imgselect_match:
                 proposal_id = imgselect_match.group(1)
                 slot_index = int(imgselect_match.group(2))
+                if not await self._verify_proposal_owner(proposal_id, chat_id):
+                    return
                 await self._handle_imgselect_reply(chat_id, proposal_id, slot_index, text)
             elif timeedit_match:
                 proposal_id = timeedit_match.group(1)
                 slot_index  = int(timeedit_match.group(2))
+                if not await self._verify_proposal_owner(proposal_id, chat_id):
+                    return
                 await self._handle_timeedit_reply(chat_id, proposal_id, slot_index, text)
             elif date_match:
                 post_id = int(date_match.group(1))
+                if not await self._verify_post_owner(post_id, chat_id):
+                    return
                 await self._handle_date_reply(chat_id, post_id, text)
             elif text_match:
                 post_id = int(text_match.group(1))
+                if not await self._verify_post_owner(post_id, chat_id):
+                    return
                 await self._handle_edit_reply(chat_id, post_id, text)
 
     async def _handle_link_account(self, chat_id: str, token: str) -> None:

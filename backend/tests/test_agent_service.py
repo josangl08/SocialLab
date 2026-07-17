@@ -150,6 +150,10 @@ async def test_proposal_callback_approve(mock_post_client, mock_tg_supabase, moc
         {"id": 101, "scheduled_at": "2026-06-04T10:00:00+00:00"}
     ])
     
+    # Mocking instagram_accounts select for the ownership check (account 1 <-> chat 999)
+    mock_account_select = MagicMock()
+    mock_account_select.execute.return_value = MagicMock(data=[{"id": 1, "telegram_chat_id": "999"}])
+
     def mock_table(name):
         mock_t = MagicMock()
         if name == "content_proposals":
@@ -158,8 +162,10 @@ async def test_proposal_callback_approve(mock_post_client, mock_tg_supabase, moc
         elif name == "posts":
             mock_t.select.return_value.eq.return_value = mock_posts_select
             mock_t.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+        elif name == "instagram_accounts":
+            mock_t.select.return_value.eq.return_value = mock_account_select
         return mock_t
-        
+
     mock_tg_supabase.table.side_effect = mock_table
     
     cb_query = TelegramCallbackQuery(
@@ -204,6 +210,22 @@ async def test_proposal_callback_reject(mock_post_client, mock_tg_supabase):
         )
     )
     
+    # Mocking content_proposals + instagram_accounts for the ownership check (account 1 <-> chat 999)
+    mock_proposal_select = MagicMock()
+    mock_proposal_select.execute.return_value = MagicMock(data=[{"id": proposal_id, "account_id": 1}])
+    mock_account_select = MagicMock()
+    mock_account_select.execute.return_value = MagicMock(data=[{"id": 1, "telegram_chat_id": "999"}])
+
+    def mock_table(name):
+        mock_t = MagicMock()
+        if name == "content_proposals":
+            mock_t.select.return_value.eq.return_value = mock_proposal_select
+        elif name == "instagram_accounts":
+            mock_t.select.return_value.eq.return_value = mock_account_select
+        return mock_t
+
+    mock_tg_supabase.table.side_effect = mock_table
+
     tg_service = TelegramService()
     with patch.object(TelegramService, "_handle_proposal_callback", new_callable=AsyncMock, create=True) as mock_handle_cb:
         await tg_service.handle_callback_query(cb_query)
