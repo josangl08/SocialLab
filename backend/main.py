@@ -1,5 +1,6 @@
 import os
 import sys
+import asyncio
 import logging
 from datetime import datetime
 from fastapi import FastAPI
@@ -30,6 +31,9 @@ from database.supabase_client import get_supabase_client, get_supabase_admin_cli
 from utils.encryption import decrypt_token
 supabase = get_supabase_client()
 admin_supabase = get_supabase_admin_client()
+
+# Límite de concurrencia para la ejecución semanal del agente (rate limits de Gemini/Instagram)
+AGENT_CONCURRENCY_LIMIT = 2
 
 # --- Inicialización de la Aplicación FastAPI ---
 app = FastAPI(
@@ -97,14 +101,30 @@ def sync_all_accounts_metrics():
     except Exception as e:
         logger.error(f"❌ Error en sync_all_accounts_metrics: {e}")
 
+async def _run_agent_for_all_accounts_async(accounts_data):
+    """Ejecuta run_agent para cada cuenta de forma concurrente, acotado por AGENT_CONCURRENCY_LIMIT."""
+    from services.agent_service import run_agent
+
+    semaphore = asyncio.Semaphore(AGENT_CONCURRENCY_LIMIT)
+
+    async def _run_one(account):
+        async with semaphore:
+            try:
+                await asyncio.to_thread(run_agent, account['id'])
+                logger.info(f"✅ Agente ejecutado con éxito para cuenta {account['id']}")
+            except Exception as e:
+                logger.error(f"❌ Error ejecutando agente para cuenta {account['id']}: {e}")
+
+    await asyncio.gather(*(_run_one(account) for account in accounts_data))
+
+
 def run_agent_for_all_accounts():
     """
     Cron job semanal (domingos 22:00) para ejecutar el agente en todas las cuentas.
+    Procesa hasta AGENT_CONCURRENCY_LIMIT cuentas en paralelo.
     """
     logger.info("⏰ Iniciando ejecución automática semanal de agentes...")
     try:
-        from services.agent_service import run_agent
-
         all_accounts = admin_supabase.table('instagram_accounts')\
             .select('id, is_active')\
             .execute()
@@ -114,12 +134,7 @@ def run_agent_for_all_accounts():
             if acc.get('is_active') is not False
         ]
 
-        for account in accounts_data:
-            try:
-                run_agent(account['id'])
-                logger.info(f"✅ Agente ejecutado con éxito para cuenta {account['id']}")
-            except Exception as e:
-                logger.error(f"❌ Error ejecutando agente para cuenta {account['id']}: {e}")
+        asyncio.run(_run_agent_for_all_accounts_async(accounts_data))
     except Exception as e:
         logger.error(f"❌ Error en run_agent_for_all_accounts: {e}")
 
