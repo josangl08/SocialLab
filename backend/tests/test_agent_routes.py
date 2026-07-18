@@ -3,7 +3,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from main import app
 from auth.dependencies import get_current_user, get_user_supabase_client
 from models.schemas import User
@@ -132,16 +132,12 @@ def test_reject_proposal_success(mock_agent_supabase, mock_agent_admin_supabase)
     assert mock_delete_exec.execute.call_count == 2
 
 
-@patch("routes.agent_routes.genai.GenerativeModel")
-def test_regenerate_slot_success(mock_model_cls, mock_agent_supabase, mock_agent_admin_supabase):
+@patch("routes.agent_routes.regenerate_slot_caption", new_callable=AsyncMock)
+def test_regenerate_slot_success(mock_regen_caption, mock_agent_supabase, mock_agent_admin_supabase):
     proposal_id = "prop-123"
     account_id = 456
     
-    mock_model_instance = MagicMock()
-    mock_response = MagicMock()
-    mock_response.text = "New generated caption by Gemini"
-    mock_model_instance.generate_content.return_value = mock_response
-    mock_model_cls.return_value = mock_model_instance
+    mock_regen_caption.return_value = "New generated caption by Gemini"
 
     # 1. Mock content_proposals select response
     mock_proposal_exec = MagicMock()

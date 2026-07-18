@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from typing import Optional
 import httpx
 
-import google.generativeai as genai
+from services.gemini_service import regenerate_slot_caption
 
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import TelegramMessage, TelegramCallbackQuery
@@ -685,10 +685,7 @@ class TelegramService:
         if action == "regen":
             if not post_id:
                 return
-            api_key = os.getenv("GOOGLE_API_KEY", "")
-            if not api_key:
-                return
-            genai.configure(api_key=api_key)
+
             image_id = slot.get('image_id')
             description_context = ""
             if image_id:
@@ -696,16 +693,16 @@ class TelegramService:
                 if va_res.data:
                     description_context = str(va_res.data[0].get('gemini_description', ''))
             theme = slot.get('theme', '')
-            prompt = (
-                f"Generate a new creative Instagram caption about the theme: '{theme}'. "
-                f"Visual context: {description_context or 'inspiring image'}. "
-                f"Tone: authentic and inspiring. End with an engagement question. "
-                f"Include 3-5 relevant hashtags. Only the caption, no explanations."
-            )
+
+            acc_res = supabase.table('instagram_accounts').select('default_language').eq('id', proposal['account_id']).execute()
+            language = acc_res.data[0].get('default_language', 'es') if acc_res.data else 'es'
+
             try:
-                model = genai.GenerativeModel('gemini-2.5-flash')
-                response = model.generate_content(prompt)
-                new_caption = response.text.strip()
+                new_caption = await regenerate_slot_caption(
+                    theme=theme,
+                    visual_context=description_context,
+                    language=language
+                )
             except Exception as e:
                 logger.error(f"Gemini regen failed for slot {slot_index}: {e}")
                 return

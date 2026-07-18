@@ -8,9 +8,8 @@ from supabase import Client
 from datetime import datetime, timezone, timedelta
 import uuid
 import json
-import os
 import logging
-import google.generativeai as genai
+from services.gemini_service import generate_gemini_content, clean_and_parse_json, regenerate_slot_caption
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["Agent"])
@@ -271,15 +270,10 @@ class SuggestTimesRequest(BaseModel):
 
 
 @router.post("/suggest-times")
-def suggest_times(
+async def suggest_times(
     request: SuggestTimesRequest,
     current_user: User = Depends(get_current_user)
 ):
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="GOOGLE_API_KEY no configurado")
-    genai.configure(api_key=api_key)
-
     if request.account_type == "professional":
         timing_context = (
             "Es una cuenta PROFESIONAL/BUSINESS. Considera las ventanas en que la audiencia "
@@ -306,12 +300,8 @@ Devuelve SOLO este JSON: {{"best_times": ["HH:MM", "HH:MM", "HH:MM"]}}
 Horarios en formato 24h, de mayor a menor impacto. Solo el JSON."""
 
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-        return json.loads(text)
+        text = await generate_gemini_content(prompt)
+        return await clean_and_parse_json(text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -324,15 +314,10 @@ class GenerateStrategyRequest(BaseModel):
 
 
 @router.post("/generate-strategy")
-def generate_strategy(
+async def generate_strategy(
     request: GenerateStrategyRequest,
     current_user: User = Depends(get_current_user)
 ):
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="GOOGLE_API_KEY no configurado")
-    genai.configure(api_key=api_key)
-
     referentes_text = ", ".join(f"@{r}" for r in request.referentes) if request.referentes else "Ninguna"
 
     prompt = f"""Eres un experto en estrategia de contenido para Instagram, con conocimiento de los datos de rendimiento de 2026.
@@ -377,12 +362,8 @@ Genera la estrategia completa. Devuelve SOLO este JSON:
 Solo el JSON, sin texto adicional."""
 
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-        return json.loads(text)
+        text = await generate_gemini_content(prompt)
+        return await clean_and_parse_json(text)
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail="La IA devolvió una respuesta inválida")
     except Exception as e:
@@ -408,7 +389,7 @@ def _get_proposal_and_slot(proposal_id: str, slot_index: int, user_id: str, supa
 
 
 @router.post("/proposals/{proposal_id}/slots/{slot_index}/regenerate")
-def regenerate_slot(
+async def regenerate_slot(
     proposal_id: str,
     slot_index: int,
     current_user: User = Depends(get_current_user),
@@ -420,11 +401,6 @@ def regenerate_slot(
     if not post_id:
         raise HTTPException(status_code=400, detail="Este slot no tiene un post asociado")
 
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="GOOGLE_API_KEY no configurado")
-    genai.configure(api_key=api_key)
-
     image_id = slot.get('image_id')
     description_context = ""
     if image_id:
@@ -433,17 +409,15 @@ def regenerate_slot(
             description_context = str(va_res.data[0].get('gemini_description', ''))
 
     theme = slot.get('theme', '')
-    prompt = (
-        f"Genera un nuevo caption creativo para Instagram sobre el tema: '{theme}'. "
-        f"Contexto visual: {description_context or 'imagen inspiradora'}. "
-        f"Tono: auténtico e inspirador. Termina con una pregunta de engagement. "
-        f"Incluye 3-5 hashtags relevantes. Solo el caption, sin explicaciones."
-    )
+    acc_res = admin_supabase.table('instagram_accounts').select('default_language').eq('id', proposal['account_id']).execute()
+    language = acc_res.data[0].get('default_language', 'es') if acc_res.data else 'es'
 
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(prompt)
-        new_caption = response.text.strip()
+        new_caption = await regenerate_slot_caption(
+            theme=theme,
+            visual_context=description_context,
+            language=language
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al regenerar caption: {str(e)}")
 

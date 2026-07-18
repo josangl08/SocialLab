@@ -17,7 +17,7 @@ from supabase import Client
 from services.google_drive_connector import get_drive_connector
 from services.template_selector import get_template_selector
 from services.image_composer import get_image_composer
-from services.caption_generator import generate_caption
+from services.gemini_service import generate_gemini_content
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/content", tags=["Content Generation"])
@@ -288,7 +288,11 @@ async def generate_content(
         # 4. Generar caption con IA
         logger.info(f"🎨 Generando caption - Estilo: {caption_style}, Idioma: {language}")
 
-        caption = generate_caption(caption_prompt)
+        try:
+            caption = await generate_gemini_content(caption_prompt)
+        except Exception as e:
+            logger.error(f"❌ Error generando caption con Gemini: {str(e)}")
+            caption = None
 
         if not caption:
             caption = generate_fallback_caption(metadata)

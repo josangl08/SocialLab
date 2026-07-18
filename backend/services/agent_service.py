@@ -8,7 +8,7 @@ import tempfile
 from datetime import datetime, date, timedelta, time, timezone
 from typing import Optional
 
-import google.generativeai as genai
+from services.gemini_service import generate_gemini_content, clean_and_parse_json, analyze_image_vision
 
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import AgentLog, VisualAnalysis, CalendarSlot, ContentProposal
@@ -96,12 +96,11 @@ Responde SOLO con JSON válido, sin explicaciones ni bloques markdown:
 {{"slots": [{{"day": "Tuesday", "image_index": 0, "post_type": "reel"}}]}}"""
 
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.0-flash')
-        response = model.generate_content(prompt)
-        raw = response.text.strip()
-        raw = re.sub(r'```(?:json)?\n?', '', raw).strip().rstrip('`').strip()
-        data = json.loads(raw)
+        async def _run_ai_schedule():
+            raw = await generate_gemini_content(prompt)
+            return await clean_and_parse_json(raw)
+
+        data = asyncio.run(_run_ai_schedule())
 
         slots = []
         seen_days: set = set()
@@ -362,7 +361,6 @@ def _analyze_images(account_id: str, files: list, account: dict = None, user_id:
         logger.error("GOOGLE_API_KEY not configured")
         return []
 
-    genai.configure(api_key=api_key)
     supabase = get_supabase_admin_client()
 
     from services.google_drive_connector import get_drive_connector
@@ -372,16 +370,6 @@ def _analyze_images(account_id: str, files: list, account: dict = None, user_id:
         "Voz natural, primera persona, tono inspirador, emojis moderados. "
         "Termina con una pregunta de engagement. Usa 3-5 hashtags relevantes."
     )
-
-    vision_prompt = f"""Analiza detalladamente esta imagen. Retorna SOLO un objeto JSON con esta estructura exacta:
-{{
-  "objects": ["lista de objetos o personas principales"],
-  "text_visible": "texto visible en la imagen o cadena vacía",
-  "mood": "uno de: energetic, calm, professional, fun, inspiring, nostalgic",
-  "theme": "tema principal en 2-3 palabras",
-  "raw_description": "descripción detallada en 2-3 frases",
-  "suggested_caption": "caption para Instagram siguiendo estas instrucciones: {strategy_context}"
-}}"""
 
     analyses = []
     for f in files:
@@ -395,17 +383,13 @@ def _analyze_images(account_id: str, files: list, account: dict = None, user_id:
                 logger.warning(f"Could not download Drive file {f['id']}")
                 continue
 
-            uploaded = genai.upload_file(tmp_path, mime_type=f.get('mimeType', 'image/jpeg'))
+            description = asyncio.run(analyze_image_vision(
+                image_path=tmp_path,
+                mime_type=f.get('mimeType', 'image/jpeg'),
+                strategy_context=strategy_context
+            ))
             os.unlink(tmp_path)
             tmp_path = None
-
-            model = genai.GenerativeModel('gemini-2.5-flash')
-            response = model.generate_content([uploaded, vision_prompt])
-
-            text = response.text.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-            description = json.loads(text)
 
             suggested_caption = description.pop('suggested_caption', None)
 
