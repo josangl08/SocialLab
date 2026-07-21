@@ -1,7 +1,7 @@
 import React from 'react';
 import ContentRadarChart from '../charts/ContentRadarChart';
 
-interface PostDetailModalProps {
+interface AnalyticsPostDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   post: {
@@ -23,7 +23,7 @@ interface PostDetailModalProps {
   } | null;
 }
 
-export const PostDetailModal: React.FC<PostDetailModalProps> = ({
+export const AnalyticsPostDetailModal: React.FC<AnalyticsPostDetailModalProps> = ({
   isOpen,
   onClose,
   post
@@ -167,4 +167,4 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
   );
 };
 
-export default PostDetailModal;
+export default AnalyticsPostDetailModal;

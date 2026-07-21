@@ -159,7 +159,7 @@ def publish_post_job(post_id: int) -> None:
 
             if retry_count < max_retries:
                 # Calculate retry time (exponential backoff)
-                # 1st retry: 5 min, 2nd: 15 min, 3rd: 30 min
+                # 1st retry: 5 min, 2nd: 10 min, 3rd: 20 min
                 delay_minutes = 5 * (2 ** retry_count)
                 retry_time = datetime.now(timezone.utc) + timedelta(
                     minutes=delay_minutes

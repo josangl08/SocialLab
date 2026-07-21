@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, test, expect, vi } from 'vitest';
 import KPIStrip from '../components/analytics/cards/KPIStrip';
-import PostDetailModal from '../components/analytics/panels/PostDetailModal';
+import AnalyticsPostDetailModal from '../components/analytics/panels/AnalyticsPostDetailModal';
 import DemographicsChart from '../components/analytics/charts/DemographicsChart';
 
 // Mock Recharts to prevent jsdom layout issues
@@ -53,10 +53,10 @@ describe('KPIStrip Component', () => {
   });
 });
 
-describe('PostDetailModal Component', () => {
+describe('AnalyticsPostDetailModal Component', () => {
   test('does not render when closed', () => {
     const { container } = render(
-      <PostDetailModal isOpen={false} onClose={vi.fn()} post={null} />
+      <AnalyticsPostDetailModal isOpen={false} onClose={vi.fn()} post={null} />
     );
     expect(container.firstChild).toBeNull();
   });
@@ -79,7 +79,7 @@ describe('PostDetailModal Component', () => {
     const handleClose = vi.fn();
 
     render(
-      <PostDetailModal isOpen={true} onClose={handleClose} post={mockPost} />
+      <AnalyticsPostDetailModal isOpen={true} onClose={handleClose} post={mockPost} />
     );
 
     // Verify caption and numerical metrics

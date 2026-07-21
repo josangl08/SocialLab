@@ -19,7 +19,7 @@ import { DemographicsChart } from './charts/DemographicsChart';
 import { ActivityHeatmap } from './charts/ActivityHeatmap';
 import { TopLocations } from './charts/TopLocations';
 import { KPIStrip } from './cards/KPIStrip';
-import { PostDetailModal } from './panels/PostDetailModal';
+import { AnalyticsPostDetailModal } from './panels/AnalyticsPostDetailModal';
 import { DraftOptimizerPanel } from './panels/DraftOptimizerPanel';
 
 interface FollowerGrowthData {
@@ -551,7 +551,7 @@ const Analytics: React.FC = () => {
       />
 
       {/* ── Post Detail Modal ───────────────────────────── */}
-      <PostDetailModal
+      <AnalyticsPostDetailModal
         isOpen={selectedPost !== null}
         onClose={() => setSelectedPost(null)}
         post={selectedPost ? {
