@@ -44,8 +44,34 @@ def _ai_schedule(analyses: list, account: dict, min_posts: int, max_posts: int, 
     tone = account.get('default_tone', 'auténtico')
     preferred_days = account.get('preferred_days') or []
     preferred_hint = f"Días preferidos por la cuenta: {', '.join(preferred_days)}." if preferred_days else ""
-    strategy = account.get('ai_strategy') or ''
-    strategy_hint = f"Estrategia de contenido: {strategy}" if strategy else ""
+
+    posts_per_week = account.get('posts_per_week')
+    posts_per_week_val = None
+    if posts_per_week is not None:
+        try:
+            val = int(posts_per_week)
+            if min_posts <= val <= max_posts:
+                posts_per_week_val = val
+        except (ValueError, TypeError):
+            pass
+
+    if posts_per_week_val is not None:
+        target_str = f"exactamente {posts_per_week_val}"
+        posts_per_week_hint = f"Publicaciones por semana objetivo: {posts_per_week_val}."
+    else:
+        target_str = f"entre {min_posts} y {max_posts}"
+        posts_per_week_hint = ""
+
+    scheduling_mode = account.get('scheduling_mode')
+    if scheduling_mode == 'fixed':
+        scheduling_hint = "Modo de programación: fijo (mantén una cadencia y días consistentes cada semana)."
+        scheduling_inst = "- Mantén los días y el horario con una cadencia fija y consistente semana a semana."
+    elif scheduling_mode == 'flexible':
+        scheduling_hint = "Modo de programación: flexible (adapta los días según el contenido y el rendimiento esperado)."
+        scheduling_inst = "- Adapta la distribución de días de forma flexible según el contenido y rendimiento esperado."
+    else:
+        scheduling_hint = ""
+        scheduling_inst = ""
 
     raw_mix = account.get('content_type_mix') or {}
     if not any(isinstance(v, int) and v > 0 for v in raw_mix.values()):
@@ -69,6 +95,31 @@ def _ai_schedule(analyses: list, account: dict, min_posts: int, max_posts: int, 
         "weekly": "una vez por semana",
     }.get(account.get('posting_frequency', 'few_times_week'), f"{min_posts} a {max_posts} veces por semana")
 
+    profile_hints = []
+    if preferred_hint:
+        profile_hints.append(preferred_hint)
+    if posts_per_week_hint:
+        profile_hints.append(posts_per_week_hint)
+    if scheduling_hint:
+        profile_hints.append(scheduling_hint)
+    if campaign_context:
+        profile_hints.append(campaign_context)
+
+    extra_profile = ("\n" + "\n".join(profile_hints)) if profile_hints else ""
+
+    instructions = [
+        f"- Elige {target_str} imágenes",
+        "- Asigna un día distinto de la semana a cada una",
+        "- Asigna el post_type más adecuado: reel, carousel, post, o story",
+        "- Reels rinden mejor martes, miércoles o jueves",
+        "- Carousels rinden mejor lunes o miércoles",
+        "- Stories funcionan cualquier día",
+        "- No repitas días"
+    ]
+    if scheduling_inst:
+        instructions.append(scheduling_inst)
+    instructions_text = "\n".join(instructions)
+
     prompt = f"""Eres un social media planner experto en Instagram. Crea un calendario semanal.
 
 PERFIL DE CUENTA:
@@ -76,22 +127,13 @@ PERFIL DE CUENTA:
 - Audiencia: {audience}
 - Tono: {tone}
 - Frecuencia: {freq_text}
-- Mix preferido: {mix_desc}
-{preferred_hint}
-{strategy_hint}
-{campaign_context}
+- Mix preferido: {mix_desc}{extra_profile}
 
 IMÁGENES DISPONIBLES ({len(analyses)} total):
 {chr(10).join(image_list)}
 
 INSTRUCCIONES:
-- Elige entre {min_posts} y {max_posts} imágenes
-- Asigna un día distinto de la semana a cada una
-- Asigna el post_type más adecuado: reel, carousel, post, o story
-- Reels rinden mejor martes, miércoles o jueves
-- Carousels rinden mejor lunes o miércoles
-- Stories funcionan cualquier día
-- No repitas días
+{instructions_text}
 
 Responde SOLO con JSON válido, sin explicaciones ni bloques markdown:
 {{"slots": [{{"day": "Tuesday", "image_index": 0, "post_type": "reel"}}]}}"""
@@ -292,7 +334,22 @@ def _build_strategy_context(account: dict, campaign_context: str = '') -> str:
     style_guide = account.get('style_guide') or ''
     target_audience = account.get('target_audience') or ''
     hashtag_strategy = account.get('hashtag_strategy', 'minimal')
-    hashtag_range = {'minimal': '3-5', 'moderate': '3-5', 'maximum': '3-5'}.get(hashtag_strategy, '3-5')
+    hashtag_range = {'minimal': '1-3', 'moderate': '4-7', 'maximum': '8-12'}.get(hashtag_strategy, '1-3')
+
+    sector = account.get('sector') or ''
+    purpose = account.get('purpose') or ''
+
+    pillars_raw = account.get('content_pillars') or []
+    if isinstance(pillars_raw, list):
+        content_pillars = ', '.join(str(p) for p in pillars_raw if p)
+    else:
+        content_pillars = str(pillars_raw).strip()
+
+    ref_raw = account.get('reference_accounts') or []
+    if isinstance(ref_raw, list):
+        reference_accounts = ', '.join(str(r) for r in ref_raw if r)
+    else:
+        reference_accounts = str(ref_raw).strip()
 
     if account_type == 'professional':
         base = (
@@ -313,6 +370,20 @@ def _build_strategy_context(account: dict, campaign_context: str = '') -> str:
             f"Usa {hashtag_range} hashtags de nicho + community + trending. "
             f"Guía de estilo: {style_guide or 'cercano e inspirador'}."
         )
+
+    extra_parts = []
+    if sector:
+        extra_parts.append(f"Sector: {sector}.")
+    if purpose:
+        extra_parts.append(f"Objetivo: {purpose}.")
+    if content_pillars:
+        extra_parts.append(f"Pilares de contenido: {content_pillars}.")
+    if reference_accounts:
+        extra_parts.append(f"Cuentas de referencia: {reference_accounts}.")
+
+    if extra_parts:
+        base = f"{base} {' '.join(extra_parts)}"
+
     return f"{base} {campaign_context}" if campaign_context else base
 
 

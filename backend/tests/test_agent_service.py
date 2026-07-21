@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
-from services.agent_service import _analyze_images, _build_calendar, _create_drafts, _build_strategy_context
+from services.agent_service import _analyze_images, _build_calendar, _create_drafts, _build_strategy_context, _ai_schedule
 from models.schemas import VisualAnalysis, CalendarSlot, ContentProposal
 from services.telegram_service import TelegramService
 from models.schemas import TelegramCallbackQuery, TelegramUser, TelegramMessage, TelegramChat
@@ -292,3 +292,59 @@ def test_build_calendar_professional_default_mix():
     slots = _build_calendar(analyses, account)
     post_types = [slot.post_type for slot in slots]
     assert post_types.count('carousel') >= post_types.count('reel')
+
+
+def test_build_strategy_context_new_fields():
+    account = {
+        'account_type': 'personal',
+        'sector': 'Nutrición y Deporte',
+        'purpose': 'Captación de clientes',
+        'content_pillars': ['Rutinas', 'Recetas saludables'],
+        'reference_accounts': ['@fitgym', '@healthy_food'],
+        'hashtag_strategy': 'moderate',
+    }
+    context = _build_strategy_context(account)
+    assert "Sector: Nutrición y Deporte." in context
+    assert "Objetivo: Captación de clientes." in context
+    assert "Pilares de contenido: Rutinas, Recetas saludables." in context
+    assert "Cuentas de referencia: @fitgym, @healthy_food." in context
+    assert "4-7 hashtags" in context
+
+
+def test_build_strategy_context_hashtag_strategy_mapping():
+    acc_minimal = {'account_type': 'personal', 'hashtag_strategy': 'minimal'}
+    acc_moderate = {'account_type': 'personal', 'hashtag_strategy': 'moderate'}
+    acc_maximum = {'account_type': 'personal', 'hashtag_strategy': 'maximum'}
+
+    assert "1-3 hashtags" in _build_strategy_context(acc_minimal)
+    assert "4-7 hashtags" in _build_strategy_context(acc_moderate)
+    assert "8-12 hashtags" in _build_strategy_context(acc_maximum)
+
+
+@patch("services.agent_service.GOOGLE_API_KEY", "mock-key")
+@patch("services.agent_service.generate_gemini_content")
+def test_ai_schedule_posts_per_week_and_scheduling_mode(mock_generate_gemini):
+    mock_generate_gemini.return_value = '{"slots": [{"day": "Monday", "image_index": 0, "post_type": "post"}]}'
+
+    analyses = [
+        VisualAnalysis(drive_file_id="file-0", gemini_description={"theme": "fitness"}, suggested_caption="cap")
+    ]
+    account = {
+        'account_type': 'personal',
+        'posting_frequency': 'few_times_week',
+        'posts_per_week': 4,
+        'scheduling_mode': 'fixed',
+    }
+
+    slots = _ai_schedule(analyses, account, 3, 5)
+
+    assert slots is not None
+    assert len(slots) == 1
+    mock_generate_gemini.assert_called_once()
+    prompt = mock_generate_gemini.call_args[0][0]
+
+    assert "Publicaciones por semana objetivo: 4" in prompt
+    assert "exactamente 4" in prompt
+    assert "Modo de programación: fijo" in prompt
+    assert "cadencia fija y consistente" in prompt
+
