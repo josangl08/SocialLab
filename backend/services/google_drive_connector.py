@@ -65,6 +65,20 @@ class GoogleDriveConnector:
             logger.error(f"Error descargando archivo: {str(e)}")
             return False
 
+    def download_file_bytes(self, file_id: str) -> Optional[bytes]:
+        try:
+            request = self.service.files().get_media(fileId=file_id)
+            fh = io.BytesIO()
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+            return fh.getvalue()
+        except Exception as e:
+            logger.error(f"Error descargando archivo en memoria: {str(e)}")
+            return None
+
+
     def download_metadata_json(
         self,
         folder_id: str,

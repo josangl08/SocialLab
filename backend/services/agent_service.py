@@ -1,10 +1,8 @@
 import asyncio
-import os
 import re
 import json
 import uuid
 import logging
-import tempfile
 from datetime import datetime, date, timedelta, time, timezone
 from typing import Optional
 
@@ -481,28 +479,39 @@ def _analyze_images(account_id: str, files: list, account: dict = None, user_id:
         "Termina con una pregunta de engagement. Usa 3-5 hashtags relevantes."
     )
 
+    semaphore = asyncio.Semaphore(3)
+
+    async def _analyze_one(f):
+        async with semaphore:
+            try:
+                logger.info(f"Processing file: {f['name']} ({f['id']})")
+                image_bytes = await asyncio.to_thread(connector.download_file_bytes, f['id'])
+                if image_bytes is None:
+                    logger.warning(f"Could not download Drive file {f['id']}")
+                    return None
+
+                description = await analyze_image_vision(
+                    image_bytes=image_bytes,
+                    mime_type=f.get('mimeType', 'image/jpeg'),
+                    strategy_context=strategy_context
+                )
+                return f, description
+            except Exception as e:
+                logger.error(f"Error analyzing file {f.get('id')}: {e}")
+                return None
+
+    async def _run_analysis():
+        return await asyncio.gather(*(_analyze_one(f) for f in files))
+
+    results = asyncio.run(_run_analysis())
+
     analyses = []
-    for f in files:
-        tmp_path = None
+    for result in results:
+        if result is None:
+            continue
+        f, description = result
+        suggested_caption = description.pop('suggested_caption', None)
         try:
-            logger.info(f"Processing file: {f['name']} ({f['id']})")
-            with tempfile.NamedTemporaryFile(suffix=f"_{f['name']}", delete=False) as tmp:
-                tmp_path = tmp.name
-
-            if not connector.download_file(f['id'], tmp_path):
-                logger.warning(f"Could not download Drive file {f['id']}")
-                continue
-
-            description = asyncio.run(analyze_image_vision(
-                image_path=tmp_path,
-                mime_type=f.get('mimeType', 'image/jpeg'),
-                strategy_context=strategy_context
-            ))
-            os.unlink(tmp_path)
-            tmp_path = None
-
-            suggested_caption = description.pop('suggested_caption', None)
-
             insert_res = supabase.table('visual_analyses').insert({
                 'account_id': int(account_id),
                 'drive_file_id': f['id'],
@@ -518,15 +527,10 @@ def _analyze_images(account_id: str, files: list, account: dict = None, user_id:
                     suggested_caption=suggested_caption
                 ))
         except Exception as e:
-            logger.error(f"Error analyzing file {f.get('id')}: {e}")
-        finally:
-            if tmp_path:
-                try:
-                    os.unlink(tmp_path)
-                except Exception:
-                    pass
+            logger.error(f"Error saving analysis for file {f.get('id')}: {e}")
 
     return analyses
+
 
 
 def _build_calendar(analyses: list, account: dict, campaign_context: str = '', analytics_summary: Optional[dict] = None) -> list:

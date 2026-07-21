@@ -27,19 +27,26 @@ def mock_scheduler():
         mock_sched_cls.return_value = mock_sched_inst
         yield mock_sched_inst
 
-@patch("google.generativeai.GenerativeModel")
-@patch("google.generativeai.upload_file", create=True)
-def test_analyze_images(mock_upload_file, mock_gen_model, mock_supabase):
-    # Mock Gemini response
-    mock_model_instance = MagicMock()
-    mock_response = MagicMock()
-    mock_response.text = '{"objects": ["player", "stadium"], "text_visible": "", "mood": "energetic", "theme": "match highlight", "raw_description": "A football player celebrating a goal in a stadium", "suggested_caption": "¡Qué gran partido! ⚽🔥"}'
-    mock_model_instance.generate_content.return_value = mock_response
-    mock_gen_model.return_value = mock_model_instance
-    
-    # Mock drive file upload
-    mock_upload_file.return_value = MagicMock(name="uploaded_file")
-    
+@patch("services.agent_service.analyze_image_vision")
+@patch("services.google_drive_connector.get_drive_connector")
+def test_analyze_images(mock_get_drive_connector, mock_analyze_image_vision, mock_supabase):
+    # Mock Gemini response/image vision
+    async def mock_vision_call(image_bytes, mime_type, strategy_context=None):
+        return {
+            "objects": ["mock_obj"],
+            "text_visible": "",
+            "mood": "inspiring",
+            "theme": "mock_theme",
+            "raw_description": f"desc for {image_bytes.decode()}",
+            "suggested_caption": "mock caption"
+        }
+    mock_analyze_image_vision.side_effect = mock_vision_call
+
+    # Mock drive connector
+    mock_connector = MagicMock()
+    mock_connector.download_file_bytes.side_effect = lambda file_id: f"bytes_for_{file_id}".encode()
+    mock_get_drive_connector.return_value = mock_connector
+
     # Mock supabase insert execution
     mock_execute = MagicMock()
     mock_execute.execute.return_value = MagicMock(data=[{
@@ -48,31 +55,58 @@ def test_analyze_images(mock_upload_file, mock_gen_model, mock_supabase):
         "drive_file_id": "file-123",
         "file_name": "image.jpg",
         "gemini_description": {
-            "objects": ["player", "stadium"],
+            "objects": ["mock_obj"],
             "text_visible": "",
-            "mood": "energetic",
-            "theme": "match highlight",
-            "raw_description": "A football player celebrating a goal in a stadium"
+            "mood": "inspiring",
+            "theme": "mock_theme",
+            "raw_description": "desc for bytes_for_file-1"
         },
-        "suggested_caption": "¡Qué gran partido! ⚽🔥"
+        "suggested_caption": "mock caption"
     }])
     mock_supabase.table.return_value.insert.return_value = mock_execute
+
+    files = [
+        {"id": "file-1", "name": "image1.jpg", "mimeType": "image/jpeg"},
+        {"id": "file-2", "name": "image2.png", "mimeType": "image/png"}
+    ]
+
+    account = {
+        "id": 123,
+        "account_type": "personal",
+        "default_tone": "energetic"
+    }
+
+    analyses = _analyze_images(
+        account_id="123",
+        files=files,
+        account=account,
+        user_id="user-456",
+        campaign_context="campaign info"
+    )
+
+    assert len(analyses) == 2
+    assert analyses[0].drive_file_id == "file-1"
+    assert analyses[1].drive_file_id == "file-2"
+    assert analyses[0].suggested_caption == "mock caption"
+
+    # Verify download_file_bytes was called for each file
+    assert mock_connector.download_file_bytes.call_count == 2
+    mock_connector.download_file_bytes.assert_any_call("file-1")
+    mock_connector.download_file_bytes.assert_any_call("file-2")
+
+    # Verify analyze_image_vision was called with the downloaded bytes and correct parameters
+    call_args_list = mock_analyze_image_vision.call_args_list
+    assert len(call_args_list) == 2
     
-    files = [{"id": "file-123", "name": "image.jpg", "mimeType": "image/jpeg", "webContentLink": "https://drive.com/file-123"}]
-    # Note: Since the real implementation is a stub, in our test we patch it or verify it returns a list
-    with patch("services.agent_service._analyze_images") as mock_analyze:
-        mock_analyze.return_value = [VisualAnalysis(
-            drive_file_id="file-123",
-            gemini_description={"objects": ["player", "stadium"]},
-            suggested_caption="¡Qué gran partido! ⚽🔥"
-        )]
-        analyses = mock_analyze("account-123", files)
-    
-    assert len(analyses) == 1
-    assert isinstance(analyses[0], VisualAnalysis)
-    assert analyses[0].drive_file_id == "file-123"
-    assert "player" in analyses[0].gemini_description.get("objects", [])
-    assert analyses[0].suggested_caption == "¡Qué gran partido! ⚽🔥"
+    args_data = []
+    for args, kwargs in call_args_list:
+        img_bytes = kwargs.get('image_bytes') or args[0]
+        m_type = kwargs.get('mime_type') or args[1]
+        args_data.append((img_bytes, m_type))
+        
+    assert (b"bytes_for_file-1", "image/jpeg") in args_data
+    assert (b"bytes_for_file-2", "image/png") in args_data
+
 
 def test_build_calendar():
     analyses = [

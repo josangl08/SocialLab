@@ -1,4 +1,3 @@
-import os
 import json
 import tempfile
 import logging
@@ -77,14 +76,9 @@ async def analyze_image(
     objects, mood, theme, raw description, and a suggested caption.
     """
     content = await file.read()
-    tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=f"_{file.filename}", delete=False) as tmp:
-            tmp.write(content)
-            tmp_path = tmp.name
-
         result = await analyze_image_vision(
-            image_path=tmp_path,
+            image_bytes=content,
             mime_type=file.content_type or "image/jpeg"
         )
         return result
@@ -95,9 +89,4 @@ async def analyze_image(
     except Exception as e:
         logger.error(f"Error en analyze-image: {e}")
         raise HTTPException(status_code=500, detail=f"Error al analizar imagen: {str(e)}")
-    finally:
-        if tmp_path:
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
+

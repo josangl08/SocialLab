@@ -6,6 +6,7 @@ from services.gemini_service import (
     clean_and_parse_json,
     generate_gemini_content,
     regenerate_slot_caption,
+    analyze_image_vision,
 )
 
 @pytest.mark.asyncio
@@ -84,3 +85,50 @@ async def test_regenerate_slot_caption_languages(mock_generate):
     assert result_en == "Caption in English"
     args, _ = mock_generate.call_args
     assert "Generate a new creative Instagram caption" in args[0]
+
+@pytest.mark.asyncio
+@patch("google.generativeai.GenerativeModel")
+@patch("google.generativeai.upload_file")
+@patch("services.gemini_service._configure_genai")
+async def test_analyze_image_vision_success(mock_configure, mock_upload_file, mock_gen_model):
+    mock_model_instance = MagicMock()
+    mock_response = MagicMock()
+    mock_response.text = '{"objects": ["logo"], "text_visible": "SocialLab", "mood": "professional", "theme": "marketing", "raw_description": "A nice logo.", "suggested_caption": "Check this out!"}'
+    mock_model_instance.generate_content.return_value = mock_response
+    mock_gen_model.return_value = mock_model_instance
+
+    image_bytes = b"fake_png_data"
+    mime_type = "image/png"
+    strategy = "brand colors, modern look"
+
+    result = await analyze_image_vision(
+        image_bytes=image_bytes,
+        mime_type=mime_type,
+        strategy_context=strategy
+    )
+
+    # Verify return dict
+    assert result["mood"] == "professional"
+    assert result["theme"] == "marketing"
+    assert result["suggested_caption"] == "Check this out!"
+
+    # Verify upload_file was NOT called
+    mock_upload_file.assert_not_called()
+
+    # Verify GenerativeModel was instantiated with gemini-2.5-flash
+    mock_gen_model.assert_called_once_with("gemini-2.5-flash")
+
+    # Verify generate_content was called with the inline data and the prompt containing the strategy
+    assert mock_model_instance.generate_content.called
+    call_args = mock_model_instance.generate_content.call_args[0][0]
+    
+    assert isinstance(call_args, list)
+    assert len(call_args) == 2
+    
+    inline_data = call_args[0]
+    assert inline_data == {"mime_type": mime_type, "data": image_bytes}
+    
+    prompt = call_args[1]
+    assert "Analiza detalladamente" in prompt
+    assert strategy in prompt
+

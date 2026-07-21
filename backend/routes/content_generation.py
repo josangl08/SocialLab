@@ -200,18 +200,12 @@ async def generate_content(
 
                 logger.info(f"✅ Gráfico '{main_graphic_name}' encontrado con ID: {graphic_file['id']}")
 
-                import tempfile
-                import os as os_temp
-
-                with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                    tmp_path = tmp.name
-
-                drive.download_file(graphic_file['id'], tmp_path)
-
-                with open(tmp_path, 'rb') as f:
-                    graphic_image_bytes = f.read()
-
-                os_temp.unlink(tmp_path)
+                graphic_image_bytes = drive.download_file_bytes(graphic_file['id'])
+                if graphic_image_bytes is None:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"No se pudo descargar el gráfico '{main_graphic_name}' desde Drive"
+                    )
 
                 logger.info(f"✅ Gráfico descargado: {main_graphic_name}")
 

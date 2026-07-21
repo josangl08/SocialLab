@@ -71,22 +71,21 @@ async def generate_gemini_content(
         raise last_exception
     raise Exception("No se especificaron modelos para generar contenido.")
 
-def _sync_analyze_image(image_path: str, mime_type: str, prompt: str) -> str:
+def _sync_analyze_image(image_bytes: bytes, mime_type: str, prompt: str) -> str:
     _configure_genai()
-    uploaded = genai.upload_file(image_path, mime_type=mime_type)
     model = genai.GenerativeModel('gemini-2.5-flash')
-    response = model.generate_content([uploaded, prompt])
+    response = model.generate_content([{"mime_type": mime_type, "data": image_bytes}, prompt])
     if not response or not response.text:
         raise Exception("El modelo no pudo generar una respuesta válida para la imagen.")
     return response.text.strip()
 
 async def analyze_image_vision(
-    image_path: str,
+    image_bytes: bytes,
     mime_type: str,
     strategy_context: Optional[str] = None,
 ) -> dict:
     """
-    Sube el archivo con genai.upload_file, usa el prompt estructurado unificado y retorna el dict ya parseado.
+    Envía la imagen como inline data (sin genai.upload_file), usa el prompt estructurado unificado y retorna el dict ya parseado.
     """
     strategy_part = f"siguiendo estas instrucciones: {strategy_context}" if strategy_context else "sugerido para Instagram (1-2 frases con hashtags relevantes)"
     prompt = f"""Analiza detalladamente esta imagen. Retorna SOLO un objeto JSON con esta estructura exacta:
@@ -99,8 +98,9 @@ async def analyze_image_vision(
   "suggested_caption": "caption {strategy_part}"
 }}"""
 
-    text = await asyncio.to_thread(_sync_analyze_image, image_path, mime_type, prompt)
+    text = await asyncio.to_thread(_sync_analyze_image, image_bytes, mime_type, prompt)
     return await clean_and_parse_json(text)
+
 
 async def regenerate_slot_caption(
     theme: str,
