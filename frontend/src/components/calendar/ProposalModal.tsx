@@ -1,23 +1,8 @@
 import React, { useState } from 'react';
 import { Modal, Button, Badge, Spinner, Alert } from 'react-bootstrap';
 import { useAuth } from '../../context/AuthContext';
-
-export interface CalendarSlot {
-  day: string;
-  post_id?: number;
-  image_id?: string;
-  theme: string;
-  caption: string;
-  post_type?: string;
-}
-
-export interface ContentProposal {
-  id: string;
-  account_id: string;
-  week_start: string;
-  slots: CalendarSlot[];
-  status: 'pending_approval' | 'approved' | 'rejected';
-}
+import { apiClient, ApiError } from '../../api/client';
+import type { ContentProposal } from '../../types';
 
 interface ProposalModalProps {
   show: boolean;
@@ -50,23 +35,13 @@ const ProposalModal: React.FC<ProposalModalProps> = ({
     setError(null);
 
     try {
-      const response = await fetch(`http://localhost:8000/api/agent/proposals/${proposal.id}/${action}`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        onActionSuccess(proposal.id, action === 'approve' ? 'approved' : 'rejected');
-        onHide();
-      } else {
-        const data = await response.json();
-        setError(`Error al procesar la propuesta: ${data.detail || 'Error desconocido'}`);
-      }
-    } catch (err: any) {
-      setError(`Error de red o servidor: ${err.message}`);
+      await apiClient.post(`/api/agent/proposals/${proposal.id}/${action}`);
+      onActionSuccess(proposal.id, action === 'approve' ? 'approved' : 'rejected');
+      onHide();
+    } catch (err) {
+      setError(err instanceof ApiError
+        ? `Error al procesar la propuesta: ${err.detail}`
+        : 'Error de red o servidor');
     } finally {
       setLoading(false);
     }

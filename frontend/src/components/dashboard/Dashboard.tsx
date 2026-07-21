@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import 'bootstrap-icons/font/bootstrap-icons.css';
+import { apiClient } from '../../api/client';
 import './Dashboard.css';
 
 import { KPICard } from '../analytics/cards/KPICard';
@@ -108,31 +109,27 @@ const Dashboard: React.FC = () => {
     if (!token) return { connected: false, accountId: null };
 
     try {
-      const response = await fetch('http://localhost:8000/instagram/status', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const accountList = await apiClient.get<Array<{
+        id: number; username: string | null; account_name: string | null;
+        profile_picture_url: string | null; connected: boolean; expired: boolean;
+      }>>('/instagram/status');
+      setAccounts(accountList);
 
-      if (response.ok) {
-        const accountList = await response.json();
-        setAccounts(accountList);
+      const connectedAccounts = accountList.filter((a) => a.connected);
+      const isConnected = connectedAccounts.length > 0;
+      setInstagramConnected(isConnected);
 
-        const connectedAccounts = accountList.filter((a: any) => a.connected);
-        const isConnected = connectedAccounts.length > 0;
-        setInstagramConnected(isConnected);
-
-        const resolvedAccountId = isConnected ? connectedAccounts[0].id : null;
-        if (resolvedAccountId !== null) {
-          setInstagramAccountId(resolvedAccountId);
-        }
-
-        const expiredAccounts = accountList.filter((a: any) => a.expired);
-        if (expiredAccounts.length > 0) {
-          alert('Uno o más tokens de Instagram han expirado. Por favor vuelve a conectar las cuentas afectadas.');
-        }
-
-        return { connected: isConnected, accountId: resolvedAccountId };
+      const resolvedAccountId = isConnected ? connectedAccounts[0].id : null;
+      if (resolvedAccountId !== null) {
+        setInstagramAccountId(resolvedAccountId);
       }
-      return { connected: false, accountId: null };
+
+      const expiredAccounts = accountList.filter((a) => a.expired);
+      if (expiredAccounts.length > 0) {
+        alert('Uno o más tokens de Instagram han expirado. Por favor vuelve a conectar las cuentas afectadas.');
+      }
+
+      return { connected: isConnected, accountId: resolvedAccountId };
     } catch (error) {
       console.error('Error al verificar estado de Instagram:', error);
       return { connected: false, accountId: null };
@@ -152,12 +149,10 @@ const Dashboard: React.FC = () => {
       if (connected) {
         const effectiveAccountId = resolvedAccountId !== undefined ? resolvedAccountId : instagramAccountId;
         const accountParam = effectiveAccountId ? `&instagram_account_id=${effectiveAccountId}` : '';
-        const instagramResponse = await fetch(`http://localhost:8000/api/analytics/overview?days=3650${accountParam}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-
-        if (instagramResponse.ok) {
-          const data = await instagramResponse.json();
+        try {
+          const data = await apiClient.get<{ success: boolean; data: any; last_sync_at: string | null }>(
+            `/api/analytics/overview?days=3650${accountParam}`
+          );
 
           if (data.success && data.data) {
             setStats({
@@ -176,22 +171,18 @@ const Dashboard: React.FC = () => {
             setBestTimes(data.data.best_posting_times || []);
             setBestTimesByWeekday(data.data.best_times_by_weekday || {});
           }
-        } else {
-          console.error('Error cargando analytics de Instagram:', instagramResponse.status);
+        } catch (error) {
+          console.error('Error cargando analytics de Instagram:', error);
         }
       }
 
-      const postsResponse = await fetch('http://localhost:8000/api/posts', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (postsResponse.ok) {
-        const posts = await postsResponse.json();
+      try {
+        const posts = await apiClient.get<ScheduledPost[]>('/api/posts');
         const upcoming = (posts || [])
-          .filter((p: any) => p.status === 'scheduled')
+          .filter((p) => p.status === 'scheduled')
           .slice(0, 5);
         setScheduledPosts(upcoming);
-      } else {
+      } catch {
         console.error('Error cargando posts');
       }
     } catch (error) {
@@ -212,28 +203,22 @@ const Dashboard: React.FC = () => {
     setSyncing(true);
     try {
       const syncParam = instagramAccountId ? `?instagram_account_id=${instagramAccountId}` : '';
-      const postsResponse = await fetch(`http://localhost:8000/instagram/sync${syncParam}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (!postsResponse.ok) {
+      try {
+        await apiClient.get(`/instagram/sync${syncParam}`);
+      } catch {
         console.error('Error al sincronizar posts de Instagram');
         setLastSync(new Date());
         return;
       }
 
-      const metricsResponse = await fetch(`http://localhost:8000/api/analytics/sync/${instagramAccountId}`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (metricsResponse.ok) {
+      try {
+        await apiClient.post(`/api/analytics/sync/${instagramAccountId}`);
         setLastSync(new Date());
         setSyncCompleted(0);
         setTimeout(() => {
           fetchDashboardStats(true);
         }, 2000);
-      } else {
+      } catch {
         console.error('Error al sincronizar métricas de Instagram');
         setLastSync(new Date());
       }
@@ -272,7 +257,7 @@ const Dashboard: React.FC = () => {
       return;
     }
     try {
-      window.location.href = `http://localhost:8000/instagram/login?token=${token}`;
+      window.location.href = apiClient.getUrl(`/instagram/login?token=${token}`);
     } catch (error) {
       console.error('Error en handleConnectInstagram:', error);
       alert('Ocurrió un error al intentar conectar con Instagram.');

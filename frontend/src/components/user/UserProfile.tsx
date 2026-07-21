@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext'; // Ruta corregida
 import { Link } from 'react-router-dom';
+import { apiClient, ApiError } from '../../api/client';
 import './UserProfile.css'; // Importar el archivo CSS
 
 interface User {
@@ -24,23 +25,12 @@ const UserProfile: React.FC = () => {
       }
 
       try {
-        const response = await fetch('http://localhost:8000/users/me', {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (response.ok) {
-          const data: User = await response.json();
-          setUser(data);
-        } else {
-          const errorData = await response.json();
-          setError('Error al cargar el perfil: ' + (errorData.detail || 'Error desconocido'));
-        }
+        const data = await apiClient.get<User>('/users/me');
+        setUser(data);
       } catch (err) {
-        setError('Error de red o servidor: ' + err.message);
+        setError(err instanceof ApiError
+          ? 'Error al cargar el perfil: ' + err.detail
+          : 'Error de red o servidor');
         console.error('Error de red o servidor:', err);
       } finally {
         setLoading(false);

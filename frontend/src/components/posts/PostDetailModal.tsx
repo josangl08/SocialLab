@@ -1,20 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { apiClient, ApiError } from '../../api/client';
+import type { Post } from '../../types';
 import './PostDetailModal.css';
-
-interface Post {
-  id: number;
-  user_id: string;
-  content: string;
-  media_url: string | null;
-  post_type: string;
-  status: string;
-  scheduled_at: string | null;
-  created_at: string;
-  publication_date?: string | null;
-  drive_file_id?: string | null;
-  is_ai_generated?: boolean | null;
-}
 
 interface PostDetailModalProps {
   show: boolean;
@@ -93,21 +81,11 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
         formData.append('scheduled_at', post.scheduled_at);
       }
 
-      const res = await fetch(`http://localhost:8000/api/posts/${post.id}`, {
-        method: 'PUT',
-        headers: { 'Authorization': `Bearer ${token}` },
-        body: formData,
-      });
-
-      if (res.ok) {
-        onActionSuccess?.();
-        onHide();
-      } else {
-        const err = await res.json();
-        setActionError(err.detail ?? 'Error al actualizar el estado');
-      }
-    } catch {
-      setActionError('Error de conexión');
+      await apiClient.putForm(`/api/posts/${post.id}`, formData);
+      onActionSuccess?.();
+      onHide();
+    } catch (error) {
+      setActionError(error instanceof ApiError ? error.detail : 'Error de conexión');
     } finally {
       setActionLoading(false);
     }
@@ -118,20 +96,11 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
     setActionLoading(true);
     setActionError('');
     try {
-      const res = await fetch(`http://localhost:8000/api/posts/${post.id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (res.ok) {
-        onActionSuccess?.();
-        onHide();
-      } else {
-        const err = await res.json();
-        setActionError(err.detail ?? 'Error al eliminar');
-        setActionStep('idle');
-      }
-    } catch {
-      setActionError('Error de conexión');
+      await apiClient.delete(`/api/posts/${post.id}`);
+      onActionSuccess?.();
+      onHide();
+    } catch (error) {
+      setActionError(error instanceof ApiError ? error.detail : 'Error de conexión');
       setActionStep('idle');
     } finally {
       setActionLoading(false);
@@ -382,7 +351,7 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
             ) : null
           ) : post.drive_file_id ? (
             <img
-              src={`http://localhost:8000/api/drive/files/${post.drive_file_id}/image?token=${token}`}
+              src={apiClient.getUrl(`/api/drive/files/${post.drive_file_id}/image?token=${token}`)}
               alt="publicación"
               className="pdm-media-img"
               onError={(e) => {

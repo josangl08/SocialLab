@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { apiClient } from '../../api/client';
+import type { ContentProposal } from '../../types';
 
 interface AgentStatus {
   last_run_at: string | null;
@@ -22,20 +24,15 @@ export const AgentStatusCard: React.FC<AgentStatusCardProps> = ({ accountId }) =
       if (!token) return;
 
       try {
-        const res = await fetch(`http://localhost:8000/api/agent/proposals?account_id=${accountId}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const proposals = await res.json();
-          if (proposals.length > 0) {
-            const latest = proposals[0];
-            setStatus({
-              last_run_at: latest.created_at || new Date().toISOString(),
-              images_scanned: latest.slots?.length || 0,
-              images_analyzed: latest.slots?.length || 0,
-              posts_drafted: latest.slots?.length || 0
-            });
-          }
+        const proposals = await apiClient.get<ContentProposal[]>(`/api/agent/proposals?account_id=${accountId}`);
+        if (proposals.length > 0) {
+          const latest = proposals[0];
+          setStatus({
+            last_run_at: latest.created_at || new Date().toISOString(),
+            images_scanned: latest.slots?.length || 0,
+            images_analyzed: latest.slots?.length || 0,
+            posts_drafted: latest.slots?.length || 0
+          });
         }
       } catch (err) {
         console.error('Error fetching agent status:', err);

@@ -1,25 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { apiClient, ApiError } from '../../api/client';
+import type { Post, InstagramAccount } from '../../types';
 import './CreatePost.css';
-
-interface Post {
-  id: number;
-  user_id: string;
-  content: string;
-  media_url: string | null;
-  post_type: string;
-  status: string;
-  scheduled_at: string | null;
-  created_at: string;
-  instagram_account_id?: number | null;
-}
-
-interface InstagramAccount {
-  id: number;
-  username: string;
-  account_name: string;
-}
 
 interface EditPostFormProps {
   post: Post;
@@ -56,10 +40,7 @@ const EditPostForm: React.FC<EditPostFormProps> = ({ post, onSave, onCancel }) =
 
   useEffect(() => {
     if (!token) return;
-    fetch('http://localhost:8000/instagram/accounts', {
-      headers: { 'Authorization': `Bearer ${token}` },
-    })
-      .then(r => r.ok ? r.json() : [])
+    apiClient.get<InstagramAccount[]>('/instagram/accounts')
       .then(setInstagramAccounts)
       .catch(() => {});
   }, [token]);
@@ -95,24 +76,12 @@ const EditPostForm: React.FC<EditPostFormProps> = ({ post, onSave, onCancel }) =
     if (selectedAccountId) formData.append('instagram_account_id', selectedAccountId);
 
     try {
-      const res = await fetch(`http://localhost:8000/api/posts/${post.id}`, {
-        method: 'PUT',
-        headers: { 'Authorization': `Bearer ${token}` },
-        body: formData,
-      });
-      if (res.ok) {
-        setMessage('Publicación actualizada.');
-        onSave();
-      } else {
-        const err = await res.json();
-        const detail = err.detail;
-        setMessage(Array.isArray(detail)
-          ? detail.map((d: any) => d.msg).join('; ')
-          : (detail ?? 'Error al actualizar'));
-        setIsError(true);
-      }
-    } catch {
-      setMessage('Error de red o servidor.'); setIsError(true);
+      await apiClient.putForm(`/api/posts/${post.id}`, formData);
+      setMessage('Publicación actualizada.');
+      onSave();
+    } catch (error) {
+      setMessage(error instanceof ApiError ? error.detail : 'Error de red o servidor.');
+      setIsError(true);
     } finally {
       setLoading(false);
     }

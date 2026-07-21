@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import 'bootstrap-icons/font/bootstrap-icons.css';
+import { apiClient, ApiError } from '../../api/client';
 import './PostGenerator.css';
 
 interface PostGeneratorProps {
@@ -58,40 +59,22 @@ const PostGenerator: React.FC<PostGeneratorProps> = ({ onPostGenerated }) => {
 
   const fetchAvailableExports = async () => {
     setLoading(true);
-    const token = localStorage.getItem('authToken');
 
     try {
       // Intentar obtener exports reales de Google Drive
-      const response = await fetch('http://localhost:8000/api/drive/exports', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      const data = await apiClient.get<Export[]>('/api/drive/exports');
 
-      if (response.ok) {
-        const data = await response.json();
-
-        // Si el backend devuelve array vacío o sin datos válidos, usar mock
-        if (!data || data.length === 0) {
-          console.warn('No se encontraron exports en Google Drive, usando datos mock');
-          setExports(getMockExports());
-        } else {
-          setExports(data);
-        }
-        setLoading(false);
-        return;
+      // Si el backend devuelve array vacío o sin datos válidos, usar mock
+      if (!data || data.length === 0) {
+        console.warn('No se encontraron exports en Google Drive, usando datos mock');
+        setExports(getMockExports());
+      } else {
+        setExports(data);
       }
-
-      // Fallback: Si falla la petición, usar datos mock
-      console.warn('Error en Google Drive API, usando datos mock');
-      setExports(getMockExports());
-      setLoading(false);
-      return;
-
     } catch (error) {
       console.error('Error fetching exports:', error);
       setExports(getMockExports());
+    } finally {
       setLoading(false);
     }
   };
@@ -156,7 +139,6 @@ const PostGenerator: React.FC<PostGeneratorProps> = ({ onPostGenerated }) => {
     if (!selectedExport) return;
 
     setLoading(true);
-    const token = localStorage.getItem('authToken');
 
     try {
       // Mapear tono a caption_style correcto
@@ -170,44 +152,34 @@ const PostGenerator: React.FC<PostGeneratorProps> = ({ onPostGenerated }) => {
 
       const caption_style = styleMap[tone] || 'informative';
 
-      const response = await fetch('http://localhost:8000/content/generate', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          export_id: selectedExport.id,
-          instagram_account_id: 1, // TODO: Obtener del usuario
-          format_type: 'square',
-          caption_style: caption_style,
-          language: language,  // Enviar el idioma seleccionado
-          auto_publish: false
-        })
+      const data = await apiClient.post<any>('/content/generate', {
+        export_id: selectedExport.id,
+        instagram_account_id: 1, // TODO: Obtener del usuario
+        format_type: 'square',
+        caption_style: caption_style,
+        language: language,  // Enviar el idioma seleccionado
+        auto_publish: false
       });
 
-      if (response.ok) {
-        const data = await response.json();
+      // Adaptar respuesta del backend al formato esperado
+      const adaptedData = {
+        post_id: data.post_id,
+        template_used: data.template_used?.name || 'Template Mock',
+        caption: data.caption || '',
+        media_url: data.preview_url || null,  // Puede ser null para datos mock
+        metadata: data.metadata || {}
+      };
 
-        // Adaptar respuesta del backend al formato esperado
-        const adaptedData = {
-          post_id: data.post_id,
-          template_used: data.template_used?.name || 'Template Mock',
-          caption: data.caption || '',
-          media_url: data.preview_url || null,  // Puede ser null para datos mock
-          metadata: data.metadata || {}
-        };
-
-        setGeneratedPost(adaptedData);
-        setCaption(data.caption || '');
-        setStep(3);
-      } else {
-        const errorData = await response.json().catch(() => ({ detail: 'Error desconocido' }));
-        alert(`Error generando post: ${errorData.detail || 'Por favor intenta de nuevo.'}`);
-      }
+      setGeneratedPost(adaptedData);
+      setCaption(data.caption || '');
+      setStep(3);
     } catch (error) {
       console.error('Error generating post:', error);
-      alert('Error de conexión. Verifica que el backend esté corriendo.');
+      if (error instanceof ApiError) {
+        alert(`Error generando post: ${error.detail || 'Por favor intenta de nuevo.'}`);
+      } else {
+        alert('Error de conexión. Verifica que el backend esté corriendo.');
+      }
     } finally {
       setLoading(false);
     }
@@ -223,7 +195,6 @@ const PostGenerator: React.FC<PostGeneratorProps> = ({ onPostGenerated }) => {
     }
 
     setLoading(true);
-    const token = localStorage.getItem('authToken');
 
     try {
       // Si no hay post_id, crear nuevo post (el backend solo generó preview)
@@ -257,49 +228,25 @@ const PostGenerator: React.FC<PostGeneratorProps> = ({ onPostGenerated }) => {
 
         formData.append('media_file', blob, `${generatedPost.metadata.export_id}.png`);
 
-        const response = await fetch('http://localhost:8000/api/posts', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-          body: formData
-        });
-
-        if (response.ok) {
-          alert(`Post guardado como ${status === 'draft' ? 'borrador' : 'programado'}!`);
-          setShowScheduleModal(false); // Cerrar modal de programación
-          setShowDraftModal(false); // Cerrar modal de borrador
-          onPostGenerated();
-          resetGenerator();
-        } else {
-          const errorData = await response.json().catch(() => ({ detail: 'Error desconocido' }));
-          alert(`Error guardando post: ${errorData.detail}`);
-        }
+        await apiClient.postForm('/api/posts', formData);
+        alert(`Post guardado como ${status === 'draft' ? 'borrador' : 'programado'}!`);
+        setShowScheduleModal(false); // Cerrar modal de programación
+        setShowDraftModal(false); // Cerrar modal de borrador
+        onPostGenerated();
+        resetGenerator();
       } else {
         // Si ya tiene post_id, actualizar (flujo antiguo, no debería pasar)
-        const response = await fetch(`http://localhost:8000/api/posts/${generatedPost.post_id}`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            content: caption,
-            status: status
-          })
+        await apiClient.put(`/api/posts/${generatedPost.post_id}`, {
+          content: caption,
+          status: status
         });
-
-        if (response.ok) {
-          alert(`Post guardado como ${status === 'draft' ? 'borrador' : 'programado'}!`);
-          onPostGenerated();
-          resetGenerator();
-        } else {
-          alert('Error guardando post.');
-        }
+        alert(`Post guardado como ${status === 'draft' ? 'borrador' : 'programado'}!`);
+        onPostGenerated();
+        resetGenerator();
       }
     } catch (error) {
       console.error('Error saving post:', error);
-      alert('Error guardando post.');
+      alert(error instanceof ApiError ? `Error guardando post: ${error.detail}` : 'Error guardando post.');
     } finally {
       setLoading(false);
     }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { HybridSelect } from './HybridSelect';
+import { apiClient, ApiError } from '../../api/client';
 
 export interface ContentTypeMix {
   post: number;
@@ -244,11 +245,8 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
     const token = localStorage.getItem('authToken');
     if (!token) return;
     const monthDate = campaign.month_date;
-    fetch(`http://localhost:8000/api/agent/campaign?account_id=${accountId}&month_date=${monthDate}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then((data: Partial<MonthlyCampaign> | null) => {
+    apiClient.get<Partial<MonthlyCampaign> | null>(`/api/agent/campaign?account_id=${accountId}&month_date=${monthDate}`)
+      .then((data) => {
         const base = emptyCampaign(accountId, monthDate);
         setCampaign(data ? {
           ...base, ...data,
@@ -269,10 +267,7 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
     setWizardMode(false);
     setSaved(false);
     setError(null);
-    fetch(`http://localhost:8000/api/agent/config/${accountId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.ok ? r.json() : Promise.reject())
+    apiClient.get<Partial<AgentStrategyConfig>>(`/api/agent/config/${accountId}`)
       .then(data => setCfg({ ...DEFAULT, ...data }))
       .catch(() => setCfg(DEFAULT))
       .finally(() => setLoading(false));
@@ -331,12 +326,10 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
     if (!token) return;
     setSuggestingTimes(true);
     try {
-      const res = await fetch('http://localhost:8000/api/agent/suggest-times', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sector: cfg.sector, target_audience: cfg.target_audience, default_tone: cfg.default_tone, account_type: cfg.account_type }),
+      const d = await apiClient.post<{ best_times?: string[] }>('/api/agent/suggest-times', {
+        sector: cfg.sector, target_audience: cfg.target_audience, default_tone: cfg.default_tone, account_type: cfg.account_type,
       });
-      if (res.ok) { const d = await res.json(); if (d.best_times) set('best_times', d.best_times); }
+      if (d.best_times) set('best_times', d.best_times);
     } catch { /* silent */ }
     finally { setSuggestingTimes(false); }
   };
@@ -356,13 +349,7 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
     }
     setGenerating(true); setError(null);
     try {
-      const res = await fetch('http://localhost:8000/api/agent/generate-strategy', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(wizard),
-      });
-      if (!res.ok) throw new Error('Error al generar');
-      const generated = await res.json();
+      const generated = await apiClient.post<Partial<AgentStrategyConfig>>('/api/agent/generate-strategy', wizard);
       setCfg(prev => ({
         ...prev, ...generated,
         reference_accounts: wizard.referentes.length ? wizard.referentes : prev.reference_accounts,
@@ -371,7 +358,7 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
       setWizardMode(false);
       setGeneratedBanner(true);
       setTimeout(() => setGeneratedBanner(false), 5000);
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(e instanceof ApiError ? e.detail : 'Error al generar'); }
     finally { setGenerating(false); }
   };
 
@@ -381,27 +368,24 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
     setSaving(true); setError(null);
     try {
       const payload = { ...cfg, posts_per_week: totalPosts };
-      const res = await fetch(`http://localhost:8000/api/agent/config/${accountId}`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error('Error al guardar');
+      try {
+        await apiClient.put(`/api/agent/config/${accountId}`, payload);
+      } catch {
+        throw new Error('Error al guardar');
+      }
 
       if (campaign.title.trim()) {
-        const campaignRes = await fetch('http://localhost:8000/api/agent/campaign', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...campaign, account_id: accountId }),
-        });
-        if (!campaignRes.ok) throw new Error('Error al guardar el enfoque mensual');
-        setCampaign(await campaignRes.json());
+        try {
+          setCampaign(await apiClient.post<MonthlyCampaign>('/api/agent/campaign', { ...campaign, account_id: accountId }));
+        } catch {
+          throw new Error('Error al guardar el enfoque mensual');
+        }
       }
 
       setSaved(true);
       setTimeout(() => setSaved(false), 4000);
       onSave();
-    } catch (e: any) { setError(e.message); }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Error al guardar'); }
     finally { setSaving(false); }
   };
 

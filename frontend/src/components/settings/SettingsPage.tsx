@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import 'bootstrap-icons/font/bootstrap-icons.css';
+import { apiClient } from '../../api/client';
 import './SettingsPage.css';
 import AccountsPage from '../accounts/AccountsPage';
 
@@ -19,11 +20,8 @@ const SettingsPage: React.FC = () => {
   useEffect(() => {
     const token = localStorage.getItem('authToken');
     if (!token) return;
-    fetch('http://localhost:8000/users/me', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => (r.ok ? r.json() : null))
-      .then(data => { if (data) setUser(data); })
+    apiClient.get<User>('/users/me')
+      .then(data => setUser(data))
       .catch(() => {});
   }, []);
 
@@ -32,11 +30,8 @@ const SettingsPage: React.FC = () => {
     if (!token) return;
     setResetStatus('sending');
     try {
-      const res = await fetch('http://localhost:8000/users/me/send-password-reset', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setResetStatus(res.ok ? 'sent' : 'error');
+      await apiClient.post('/users/me/send-password-reset');
+      setResetStatus('sent');
     } catch {
       setResetStatus('error');
     }

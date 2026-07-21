@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { apiClient, ApiError } from '../../api/client';
 import './Register.css'; // Importar el archivo CSS
 
 const Register: React.FC = () => {
@@ -17,30 +18,17 @@ const Register: React.FC = () => {
     setLoading(true); // Iniciar carga
 
     try {
-      const response = await fetch('http://localhost:8000/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email,
-          password,
-          instagram_handle: instagramHandle,
-        }),
+      const data = await apiClient.post<{ email: string }>('/register', {
+        email,
+        password,
+        instagram_handle: instagramHandle,
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        setMessage('Registro exitoso! Usuario: ' + data.email + '. Redirigiendo a login...');
-        setTimeout(() => {
-          navigate('/login'); // Redirigir al login después de un registro exitoso
-        }, 2000); // Redirigir después de 2 segundos
-      } else {
-        const errorData = await response.json();
-        setMessage('Error al registrar: ' + (errorData.detail || 'Error desconocido'));
-      }
+      setMessage('Registro exitoso! Usuario: ' + data.email + '. Redirigiendo a login...');
+      setTimeout(() => {
+        navigate('/login'); // Redirigir al login después de un registro exitoso
+      }, 2000); // Redirigir después de 2 segundos
     } catch (error) {
-      setMessage('Error de red o servidor');
+      setMessage(error instanceof ApiError ? 'Error al registrar: ' + error.detail : 'Error de red o servidor');
       console.error('Error de red o servidor:', error);
     } finally {
       setLoading(false); // Finalizar carga

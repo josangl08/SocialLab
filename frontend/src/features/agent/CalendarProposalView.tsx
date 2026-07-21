@@ -1,20 +1,6 @@
 import React, { useEffect, useState } from 'react';
-
-interface CalendarSlot {
-  day: string;
-  post_id: number | null;
-  image_id: string | null;
-  theme: string;
-  caption: string;
-}
-
-interface ContentProposal {
-  id: string;
-  account_id: string;
-  week_start: string;
-  slots: CalendarSlot[];
-  status: 'pending_approval' | 'approved' | 'rejected';
-}
+import { apiClient } from '../../api/client';
+import type { ContentProposal } from '../../types';
 
 interface CalendarProposalViewProps {
   accountId: number;
@@ -26,11 +12,7 @@ export const CalendarProposalView: React.FC<CalendarProposalViewProps> = ({ acco
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('authToken');
-    fetch(`/api/agent/proposals?account_id=${accountId}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
-    })
-      .then(r => r.json())
+    apiClient.get<ContentProposal[]>(`/api/agent/proposals?account_id=${accountId}`)
       .then(data => {
         setProposals(Array.isArray(data) ? data : []);
         setLoading(false);
@@ -40,7 +22,6 @@ export const CalendarProposalView: React.FC<CalendarProposalViewProps> = ({ acco
 
   const handleAction = async (proposalId: string, action: 'approve' | 'reject') => {
     setActionLoading(`${proposalId}-${action}`);
-    const token = localStorage.getItem('authToken');
 
     setProposals(prev =>
       prev.map(p =>
@@ -51,10 +32,7 @@ export const CalendarProposalView: React.FC<CalendarProposalViewProps> = ({ acco
     );
 
     try {
-      await fetch(`/api/agent/proposals/${proposalId}/${action}`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
+      await apiClient.post(`/api/agent/proposals/${proposalId}/${action}`);
     } catch {
       // revert optimistic update on failure
       setProposals(prev =>

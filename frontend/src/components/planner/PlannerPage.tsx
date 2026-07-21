@@ -7,26 +7,16 @@ import EditPostForm from '../posts/EditPostForm';
 import WeeklyProposalPanel from './WeeklyProposalPanel';
 import { MonthlyFocusBanner } from './MonthlyFocusBanner';
 import { useAuth } from '../../context/AuthContext';
+import { apiClient, ApiError } from '../../api/client';
+import type { Post, InstagramAccount, ContentProposal } from '../../types';
 import './PlannerPage.css';
-
-interface EditablePost {
-  id: number;
-  user_id: string;
-  content: string;
-  media_url: string | null;
-  post_type: string;
-  status: string;
-  scheduled_at: string | null;
-  created_at: string;
-  publication_date?: string | null;
-}
 
 const PlannerPage: React.FC = () => {
   const { token } = useAuth();
   const [view, setView]               = useState<'calendar' | 'list'>('calendar');
   const [showDrawer, setShowDrawer]   = useState(false);
   const [drawerDate, setDrawerDate]   = useState('');
-  const [editingPost, setEditingPost] = useState<EditablePost | null>(null);
+  const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [calendarSignal, setCalendarSignal] = useState(0);
   const [aiTriggering, setAiTriggering] = useState(false);
   const [aiStatus, setAiStatus] = useState<string | null>(null);
@@ -66,37 +56,25 @@ const PlannerPage: React.FC = () => {
     setAiStatus(null);
     setIsDriveError(false);
 
-    const authHeaders = { Authorization: `Bearer ${token}` };
     try {
-      const [accRes, propRes] = await Promise.all([
-        fetch('http://localhost:8000/instagram/accounts', { headers: authHeaders }),
-        fetch(`http://localhost:8000/api/agent/proposals?account_id=${primaryAccountId}`, { headers: authHeaders }),
+      const [accounts, proposals] = await Promise.all([
+        apiClient.get<InstagramAccount[]>('/instagram/accounts'),
+        apiClient.get<ContentProposal[]>(`/api/agent/proposals?account_id=${primaryAccountId}`),
       ]);
-      if (accRes.ok) {
-        const accounts = await accRes.json();
-        const acc = accounts.find((a: { id: number; last_agent_sync?: string }) => a.id === primaryAccountId);
-        agentSyncBeforeRef.current = acc?.last_agent_sync ?? null;
-      }
-      if (propRes.ok) {
-        const proposals = await propRes.json();
-        proposalCountRef.current = proposals.filter((p: { status: string }) => p.status === 'pending_approval').length;
-      }
+      const acc = accounts.find((a) => a.id === primaryAccountId);
+      agentSyncBeforeRef.current = acc?.last_agent_sync ?? null;
+      proposalCountRef.current = proposals.filter(p => p.status === 'pending_approval').length;
     } catch { /* proceed with trigger even if pre-fetch fails */ }
 
     try {
-      const res = await fetch('http://localhost:8000/api/agent/trigger', {
-        method: 'POST',
-        headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account_id: primaryAccountId }),
-      });
-      if (res.ok) {
-        setIsAgentRunning(true);
-        setAgentStartedAt(Date.now());
-      } else if (res.status === 503) {
+      await apiClient.post('/api/agent/trigger', { account_id: primaryAccountId });
+      setIsAgentRunning(true);
+      setAgentStartedAt(Date.now());
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 503) {
         setIsDriveError(true);
       } else {
-        const body = await res.json().catch(() => ({}));
-        setAiStatus(body.detail ?? 'Error al iniciar el agente. Intenta de nuevo.');
+        setAiStatus(error instanceof ApiError ? error.detail : 'Error al iniciar el agente. Intenta de nuevo.');
       }
     } finally {
       setAiTriggering(false);
@@ -109,7 +87,7 @@ const PlannerPage: React.FC = () => {
     setShowDrawer(true);
   }, []);
 
-  const openEditDrawer = useCallback((post: EditablePost) => {
+  const openEditDrawer = useCallback((post: Post) => {
     setEditingPost(post);
     setShowDrawer(true);
   }, []);
@@ -133,11 +111,8 @@ const PlannerPage: React.FC = () => {
 
   useEffect(() => {
     if (!token) return;
-    fetch('http://localhost:8000/instagram/accounts', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => (r.ok ? r.json() : []))
-      .then((accounts: { id: number }[]) => {
+    apiClient.get<InstagramAccount[]>('/instagram/accounts')
+      .then(accounts => {
         if (accounts.length > 0) setPrimaryAccountId(accounts[0].id);
       })
       .catch(() => {});
@@ -146,32 +121,23 @@ const PlannerPage: React.FC = () => {
   useEffect(() => {
     if (!isAgentRunning || !token || !primaryAccountId) return;
 
-    const authHeaders = { Authorization: `Bearer ${token}` };
-
     const poll = async () => {
       try {
-        const propRes = await fetch(
-          `http://localhost:8000/api/agent/proposals?account_id=${primaryAccountId}`,
-          { headers: authHeaders }
+        const proposals = await apiClient.get<ContentProposal[]>(
+          `/api/agent/proposals?account_id=${primaryAccountId}`
         );
-        if (propRes.ok) {
-          const proposals = await propRes.json();
-          const pendingCount = proposals.filter((p: { status: string }) => p.status === 'pending_approval').length;
-          if (pendingCount > proposalCountRef.current) {
-            setCalendarSignal(k => k + 1);
-            stopPolling();
-            return;
-          }
+        const pendingCount = proposals.filter(p => p.status === 'pending_approval').length;
+        if (pendingCount > proposalCountRef.current) {
+          setCalendarSignal(k => k + 1);
+          stopPolling();
+          return;
         }
 
-        const accRes = await fetch('http://localhost:8000/instagram/accounts', { headers: authHeaders });
-        if (accRes.ok) {
-          const accounts = await accRes.json();
-          const account = accounts.find((a: { id: number; last_agent_sync?: string }) => a.id === primaryAccountId);
-          if (account?.last_agent_sync && account.last_agent_sync !== agentSyncBeforeRef.current) {
-            setAiStatus('No new images in Drive. Add photos to your folder to generate a proposal.');
-            stopPolling();
-          }
+        const accounts = await apiClient.get<InstagramAccount[]>('/instagram/accounts');
+        const account = accounts.find(a => a.id === primaryAccountId);
+        if (account?.last_agent_sync && account.last_agent_sync !== agentSyncBeforeRef.current) {
+          setAiStatus('No new images in Drive. Add photos to your folder to generate a proposal.');
+          stopPolling();
         }
       } catch { /* ignore transient errors */ }
     };
@@ -306,7 +272,7 @@ const PlannerPage: React.FC = () => {
             <div className="planner-drawer-body">
               {editingPost ? (
                 <EditPostForm
-                  post={editingPost as any}
+                  post={editingPost}
                   onSave={() => { closeDrawer(); setCalendarSignal(k => k + 1); }}
                   onCancel={closeDrawer}
                 />

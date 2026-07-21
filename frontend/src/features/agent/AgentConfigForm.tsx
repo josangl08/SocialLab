@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { apiClient, ApiError } from '../../api/client';
 
 interface AgentConfig {
   account_type: 'personal' | 'professional';
@@ -44,31 +45,20 @@ export const AgentConfigForm: React.FC<AgentConfigFormProps> = ({
     }
 
     try {
-      const res = await fetch(`http://localhost:8000/api/agent/config/${accountId}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          account_type: accountType,
-          sector,
-          purpose,
-          target_audience: targetAudience,
-          style_guide: styleGuide
-        })
+      await apiClient.put(`/api/agent/config/${accountId}`, {
+        account_type: accountType,
+        sector,
+        purpose,
+        target_audience: targetAudience,
+        style_guide: styleGuide
       });
-
-      if (!res.ok) {
-        throw new Error('Error al guardar la configuración del agente');
-      }
 
       setSuccess(true);
       if (onSave) {
         onSave();
       }
-    } catch (err: any) {
-      setError(err.message || 'Error al actualizar configuración');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : 'Error al actualizar configuración');
     } finally {
       setSaving(false);
     }

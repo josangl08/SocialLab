@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { getFirstOfDayOfMonth } from '../../features/agent/AgentStrategyDrawer';
 import type { MonthlyCampaign } from '../../features/agent/AgentStrategyDrawer';
 import { useAuth } from '../../context/AuthContext';
+import { apiClient } from '../../api/client';
 import './MonthlyFocusBanner.css';
 
 interface MonthlyFocusBannerProps {
@@ -23,10 +24,7 @@ export const MonthlyFocusBanner: React.FC<MonthlyFocusBannerProps> = ({ accountI
     const monthDate = getFirstOfDayOfMonth(currentDate);
     setLoading(true);
 
-    fetch(`http://localhost:8000/api/agent/campaign?account_id=${accountId}&month_date=${monthDate}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(r => r.ok ? r.json() : Promise.reject())
+    apiClient.get<MonthlyCampaign>(`/api/agent/campaign?account_id=${accountId}&month_date=${monthDate}`)
       .then(data => {
         setCampaign(data);
       })

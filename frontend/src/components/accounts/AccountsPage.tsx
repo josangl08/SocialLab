@@ -1,33 +1,12 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 import { AgentStrategyDrawer } from '../../features/agent/AgentStrategyDrawer';
-
-interface InstagramAccount {
-  id: number;
-  username: string | null;
-  account_name: string | null;
-  profile_picture_url: string | null;
-  followers_count: number | null;
-  expires_at: string | null;
-  is_active: boolean;
-  telegram_chat_id: string | null;
-  drive_folder_id: string | null;
-  account_type?: string;
-  sector?: string;
-  purpose?: string;
-  target_audience?: string;
-  style_guide?: string;
-  default_tone?: string;
-  default_language?: string;
-  posting_frequency?: string;
-  best_times?: string[];
-  content_pillars?: string[];
-  hashtag_strategy?: string;
-}
+import { apiClient, ApiError } from '../../api/client';
+import type { InstagramAccount } from '../../types';
 
 type TokenStatus = 'valid' | 'expiring' | 'expired';
 
-function getTokenStatus(expiresAt: string | null): TokenStatus {
+function getTokenStatus(expiresAt: string | null | undefined): TokenStatus {
   if (!expiresAt) return 'expired';
   const exp = new Date(expiresAt);
   const now = new Date();
@@ -62,13 +41,9 @@ const AccountsPage: React.FC = () => {
     const token = localStorage.getItem('authToken');
     if (!token) return;
     try {
-      const res = await fetch('http://localhost:8000/instagram/accounts', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error('Error al cargar cuentas');
-      setAccounts(await res.json());
-    } catch (e: any) {
-      setError(e.message);
+      setAccounts(await apiClient.get<InstagramAccount[]>('/instagram/accounts'));
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : 'Error al cargar cuentas');
     } finally {
       setLoading(false);
     }
@@ -88,10 +63,7 @@ const AccountsPage: React.FC = () => {
     // Fetch Drive connection status for the current user
     const token = localStorage.getItem('authToken');
     if (token) {
-      fetch('http://localhost:8000/api/drive/status', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-        .then(res => res.json())
+      apiClient.get<{ connected: boolean }>('/api/drive/status')
         .then(data => setDriveConnected(data.connected === true))
         .catch(() => {});
     }
@@ -103,14 +75,10 @@ const AccountsPage: React.FC = () => {
     if (!token) return;
     setDisconnecting(accountId);
     try {
-      const res = await fetch(`http://localhost:8000/instagram/accounts/${accountId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error('Error al desconectar');
+      await apiClient.delete(`/instagram/accounts/${accountId}`);
       setAccounts(prev => prev.filter(a => a.id !== accountId));
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      alert(e instanceof ApiError ? e.detail : 'Error al desconectar');
     } finally {
       setDisconnecting(null);
     }
@@ -121,15 +89,10 @@ const AccountsPage: React.FC = () => {
     if (!token) return;
     setTelegramLinking(accountId);
     try {
-      const res = await fetch('http://localhost:8000/api/telegram/generate-link-token', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error('Error al generar token');
-      const data = await res.json();
+      const data = await apiClient.post<{ token: string }>('/api/telegram/generate-link-token');
       setLinkTokens(prev => ({ ...prev, [accountId]: data.token }));
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      alert(e instanceof ApiError ? e.detail : 'Error al generar token');
     } finally {
       setTelegramLinking(null);
     }
@@ -140,16 +103,11 @@ const AccountsPage: React.FC = () => {
     if (!token) return;
     setTelegramUnlinking(accountId);
     try {
-      const res = await fetch(`http://localhost:8000/instagram/accounts/${accountId}/config`, {
-        method: 'PUT',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telegram_chat_id: null })
-      });
-      if (!res.ok) throw new Error('Error al desvincular');
+      await apiClient.put(`/instagram/accounts/${accountId}/config`, { telegram_chat_id: null });
       setAccounts(prev => prev.map(a => a.id === accountId ? { ...a, telegram_chat_id: null } : a));
       setLinkTokens(prev => { const next = { ...prev }; delete next[accountId]; return next; });
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      alert(e instanceof ApiError ? e.detail : 'Error al desvincular');
     } finally {
       setTelegramUnlinking(null);
     }
@@ -162,18 +120,13 @@ const AccountsPage: React.FC = () => {
     if (!token) return;
     setDriveSaving(accountId);
     try {
-      const res = await fetch(`http://localhost:8000/instagram/accounts/${accountId}/config`, {
-        method: 'PUT',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ drive_folder_id: folderId })
-      });
-      if (!res.ok) throw new Error('Error al vincular carpeta');
+      await apiClient.put(`/instagram/accounts/${accountId}/config`, { drive_folder_id: folderId });
       setAccounts(prev => prev.map(a => a.id === accountId ? { ...a, drive_folder_id: folderId } : a));
       setDriveInputs(prev => { const next = { ...prev }; delete next[accountId]; return next; });
       setDriveSuccess(prev => ({ ...prev, [accountId]: true }));
       setTimeout(() => setDriveSuccess(prev => { const next = { ...prev }; delete next[accountId]; return next; }), 3000);
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      alert(e instanceof ApiError ? e.detail : 'Error al vincular carpeta');
     } finally {
       setDriveSaving(null);
     }
@@ -184,15 +137,10 @@ const AccountsPage: React.FC = () => {
     if (!token) return;
     setDriveUnlinking(accountId);
     try {
-      const res = await fetch(`http://localhost:8000/instagram/accounts/${accountId}/config`, {
-        method: 'PUT',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ drive_folder_id: null })
-      });
-      if (!res.ok) throw new Error('Error al desvincular carpeta');
+      await apiClient.put(`/instagram/accounts/${accountId}/config`, { drive_folder_id: null });
       setAccounts(prev => prev.map(a => a.id === accountId ? { ...a, drive_folder_id: null } : a));
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      alert(e instanceof ApiError ? e.detail : 'Error al desvincular carpeta');
     } finally {
       setDriveUnlinking(null);
     }
@@ -201,16 +149,13 @@ const AccountsPage: React.FC = () => {
   const handleDisconnectDrive = async () => {
     const token = localStorage.getItem('authToken');
     if (!token) return;
-    await fetch('http://localhost:8000/api/drive/auth', {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    await apiClient.delete('/api/drive/auth');
     setDriveConnected(false);
   };
 
   const handleReconnect = () => {
     const token = localStorage.getItem('authToken');
-    if (token) window.location.href = `http://localhost:8000/instagram/login?token=${token}`;
+    if (token) window.location.href = apiClient.getUrl(`/instagram/login?token=${token}`);
   };
 
   const statusBadge = (status: TokenStatus) => {
@@ -385,7 +330,7 @@ const AccountsPage: React.FC = () => {
                     Google Drive
                   </div>
                   {!driveConnected ? (
-                    <a href={`http://localhost:8000/api/drive/auth?token=${localStorage.getItem('authToken')}&account_id=${account.id}`}>
+                    <a href={apiClient.getUrl(`/api/drive/auth?token=${localStorage.getItem('authToken')}&account_id=${account.id}`)}>
                       <button className="st-btn st-btn-ghost st-btn-sm">
                         <i className="bi bi-google"></i>Conectar Drive
                       </button>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import type { ContentProposal, CalendarSlot } from '../calendar/ProposalModal';
+import { apiClient, ApiError } from '../../api/client';
+import type { ContentProposal, CalendarSlot, InstagramAccount } from '../../types';
 import './WeeklyProposalPanel.css';
 
 interface WeeklyProposalPanelProps {
@@ -71,37 +72,25 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
   const hasLoaded = useRef(false);
   const activeSlotRef = useRef<HTMLDivElement>(null);
 
-  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-
   useEffect(() => {
     if (!token || accountId === null) return;
     const fetchProposals = async () => {
       if (!hasLoaded.current) setLoading(true);
       setError(null);
       try {
-        const url = accountId
-          ? `http://localhost:8000/api/agent/proposals?account_id=${accountId}`
-          : `http://localhost:8000/instagram/accounts`;
-
         if (!accountId) {
-          const accRes = await fetch(url, { headers });
-          if (!accRes.ok) { return; }
-          const accounts = await accRes.json();
-          const fetches = accounts.map((acc: { id: number }) =>
-            fetch(`http://localhost:8000/api/agent/proposals?account_id=${acc.id}`, { headers })
-              .then(r => (r.ok ? r.json() : []))
-              .catch(() => [])
+          const accounts = await apiClient.get<InstagramAccount[]>('/instagram/accounts');
+          const fetches = accounts.map((acc) =>
+            apiClient.get<ContentProposal[]>(`/api/agent/proposals?account_id=${acc.id}`).catch(() => [])
           );
           const arrays = await Promise.all(fetches);
-          setProposals((arrays as ContentProposal[][]).flat().filter(p => p.status === 'pending_approval'));
+          setProposals(arrays.flat().filter(p => p.status === 'pending_approval'));
         } else {
-          const res = await fetch(url, { headers });
-          if (!res.ok) throw new Error('Error al cargar propuestas');
-          const data: ContentProposal[] = await res.json();
+          const data = await apiClient.get<ContentProposal[]>(`/api/agent/proposals?account_id=${accountId}`);
           setProposals(data.filter(p => p.status === 'pending_approval'));
         }
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : 'Error desconocido');
+        setError(err instanceof ApiError ? err.detail : 'Error desconocido');
       } finally {
         hasLoaded.current = true;
         setLoading(false);
@@ -134,56 +123,51 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
   const handleProposalApprove = useCallback(async (proposalId: string) => {
     setSlotLoading(`${proposalId}-approve`, true);
     try {
-      await fetch(`http://localhost:8000/api/agent/proposals/${proposalId}/approve`, { method: 'POST', headers });
+      await apiClient.post(`/api/agent/proposals/${proposalId}/approve`);
       setProposals(prev => prev.filter(p => p.id !== proposalId));
       setActiveSlot(null);
       onProposalAction();
     } finally {
       setSlotLoading(`${proposalId}-approve`, false);
     }
-  }, [token, onProposalAction]);
+  }, [onProposalAction]);
 
   const handleProposalReject = useCallback(async (proposalId: string) => {
     setSlotLoading(`${proposalId}-reject`, true);
     try {
-      await fetch(`http://localhost:8000/api/agent/proposals/${proposalId}/reject`, { method: 'POST', headers });
+      await apiClient.post(`/api/agent/proposals/${proposalId}/reject`);
       setProposals(prev => prev.filter(p => p.id !== proposalId));
       setActiveSlot(null);
       onProposalAction();
     } finally {
       setSlotLoading(`${proposalId}-reject`, false);
     }
-  }, [token, onProposalAction]);
+  }, [onProposalAction]);
 
   const handleRegen = useCallback(async (proposalId: string, slotIndex: number) => {
     const key = `${proposalId}-${slotIndex}`;
     setSlotLoading(key + '-regen', true);
     try {
-      const res = await fetch(
-        `http://localhost:8000/api/agent/proposals/${proposalId}/slots/${slotIndex}/regenerate`,
-        { method: 'POST', headers }
+      const data = await apiClient.post<{ caption: string }>(
+        `/api/agent/proposals/${proposalId}/slots/${slotIndex}/regenerate`
       );
-      if (res.ok) {
-        const data = await res.json();
-        setSlotCaptions(prev => ({ ...prev, [key]: data.caption }));
-        setProposals(prev => prev.map(p => {
-          if (p.id !== proposalId) return p;
-          return { ...p, slots: p.slots.map((s, i) => i === slotIndex ? { ...s, caption: data.caption } : s) };
-        }));
-      }
+      setSlotCaptions(prev => ({ ...prev, [key]: data.caption }));
+      setProposals(prev => prev.map(p => {
+        if (p.id !== proposalId) return p;
+        return { ...p, slots: p.slots.map((s, i) => i === slotIndex ? { ...s, caption: data.caption } : s) };
+      }));
+    } catch {
+      // Silent — user can retry Regenerate
     } finally {
       setSlotLoading(key + '-regen', false);
     }
-  }, [token]);
+  }, []);
 
   const handleSkip = useCallback(async (proposalId: string, slotIndex: number) => {
     const key = `${proposalId}-${slotIndex}-skip`;
     setSlotLoading(key, true);
     try {
-      await fetch(
-        `http://localhost:8000/api/agent/proposals/${proposalId}/slots/${slotIndex}/skip`,
-        { method: 'POST', headers }
-      );
+      await apiClient.post(`/api/agent/proposals/${proposalId}/slots/${slotIndex}/skip`);
       setProposals(prev => prev.map(p => {
         if (p.id !== proposalId) return p;
         return { ...p, slots: p.slots.map((s, i) => i === slotIndex ? { ...s, post_id: undefined } : s) };
@@ -192,17 +176,14 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
     } finally {
       setSlotLoading(key, false);
     }
-  }, [token]);
+  }, []);
 
   const handleTypeChange = useCallback(async (proposalId: string, slotIndex: number, post_type: string) => {
     const key = `${proposalId}-${slotIndex}-type`;
     setSlotLoading(key, true);
     setTypeMenuOpen(null);
     try {
-      await fetch(
-        `http://localhost:8000/api/agent/proposals/${proposalId}/slots/${slotIndex}/type`,
-        { method: 'POST', headers, body: JSON.stringify({ post_type }) }
-      );
+      await apiClient.post(`/api/agent/proposals/${proposalId}/slots/${slotIndex}/type`, { post_type });
       setProposals(prev => prev.map(p => {
         if (p.id !== proposalId) return p;
         return { ...p, slots: p.slots.map((s, i) => i === slotIndex ? { ...s, post_type } : s) };
@@ -210,7 +191,7 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
     } finally {
       setSlotLoading(key, false);
     }
-  }, [token]);
+  }, []);
 
   const handleSaveTime = useCallback(async (proposalId: string, slotIndex: number, slot: CalendarSlot, datetime: string) => {
     if (!slot.post_id || !datetime) return;
@@ -218,42 +199,34 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
     setSlotLoading(key, true);
     try {
       const isoTime = new Date(datetime).toISOString();
-      await fetch(`http://localhost:8000/api/scheduler/reschedule/${slot.post_id}`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify({ new_scheduled_time: isoTime }),
-      });
+      await apiClient.put(`/api/scheduler/reschedule/${slot.post_id}`, { new_scheduled_time: isoTime });
     } catch {
       // Silent — the visual update already reflects the input
     } finally {
       setSlotLoading(key, false);
     }
-  }, [token]);
+  }, []);
 
   const openImagePicker = useCallback(async (slotKey: string) => {
     if (!accountId) return;
     setImagePicking(slotKey);
     setImagePickLoading(true);
     try {
-      const res = await fetch(`http://localhost:8000/api/drive/images?account_id=${accountId}`, { headers });
-      if (res.ok) {
-        const data: DriveImage[] = await res.json();
-        setDriveImages(data);
-      }
+      const data = await apiClient.get<DriveImage[]>(`/api/drive/images?account_id=${accountId}`);
+      setDriveImages(data);
+    } catch {
+      // Silent — picker shows the empty state
     } finally {
       setImagePickLoading(false);
     }
-  }, [token, accountId]);
+  }, [accountId]);
 
   const handleImageSelect = useCallback(async (proposalId: string, slotIndex: number, fileId: string) => {
     const key = `${proposalId}-${slotIndex}-img`;
     setSlotLoading(key, true);
     setImagePicking(null);
     try {
-      await fetch(
-        `http://localhost:8000/api/agent/proposals/${proposalId}/slots/${slotIndex}/image`,
-        { method: 'PATCH', headers, body: JSON.stringify({ drive_file_id: fileId }) }
-      );
+      await apiClient.patch(`/api/agent/proposals/${proposalId}/slots/${slotIndex}/image`, { drive_file_id: fileId });
       setProposals(prev => prev.map(p => {
         if (p.id !== proposalId) return p;
         return { ...p, slots: p.slots.map((s, i) => i === slotIndex ? { ...s, image_id: fileId } : s) };
@@ -261,7 +234,7 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
     } finally {
       setSlotLoading(key, false);
     }
-  }, [token]);
+  }, []);
 
   const handleSlotReorder = useCallback(async (proposalId: string, fromDay: string, toDay: string) => {
     setProposals(prev => prev.map(p => {
@@ -274,16 +247,12 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
       return { ...p, slots: newSlots };
     }));
     try {
-      await fetch(`http://localhost:8000/api/agent/proposals/${proposalId}/slots/reorder`, {
-        method: 'PATCH',
-        headers,
-        body: JSON.stringify({ from_day: fromDay, to_day: toDay }),
-      });
+      await apiClient.patch(`/api/agent/proposals/${proposalId}/slots/reorder`, { from_day: fromDay, to_day: toDay });
       onProposalAction();
     } catch {
       // Silent — onProposalAction triggers a calendar re-fetch
     }
-  }, [token, onProposalAction]);
+  }, [onProposalAction]);
 
   if (loading) {
     return (
@@ -383,7 +352,7 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
                     <div className="wpp-day-content">
                       {slot.image_id && (
                         <img
-                          src={`http://localhost:8000/api/drive/files/${slot.image_id}/image?token=${token}`}
+                          src={apiClient.getUrl(`/api/drive/files/${slot.image_id}/image?token=${token}`)}
                           alt={slot.theme ?? ''}
                           className="wpp-day-thumb"
                           onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
@@ -418,7 +387,7 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
                 <div className="wpp-detail-img-wrap">
                   {slot.image_id && (
                     <img
-                      src={`http://localhost:8000/api/drive/files/${slot.image_id}/image?token=${token}`}
+                      src={apiClient.getUrl(`/api/drive/files/${slot.image_id}/image?token=${token}`)}
                       alt={slot.theme ?? ''}
                       className="wpp-detail-thumb"
                       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
@@ -454,7 +423,7 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
                             title={img.name}
                           >
                             <img
-                              src={`http://localhost:8000/api/drive/files/${img.id}/image?token=${token}`}
+                              src={apiClient.getUrl(`/api/drive/files/${img.id}/image?token=${token}`)}
                               alt={img.name}
                               onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                             />

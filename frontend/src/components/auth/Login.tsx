@@ -1,6 +1,7 @@
 import React, { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { apiClient, ApiError } from '../../api/client';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 import './Login.css';
 
@@ -26,25 +27,12 @@ const Login: React.FC = () => {
     formData.append('password', password);
 
     try {
-      const response = await fetch('http://localhost:8000/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: formData.toString(),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        login(data.access_token);
-        navigate('/dashboard');
-      } else {
-        const err = await response.json();
-        setIsError(true);
-        setMessage(err.detail || 'Credenciales inválidas');
-        setErrorKey(k => k + 1);
-      }
+      const data = await apiClient.postUrlEncoded<{ access_token: string }>('/token', formData);
+      login(data.access_token);
+      navigate('/dashboard');
     } catch (error: unknown) {
       setIsError(true);
-      setMessage('Error de conexión con el servidor');
+      setMessage(error instanceof ApiError ? error.detail : 'Error de conexión con el servidor');
       setErrorKey(k => k + 1);
     } finally {
       setLoading(false);

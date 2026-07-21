@@ -1,19 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { apiClient, ApiError } from '../../api/client';
+import type { Post } from '../../types';
 import EditPostForm from './EditPostForm';
 import PostDetailModal from './PostDetailModal';
 import './PostList.css';
-
-interface Post {
-  id: number;
-  user_id: string;
-  content: string;
-  media_url: string | null;
-  post_type: string;
-  status: string;
-  scheduled_at: string | null;
-  created_at: string;
-}
 
 interface PostListProps {
   refresh?: boolean;
@@ -76,16 +67,9 @@ const PostList: React.FC<PostListProps> = ({ refresh }) => {
   const fetchPosts = async () => {
     if (!token) { setError('No hay token de autenticación.'); setLoading(false); return; }
     try {
-      const res = await fetch('http://localhost:8000/api/posts', {
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      });
-      if (res.ok) setPosts(await res.json());
-      else {
-        const err = await res.json();
-        setError('Error al cargar publicaciones: ' + (err.detail ?? 'Error desconocido'));
-      }
-    } catch {
-      setError('Error de red o servidor');
+      setPosts(await apiClient.get<Post[]>('/api/posts'));
+    } catch (err) {
+      setError('Error al cargar publicaciones: ' + (err instanceof ApiError ? err.detail : 'Error de red o servidor'));
     } finally {
       setLoading(false);
     }
@@ -97,18 +81,11 @@ const PostList: React.FC<PostListProps> = ({ refresh }) => {
     if (!window.confirm('¿Eliminar esta publicación?')) return;
     setAlert(null);
     try {
-      const res = await fetch(`http://localhost:8000/api/posts/${postId}`, {
-        method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (res.ok) {
-        setAlert({ text: 'Publicación eliminada.', ok: true });
-        fetchPosts();
-      } else {
-        const err = await res.json();
-        setAlert({ text: 'Error: ' + (err.detail ?? 'Error desconocido'), ok: false });
-      }
-    } catch {
-      setAlert({ text: 'Error de red o servidor', ok: false });
+      await apiClient.delete(`/api/posts/${postId}`);
+      setAlert({ text: 'Publicación eliminada.', ok: true });
+      fetchPosts();
+    } catch (err) {
+      setAlert({ text: 'Error: ' + (err instanceof ApiError ? err.detail : 'Error de red o servidor'), ok: false });
     }
   };
 

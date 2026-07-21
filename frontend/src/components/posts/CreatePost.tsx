@@ -2,18 +2,14 @@ import React, { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { apiClient, ApiError } from '../../api/client';
+import type { InstagramAccount } from '../../types';
 import './CreatePost.css';
 
 interface CreatePostProps {
   onPostCreated: () => void;
   onCancel?: () => void;
   initialDate?: string;
-}
-
-interface InstagramAccount {
-  id: number;
-  username: string;
-  account_name: string;
 }
 
 const AI_ROLES = [
@@ -60,10 +56,7 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, onCancel, initia
 
   useEffect(() => {
     if (!token) return;
-    fetch('http://localhost:8000/instagram/accounts', {
-      headers: { 'Authorization': `Bearer ${token}` },
-    })
-      .then(r => r.ok ? r.json() : [])
+    apiClient.get<InstagramAccount[]>('/instagram/accounts')
       .then(setInstagramAccounts)
       .catch(() => {});
   }, [token]);
@@ -87,21 +80,13 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, onCancel, initia
     if (!aiTopic) { setAiMsg('Introduce un tema para generar contenido.'); return; }
     setAiLoading(true); setAiMsg('');
     try {
-      const res = await fetch('http://localhost:8000/ai/generate-post-content', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ topic: aiTopic, role: aiRole }),
+      const data = await apiClient.post<{ generated_text: string }>('/ai/generate-post-content', {
+        topic: aiTopic, role: aiRole,
       });
-      if (res.ok) {
-        const data = await res.json();
-        setContent(data.generated_text);
-        setAiMsg('Contenido generado correctamente.');
-      } else {
-        const err = await res.json();
-        setAiMsg('Error: ' + (err.detail ?? 'No se pudo generar'));
-      }
-    } catch {
-      setAiMsg('Error de conexión.');
+      setContent(data.generated_text);
+      setAiMsg('Contenido generado correctamente.');
+    } catch (error) {
+      setAiMsg(error instanceof ApiError ? 'Error: ' + error.detail : 'Error de conexión.');
     } finally {
       setAiLoading(false);
     }
@@ -123,23 +108,14 @@ const CreatePost: React.FC<CreatePostProps> = ({ onPostCreated, onCancel, initia
     if (selectedAccountId) formData.append('instagram_account_id', selectedAccountId);
 
     try {
-      const res = await fetch('http://localhost:8000/api/posts', {
-        method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: formData,
-      });
-      if (res.ok) {
-        setMessage('Publicación creada correctamente.');
-        setContent(''); setAiTopic(''); setMediaFile(null); setMediaPreview(null);
-        setPostType('post'); setStatus('draft'); setScheduledAt(''); setSelectedAccountId('');
-        onPostCreated();
-      } else {
-        const err = await res.json();
-        setMessage(Array.isArray(err.detail)
-          ? err.detail.map((e: any) => e.msg).join('; ')
-          : (err.detail ?? 'Error al crear la publicación'));
-        setIsError(true);
-      }
-    } catch {
-      setMessage('Error de red o servidor.'); setIsError(true);
+      await apiClient.postForm('/api/posts', formData);
+      setMessage('Publicación creada correctamente.');
+      setContent(''); setAiTopic(''); setMediaFile(null); setMediaPreview(null);
+      setPostType('post'); setStatus('draft'); setScheduledAt(''); setSelectedAccountId('');
+      onPostCreated();
+    } catch (error) {
+      setMessage(error instanceof ApiError ? error.detail : 'Error de red o servidor.');
+      setIsError(true);
     } finally {
       setLoading(false);
     }

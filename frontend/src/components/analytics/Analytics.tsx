@@ -12,6 +12,7 @@ import {
   ResponsiveContainer
 } from 'recharts';
 import 'bootstrap-icons/font/bootstrap-icons.css';
+import { apiClient } from '../../api/client';
 import './Analytics.css';
 import { FollowerGrowthChart } from './charts/FollowerGrowthChart';
 import { DemographicsChart } from './charts/DemographicsChart';
@@ -136,14 +137,11 @@ const Analytics: React.FC = () => {
     async function load() {
       try {
         const days = DAYS_MAP[timeRange];
-        const response = await fetch(
-          `http://localhost:8000/api/analytics/overview?days=${days}&compare=true`,
-          { headers: { 'Authorization': `Bearer ${token}` }, signal: controller.signal }
+        const data = await apiClient.get<{ success: boolean; data: Record<string, any> }>(
+          `/api/analytics/overview?days=${days}&compare=true`,
+          { signal: controller.signal }
         );
 
-        if (!response.ok) throw new Error('Error fetching analytics');
-
-        const data = await response.json();
         if (!data.success || !data.data) throw new Error('No data available');
 
         const raw = data.data;

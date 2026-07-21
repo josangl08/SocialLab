@@ -11,21 +11,9 @@ import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
 import './CalendarView.css';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { apiClient, ApiError } from '../../api/client';
+import type { Post } from '../../types';
 import PostDetailModal from '../posts/PostDetailModal';
-
-interface Post {
-  id: number;
-  user_id: string;
-  content: string;
-  media_url: string | null;
-  post_type: string;
-  status: string;
-  scheduled_at: string | null;
-  created_at: string;
-  publication_date: string | null;
-  is_ai_generated?: boolean;
-  drive_file_id?: string | null;
-}
 
 interface CalendarViewProps {
   onNewPost?: (date?: string) => void;
@@ -81,17 +69,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
 
       if (!hasLoaded.current) setLoading(true);
       try {
-        const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
-
-        const postsRes = await fetch('http://localhost:8000/api/posts', { headers });
-
-        if (!postsRes.ok) {
-          const err = await postsRes.json();
-          setError('Error loading posts: ' + (err.detail || 'Unknown error'));
-          return;
-        }
-
-        const posts: Post[] = await postsRes.json();
+        const posts = await apiClient.get<Post[]>('/api/posts');
         const postEvents = posts.map(post => {
           const start = post.publication_date
             ? new Date(post.publication_date)
@@ -113,8 +91,8 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
         });
 
         setEvents(postEvents);
-      } catch (err: any) {
-        setError('Network or server error: ' + err.message);
+      } catch (err) {
+        setError(err instanceof ApiError ? 'Error loading posts: ' + err.detail : 'Network or server error');
       } finally {
         hasLoaded.current = true;
         setLoading(false);
@@ -144,26 +122,18 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
       );
 
       try {
-        const res = await fetch(`http://localhost:8000/api/scheduler/reschedule/${event.id}`, {
-          method: 'PUT',
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ new_scheduled_time: new Date(start).toISOString() }),
+        await apiClient.put(`/api/scheduler/reschedule/${event.id}`, {
+          new_scheduled_time: new Date(start).toISOString(),
         });
-
-        if (!res.ok) {
-          setEvents(prevEvents);
-          showDragError('Could not reschedule the post.');
-        } else {
-          onDragSuccess?.();
-        }
+        onDragSuccess?.();
       } catch {
         setEvents(prevEvents);
-        showDragError('Network error rescheduling post.');
+        showDragError('Could not reschedule the post.');
       } finally {
         rescheduleInProgress.current.delete(event.id);
       }
     },
-    [events, token]
+    [events]
   );
 
   const handleSelectSlot = useCallback(({ start }: { start: Date | string }) => {
