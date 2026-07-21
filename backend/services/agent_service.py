@@ -33,7 +33,7 @@ FREQ_RANGE: dict = {
 }
 
 
-def _ai_schedule(analyses: list, account: dict, min_posts: int, max_posts: int, campaign_context: str = '') -> Optional[list]:
+def _ai_schedule(analyses: list, account: dict, min_posts: int, max_posts: int, campaign_context: str = '', analytics_summary: Optional[dict] = None) -> Optional[list]:
     """Ask Gemini to choose which days and post types to use. Returns list of CalendarSlot or None."""
     api_key = GOOGLE_API_KEY
     if not api_key:
@@ -104,6 +104,8 @@ def _ai_schedule(analyses: list, account: dict, min_posts: int, max_posts: int, 
         profile_hints.append(scheduling_hint)
     if campaign_context:
         profile_hints.append(campaign_context)
+    if analytics_summary and analytics_summary.get('has_data'):
+        profile_hints.append(f"MÉTRICAS EMPÍRICAS DE TU CUENTA: {analytics_summary['summary_text']}.")
 
     extra_profile = ("\n" + "\n".join(profile_hints)) if profile_hints else ""
 
@@ -164,6 +166,7 @@ Responde SOLO con JSON válido, sin explicaciones ni bloques markdown:
             ))
 
         if slots:
+            slots = _validate_content_type_mix(slots, raw_mix)
             logger.info(f"[Agent] AI-scheduled {len(slots)} slots: {[s.day for s in slots]}")
             return slots
         raw_count = len(data.get('slots', []))
@@ -172,6 +175,28 @@ Responde SOLO con JSON válido, sin explicaciones ni bloques markdown:
     except Exception as e:
         logger.warning(f"[Agent] AI calendar scheduling failed, using fallback: {e}")
         return None
+
+
+def _validate_content_type_mix(slots: list, raw_mix: dict) -> list:
+    """Corrige el post_type de los slots devueltos por Gemini para que respete
+    la cuota configurada en content_type_mix, cuando el total de slots coincide
+    con el total esperado (ver design.md §3). Si los totales no coinciden, no
+    se toca nada — no se corrige sobre una premisa ya rota."""
+    quota = {k: v for k, v in raw_mix.items() if isinstance(v, int) and v > 0}
+    if sum(quota.values()) != len(slots):
+        return slots
+
+    remaining = dict(quota)
+    corrected = []
+    for slot in slots:
+        if remaining.get(slot.post_type, 0) > 0:
+            remaining[slot.post_type] -= 1
+            corrected.append(slot)
+        else:
+            new_type = next(t for t, count in remaining.items() if count > 0)
+            remaining[new_type] -= 1
+            corrected.append(slot.model_copy(update={'post_type': new_type}))
+    return corrected
 
 
 def run_agent(account_id: int) -> AgentLog:
@@ -258,12 +283,25 @@ def run_agent(account_id: int) -> AgentLog:
         if len(available_analyses) < len(analyses):
             logger.info(f"[Agent] Excluded {len(analyses) - len(available_analyses)} already-pending images")
 
-        slots = _build_calendar(available_analyses, account, campaign_context)
+        raw_best_times = account.get('best_times')
+        analytics_summary = None
+        best_times_by_weekday = None
+        if not raw_best_times:
+            try:
+                from services.analytics.analytics_service import AnalyticsService
+                analytics_summary = AnalyticsService(db_client=supabase).get_empirical_scheduling_data(account_id)
+                if analytics_summary.get('has_data'):
+                    best_times_by_weekday = analytics_summary.get('best_times_by_weekday')
+            except Exception as e:
+                logger.warning(f"[Agent] Could not compute empirical scheduling data: {e}")
+                analytics_summary = None
+
+        slots = _build_calendar(available_analyses, account, campaign_context, analytics_summary)
         logger.info(f"[Agent] Calendar slots built — count={len(slots)}")
-        best_times = account.get('best_times') or ['12:00']
+        best_times = raw_best_times or ['12:00']
         if isinstance(best_times, str):
             best_times = json.loads(best_times)
-        proposal = _create_drafts(slots, account_id, user_id, best_times, week_start)
+        proposal = _create_drafts(slots, account_id, user_id, best_times, week_start, best_times_by_weekday)
         posts_drafted = len(proposal.slots)
         logger.info(f"[Agent] Proposal created — id={proposal.id}, week_start={proposal.week_start}, slots={posts_drafted}")
 
@@ -491,12 +529,12 @@ def _analyze_images(account_id: str, files: list, account: dict = None, user_id:
     return analyses
 
 
-def _build_calendar(analyses: list, account: dict, campaign_context: str = '') -> list:
+def _build_calendar(analyses: list, account: dict, campaign_context: str = '', analytics_summary: Optional[dict] = None) -> list:
     freq = account.get('posting_frequency', 'few_times_week')
     min_posts, max_posts = FREQ_RANGE.get(freq, (3, 5))
 
     # Try AI scheduling first
-    ai_slots = _ai_schedule(analyses, account, min_posts, max_posts, campaign_context)
+    ai_slots = _ai_schedule(analyses, account, min_posts, max_posts, campaign_context, analytics_summary)
     if ai_slots:
         return ai_slots
 
@@ -547,16 +585,24 @@ def _get_next_unplanned_week(account_id: int, supabase) -> date:
     return candidate
 
 
-def _create_drafts(slots: list, account_id: int, user_id: str, best_times: list = None, week_start: date = None) -> ContentProposal:
+def _create_drafts(
+    slots: list,
+    account_id: int,
+    user_id: str,
+    best_times: list = None,
+    week_start: date = None,
+    best_times_by_weekday: Optional[dict] = None,
+) -> ContentProposal:
     supabase = get_supabase_admin_client()
     if week_start is None:
         week_start = _get_next_unplanned_week(account_id, supabase)
     times = best_times if best_times else ['12:00']
+    best_times_by_weekday = best_times_by_weekday or {}
 
     updated_slots = []
     for i, slot in enumerate(slots):
         day_offset = WEEKDAY_NAMES.index(slot.day) if slot.day in WEEKDAY_NAMES else 0
-        raw_time = times[i % len(times)]
+        raw_time = best_times_by_weekday.get(day_offset) or times[i % len(times)]
         h, m = map(int, raw_time.split(':'))
         scheduled_at = datetime.combine(
             week_start + timedelta(days=day_offset),

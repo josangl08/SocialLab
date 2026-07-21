@@ -328,6 +328,7 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
     try {
       const d = await apiClient.post<{ best_times?: string[] }>('/api/agent/suggest-times', {
         sector: cfg.sector, target_audience: cfg.target_audience, default_tone: cfg.default_tone, account_type: cfg.account_type,
+        account_id: accountId,
       });
       if (d.best_times) set('best_times', d.best_times);
     } catch { /* silent */ }

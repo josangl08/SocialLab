@@ -10,6 +10,7 @@ import uuid
 import json
 import logging
 from services.gemini_service import generate_gemini_content, clean_and_parse_json, regenerate_slot_caption
+from services.analytics.analytics_service import AnalyticsService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["Agent"])
@@ -267,6 +268,7 @@ class SuggestTimesRequest(BaseModel):
     target_audience: str = ""
     default_tone: str = "energetic"
     account_type: str = "personal"
+    account_id: Optional[int] = None
 
 
 @router.post("/suggest-times")
@@ -274,6 +276,17 @@ async def suggest_times(
     request: SuggestTimesRequest,
     current_user: User = Depends(get_current_user)
 ):
+    if request.account_id is not None:
+        acc_res = admin_supabase.table('instagram_accounts').select('user_id').eq('id', request.account_id).execute()
+        if not acc_res.data:
+            raise HTTPException(status_code=404, detail="Cuenta de Instagram no encontrada")
+        if str(acc_res.data[0]['user_id']) != str(current_user.id):
+            raise HTTPException(status_code=403, detail="No tienes acceso a esta cuenta")
+
+        analytics_data = AnalyticsService(db_client=admin_supabase).get_empirical_scheduling_data(request.account_id)
+        if analytics_data.get('has_data'):
+            return {"best_times": analytics_data['top_times'][:3], "source": "historical"}
+
     if request.account_type == "professional":
         timing_context = (
             "Es una cuenta PROFESIONAL/BUSINESS. Considera las ventanas en que la audiencia "
@@ -301,7 +314,9 @@ Horarios en formato 24h, de mayor a menor impacto. Solo el JSON."""
 
     try:
         text = await generate_gemini_content(prompt)
-        return await clean_and_parse_json(text)
+        result = await clean_and_parse_json(text)
+        result["source"] = "heuristic"
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

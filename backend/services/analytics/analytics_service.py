@@ -906,6 +906,66 @@ class AnalyticsService:
 
         return result
 
+    def get_empirical_scheduling_data(
+        self,
+        instagram_account_id: int,
+        days: int = 90
+    ) -> Dict:
+        """
+        Resumen compacto de horarios óptimos basado en histórico real de la cuenta,
+        listo para inyectar en un prompt de Gemini o usar directamente (sin llamar a IA).
+
+        Reutiliza _get_posts_from_db, _analyze_audience, _calculate_best_posting_times
+        y _calculate_best_times_by_weekday sin modificarlos (ver design.md §1).
+
+        Returns:
+            Dict con 'has_data', 'top_times' (top 3 horas globales), 'best_times_by_weekday'
+            (weekday idx 0=lunes -> mejor hora "HH:00", solo días con >=3 posts) y
+            'summary_text' (resumen de 1 línea para el prompt).
+        """
+        posts = self._get_posts_from_db(instagram_account_id, days)
+        if not posts:
+            return {
+                'has_data': False,
+                'top_times': [],
+                'best_times_by_weekday': {},
+                'summary_text': ""
+            }
+
+        audience = self._analyze_audience(instagram_account_id, days)
+        best_posting_times = self._calculate_best_posting_times(
+            instagram_account_id, audience.get('online_hours', {}), days
+        )
+        weekday_slots = self._calculate_best_times_by_weekday(posts)
+
+        def _slot_count(slot: Dict) -> int:
+            return slot.get('posts_count', slot.get('count', 0))
+
+        best_times_by_weekday = {
+            day: slots[0]['hour']
+            for day, slots in weekday_slots.items()
+            if slots and sum(_slot_count(s) for s in slots) >= 3
+        }
+
+        has_data = bool(best_times_by_weekday)
+        top_times = [slot['hour'] for slot in best_posting_times[:3]] if has_data else []
+
+        summary_text = ""
+        if has_data:
+            day_names = ['Lun', 'Mar', 'Miér', 'Jue', 'Vie', 'Sáb', 'Dom']
+            parts = [
+                f"{day_names[day] if isinstance(day, int) and 0 <= day < 7 else str(day)[:3]} {hour}"
+                for day, hour in best_times_by_weekday.items()
+            ]
+            summary_text = ", ".join(parts) + " — basado en tu histórico real"
+
+        return {
+            'has_data': has_data,
+            'top_times': top_times,
+            'best_times_by_weekday': best_times_by_weekday,
+            'summary_text': summary_text
+        }
+
     def _calculate_trends(self, posts: List[Dict], days: int) -> List[Dict]:
         """
         Calcula tendencia de engagement por día.
