@@ -19,10 +19,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/instagram", tags=["Instagram Integration"])
 supabase = get_supabase_client()
 admin_supabase = get_supabase_admin_client()
-
-INSTAGRAM_APP_ID = os.environ.get("INSTAGRAM_APP_ID")
-INSTAGRAM_APP_SECRET = os.environ.get("INSTAGRAM_APP_SECRET")
-INSTAGRAM_REDIRECT_URI = os.environ.get("INSTAGRAM_REDIRECT_URI")
+from config import INSTAGRAM_APP_ID, INSTAGRAM_APP_SECRET, INSTAGRAM_REDIRECT_URI
 
 @router.get("/login")
 def instagram_login(token: str, current_user: User = Depends(get_current_user_from_query_token)):

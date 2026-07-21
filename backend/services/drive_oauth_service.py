@@ -10,6 +10,7 @@ from google_auth_oauthlib.flow import Flow
 
 from database.supabase_client import get_supabase_admin_client
 from utils.encryption import encrypt_token, decrypt_token
+from config import GOOGLE_REDIRECT_URI, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +23,9 @@ class DriveOAuthService:
         self._supabase = get_supabase_admin_client()
 
     def build_flow(self) -> Flow:
-        redirect_uri = os.getenv('GOOGLE_REDIRECT_URI', _DEFAULT_REDIRECT_URI)
-        client_id = os.getenv('GOOGLE_CLIENT_ID')
-        client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+        redirect_uri = GOOGLE_REDIRECT_URI or _DEFAULT_REDIRECT_URI
+        client_id = GOOGLE_CLIENT_ID
+        client_secret = GOOGLE_CLIENT_SECRET
 
         if client_id and client_secret:
             client_config = {
@@ -67,8 +68,8 @@ class DriveOAuthService:
             token=decrypt_token(row['access_token']),
             refresh_token=decrypt_token(row['refresh_token']),
             token_uri="https://oauth2.googleapis.com/token",
-            client_id=os.getenv('GOOGLE_CLIENT_ID'),
-            client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
+            client_id=GOOGLE_CLIENT_ID,
+            client_secret=GOOGLE_CLIENT_SECRET,
             scopes=row.get('scopes') or SCOPES,
             expiry=expiry,
         )

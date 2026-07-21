@@ -14,6 +14,7 @@ from services.gemini_service import regenerate_slot_caption
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import TelegramMessage, TelegramCallbackQuery
 from services.scheduler.post_scheduler import PostScheduler
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +30,14 @@ class TelegramService:
         return cls._instance
 
     def _bot_url(self, method: str) -> str:
-        token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        token = config.TELEGRAM_BOT_TOKEN
         return f"{TELEGRAM_API_BASE}{token}/{method}"
 
     async def register_webhook(self, base_url: Optional[str]) -> None:
         if not base_url:
             logger.info("TELEGRAM_WEBHOOK_URL not set — skipping webhook registration")
             return
-        token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        token = config.TELEGRAM_BOT_TOKEN
         webhook_url = f"{base_url}/api/telegram/webhook/{token}"
         async with httpx.AsyncClient() as client:
             resp = await client.post(self._bot_url("setWebhook"), json={"url": webhook_url})
@@ -318,7 +319,7 @@ class TelegramService:
                 await self._handle_edit_reply(chat_id, post_id, text)
 
     async def _handle_link_account(self, chat_id: str, token: str) -> None:
-        base_url = os.getenv("APP_BASE_URL", "http://localhost:8000")
+        base_url = config.APP_BASE_URL
         async with httpx.AsyncClient() as client:
             resp = await client.post(f"{base_url}/api/telegram/link-account", json={
                 "link_token": token,
@@ -464,7 +465,7 @@ class TelegramService:
 
     async def _handle_date_reply(self, chat_id: str, post_id: int, date_text: str) -> None:
         try:
-            tz = ZoneInfo(os.getenv("APP_TIMEZONE", "Europe/Madrid"))
+            tz = ZoneInfo(config.APP_TIMEZONE)
             scheduled_at = datetime.strptime(date_text.strip(), "%Y-%m-%d %H:%M").replace(tzinfo=tz)
         except (ValueError, KeyError):
             async with httpx.AsyncClient() as client:
@@ -894,7 +895,7 @@ class TelegramService:
         if not largest:
             return
 
-        token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        token = config.TELEGRAM_BOT_TOKEN
         async with httpx.AsyncClient() as client:
             # Get file path from Telegram
             file_resp = await client.get(self._bot_url(f"getFile?file_id={largest.file_id}"))

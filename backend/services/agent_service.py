@@ -12,6 +12,7 @@ from services.gemini_service import generate_gemini_content, clean_and_parse_jso
 
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import AgentLog, VisualAnalysis, CalendarSlot, ContentProposal
+from config import GOOGLE_API_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ FREQ_RANGE: dict = {
 
 def _ai_schedule(analyses: list, account: dict, min_posts: int, max_posts: int, campaign_context: str = '') -> Optional[list]:
     """Ask Gemini to choose which days and post types to use. Returns list of CalendarSlot or None."""
-    api_key = os.getenv("GOOGLE_API_KEY", "")
+    api_key = GOOGLE_API_KEY
     if not api_key:
         return None
 
@@ -356,7 +357,7 @@ def _build_campaign_context(campaign: Optional[dict], week_start: date) -> str:
 
 def _analyze_images(account_id: str, files: list, account: dict = None, user_id: str = '', campaign_context: str = '') -> list:
     logger.info(f"_analyze_images: starting for account {account_id} with {len(files)} files")
-    api_key = os.getenv("GOOGLE_API_KEY")
+    api_key = GOOGLE_API_KEY
     if not api_key:
         logger.error("GOOGLE_API_KEY not configured")
         return []

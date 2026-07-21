@@ -7,8 +7,8 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Dict
 from pydantic import BaseModel
 
-from auth.jwt_handler import get_current_user
-from auth.dependencies import get_user_supabase_client
+from auth.dependencies import get_current_user, get_user_supabase_client
+from models.schemas import User
 from services.template_sync import get_template_sync
 from supabase import Client
 
@@ -27,7 +27,7 @@ class SyncResponse(BaseModel):
 
 @router.post("/sync-from-drive", response_model=SyncResponse)
 async def sync_templates_from_drive(
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
     """
@@ -42,7 +42,7 @@ async def sync_templates_from_drive(
         Resultado de sincronización con detalles
     """
     try:
-        user_id = current_user['id']
+        user_id = current_user.id
 
         sync_service = get_template_sync(supabase_client=supabase)
         result = sync_service.sync_templates_from_drive(user_id)
@@ -78,7 +78,7 @@ async def sync_templates_from_drive(
 
 @router.get("/drive-status")
 async def get_drive_sync_status(
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Verifica estado de Google Drive y carpeta de templates.

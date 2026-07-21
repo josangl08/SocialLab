@@ -9,10 +9,12 @@ from auth.dependencies import get_current_user, get_current_user_from_query_toke
 from models.schemas import DriveToken, User
 from utils.oauth_state import generate_state_token, verify_state_token
 
+from config import FRONTEND_URL
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/drive", tags=["Drive OAuth"])
 
-_FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+_FRONTEND_URL = FRONTEND_URL
 
 
 @router.get("/auth")

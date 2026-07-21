@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 import logging
 
-from auth.jwt_handler import get_current_user
-from auth.dependencies import get_user_supabase_client
+from auth.dependencies import get_current_user, get_user_supabase_client
+from models.schemas import User
 from supabase import Client
 from services.google_drive_connector import get_drive_connector
 from services.image_composer import get_image_composer
@@ -65,7 +65,7 @@ class TemplateResponse(BaseModel):
 @router.post("/", response_model=dict)
 async def create_template(
     template: TemplateCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
     """
@@ -76,7 +76,7 @@ async def create_template(
     - Datos del template
     """
     try:
-        user_id = current_user['id']
+        user_id = current_user.id
 
         # Crear template en DB
         template_data = {
@@ -118,7 +118,7 @@ async def list_templates(
     category_id: Optional[int] = None,
     instagram_account_id: Optional[int] = None,
     is_active: Optional[bool] = None,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
     """
@@ -130,7 +130,7 @@ async def list_templates(
     - is_active: Solo activos/inactivos
     """
     try:
-        user_id = current_user['id']
+        user_id = current_user.id
 
         # Query base
         query = supabase.table('templates').select('*').eq(
@@ -163,12 +163,12 @@ async def list_templates(
 @router.get("/{template_id}", response_model=TemplateResponse)
 async def get_template(
     template_id: int,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
     """Obtiene un template específico."""
     try:
-        user_id = current_user['id']
+        user_id = current_user.id
 
         result = supabase.table('templates').select('*').eq(
             'id',
@@ -194,12 +194,12 @@ async def get_template(
 async def update_template(
     template_id: int,
     template_update: TemplateUpdate,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
     """Actualiza un template existente."""
     try:
-        user_id = current_user['id']
+        user_id = current_user.id
 
         # Verificar que el template existe y pertenece al usuario
         existing = supabase.table('templates').select('id').eq(
@@ -249,7 +249,7 @@ async def update_template(
 @router.delete("/{template_id}", response_model=dict)
 async def delete_template(
     template_id: int,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
     """
@@ -258,7 +258,7 @@ async def delete_template(
     Solo lo marca como inactivo en lugar de eliminarlo físicamente.
     """
     try:
-        user_id = current_user['id']
+        user_id = current_user.id
 
         # Verificar que existe
         existing = supabase.table('templates').select('id').eq(
@@ -295,7 +295,7 @@ async def delete_template(
 async def upload_template_image(
     template_id: int,
     file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
     """
@@ -304,7 +304,7 @@ async def upload_template_image(
     Valida dimensiones y guarda en Supabase Storage.
     """
     try:
-        user_id = current_user['id']
+        user_id = current_user.id
 
         # Verificar template
         template_result = supabase.table('templates').select('id').eq(
@@ -369,7 +369,7 @@ async def upload_template_image(
 async def get_template_preview(
     template_id: int,
     format_type: str = 'square',
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
     """
@@ -379,7 +379,7 @@ async def get_template_preview(
     - format_type: 'square' | 'portrait' | 'story'
     """
     try:
-        user_id = current_user['id']
+        user_id = current_user.id
 
         # Obtener template
         template_result = supabase.table('templates').select(
@@ -417,7 +417,7 @@ async def get_template_preview(
 
 @router.get("/categories/list", response_model=List[dict])
 async def list_template_categories(
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
     """Lista categorías de templates disponibles."""
@@ -437,7 +437,7 @@ async def list_template_categories(
 async def create_template_category(
     name: str,
     description: Optional[str] = None,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
     """Crea una nueva categoría de templates."""

@@ -8,6 +8,8 @@ from google.api_core.exceptions import ResourceExhausted
 
 from typing import Optional, List
 
+from config import GOOGLE_API_KEY
+
 logger = logging.getLogger(__name__)
 
 PREFERRED_GEMINI_MODELS = [
@@ -16,7 +18,7 @@ PREFERRED_GEMINI_MODELS = [
 ]
 
 def _configure_genai():
-    api_key = os.getenv("GOOGLE_API_KEY")
+    api_key = GOOGLE_API_KEY
     if not api_key:
         raise Exception("GOOGLE_API_KEY no configurada. Necesaria para interactuar con Gemini.")
     genai.configure(api_key=api_key)

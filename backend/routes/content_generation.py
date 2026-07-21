@@ -10,8 +10,8 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 import logging
 
-from auth.jwt_handler import get_current_user
-from auth.dependencies import get_user_supabase_client
+from auth.dependencies import get_current_user, get_user_supabase_client
+from models.schemas import User
 from database.supabase_client import get_supabase_client
 from supabase import Client
 from services.google_drive_connector import get_drive_connector
@@ -79,7 +79,7 @@ class QueueStatusResponse(BaseModel):
 async def generate_content(
     request: ContentGenerationRequest,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
     """
@@ -94,7 +94,7 @@ async def generate_content(
     6. Opcionalmente: publica en Instagram
     """
     try:
-        user_id = current_user['id']
+        user_id = current_user.id
 
         if not request.export_id and not request.topic:
             raise HTTPException(
@@ -334,12 +334,12 @@ async def generate_content(
 
 @router.get("/queue/status", response_model=QueueStatusResponse)
 async def get_queue_status(
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
     """Obtiene estado de la cola de generación."""
     try:
-        user_id = current_user['id']
+        user_id = current_user.id
 
         # Contar por estado
         pending = supabase.table('content_generation_queue').select(
@@ -386,12 +386,12 @@ async def get_queue_status(
 @router.get("/history", response_model=List[dict])
 async def get_generation_history(
     limit: int = 50,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
     """Obtiene historial de generaciones."""
     try:
-        user_id = current_user['id']
+        user_id = current_user.id
 
         result = supabase.table('content_generation_history').select(
             '*',

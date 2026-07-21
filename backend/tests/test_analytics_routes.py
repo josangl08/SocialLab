@@ -2,12 +2,13 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 from main import app
-from auth.jwt_handler import get_current_user
+from auth.dependencies import get_current_user
+from models.schemas import User
 from tests.conftest import USER_ID
 
 # Mock current user
 async def mock_get_current_user():
-    return {"id": USER_ID, "email": "test@example.com"}
+    return User(id=USER_ID, email="test@example.com")
 
 # Apply dependency override
 app.dependency_overrides[get_current_user] = mock_get_current_user

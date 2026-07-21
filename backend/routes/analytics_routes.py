@@ -14,7 +14,8 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from pydantic import BaseModel
 
-from auth.jwt_handler import get_current_user
+from auth.dependencies import get_current_user
+from models.schemas import User
 from database import supabase
 from database.supabase_client import get_supabase_admin_client
 from services.instagram_insights import InstagramInsightsService
@@ -27,14 +28,14 @@ router = APIRouter(prefix="/api/analytics", tags=["Analytics"])
 
 def get_instagram_service(
     instagram_account_id: Optional[int] = None,
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ) -> InstagramInsightsService:
     """
     Dependency para obtener el servicio de Instagram configurado para el usuario actual
     """
     try:
         admin_db = get_supabase_admin_client()
-        query = admin_db.table('instagram_accounts').select('*').eq('user_id', current_user['id'])
+        query = admin_db.table('instagram_accounts').select('*').eq('user_id', current_user.id)
         if instagram_account_id:
             query = query.eq('id', instagram_account_id)
         else:
@@ -227,7 +228,7 @@ def full_sync_account(instagram_service, db_client, user_id, instagram_account_i
 async def sync_instagram_analytics(
     instagram_account_id: int,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Inicia sincronización de posts y métricas de una cuenta Instagram específica.
@@ -247,7 +248,7 @@ async def sync_instagram_analytics(
 
         account = result.data
 
-        if account['user_id'] != current_user['id']:
+        if account['user_id'] != current_user.id:
             raise HTTPException(
                 status_code=403,
                 detail="No tienes permiso para sincronizar esta cuenta"
@@ -268,13 +269,13 @@ async def sync_instagram_analytics(
             full_sync_account,
             instagram_service=instagram_service,
             db_client=get_supabase_admin_client(),
-            user_id=current_user['id'],
+            user_id=current_user.id,
             instagram_account_id_db=instagram_account_id
         )
 
         logger.info(
             f"Iniciada sincronización para cuenta Instagram "
-            f"{instagram_account_id} (user: {current_user['id']})"
+            f"{instagram_account_id} (user: {current_user.id})"
         )
 
         return {
@@ -307,7 +308,7 @@ async def sync_instagram_analytics(
 )
 async def sync_instagram_data_deprecated(
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     instagram_service: InstagramInsightsService = Depends(get_instagram_service)
 ):
     """
@@ -318,7 +319,7 @@ async def sync_instagram_data_deprecated(
     """
     try:
         admin_db = get_supabase_admin_client()
-        result = admin_db.table('instagram_accounts').select('id').eq('user_id', current_user['id']).eq('is_active', True).limit(1).execute()
+        result = admin_db.table('instagram_accounts').select('id').eq('user_id', current_user.id).eq('is_active', True).limit(1).execute()
         if not result.data:
             raise HTTPException(status_code=404, detail="No se encontró una cuenta de Instagram activa para este usuario.")
 
@@ -328,7 +329,7 @@ async def sync_instagram_data_deprecated(
         background_tasks.add_task(
             instagram_service.sync_posts_to_database,
             db_client=admin_db,
-            user_id=current_user['id'], 
+            user_id=current_user.id, 
             instagram_account_id_db=instagram_account_id_db
         )
 
@@ -394,7 +395,7 @@ async def get_analytics_overview(
     days: int = 365,
     compare: bool = False,
     instagram_account_id: Optional[int] = None,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     instagram_service: InstagramInsightsService = Depends(get_instagram_service)
 ) -> Dict:
     """
@@ -440,7 +441,7 @@ async def get_analytics_overview(
 
         # Obtener análisis completo
         result = analytics_service.get_comprehensive_analytics(
-            user_id=current_user['id'],
+            user_id=current_user.id,
             instagram_account_id=instagram_account_id,
             days=days,
             compare=compare
@@ -491,7 +492,7 @@ async def get_analytics_overview(
 
     except Exception as e:
         logger.error(
-            f"Error obteniendo analytics para user {current_user['id']}: {e}",
+            f"Error obteniendo analytics para user {current_user.id}: {e}",
             exc_info=True
         )
         raise HTTPException(

@@ -13,28 +13,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Cargar variables de entorno desde el directorio raíz del backend
-backend_root = Path(__file__).parent.parent
-dotenv_path = backend_root / '.env'
-load_dotenv(dotenv_path=dotenv_path)
-
-# Configuración de Supabase
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    if not dotenv_path.is_file():
-        raise Exception(
-            f"Error de Configuración: No se encontró el fichero .env en la ruta esperada: {dotenv_path}. "
-            "Por favor, asegúrate de que el fichero existe en el directorio 'backend' y contiene las "
-            "variables SUPABASE_URL y SUPABASE_KEY."
-        )
-    else:
-        raise Exception(
-            "Error de Configuración: El fichero .env fue encontrado, pero no contiene "
-            "las variables SUPABASE_URL y/o SUPABASE_KEY. Por favor, verifica el contenido del fichero."
-        )
+from config import SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_ROLE_KEY
 
 # Clientes globales
 _supabase_client: Client = None
