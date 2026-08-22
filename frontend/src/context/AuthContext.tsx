@@ -19,6 +19,17 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Endpoints whose 401 means "a connected third-party token expired" (e.g.
+// Instagram/Facebook), not "your app session expired" — must not trigger
+// the global forced logout below.
+const NON_SESSION_401_PATHS = ['/instagram/sync'];
+
+function getRequestUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.toString();
+  return input.url;
+}
+
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const navigate = useNavigate();
   const [token, setToken] = useState<string | null>(localStorage.getItem('authToken'));
@@ -62,8 +73,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     window.fetch = async (...args) => {
       const response = await originalFetch(...args);
       if (response.status === 401 && localStorage.getItem('authToken')) {
-        logout();
-        navigate('/login', { replace: true });
+        const url = getRequestUrl(args[0]);
+        const isSessionUnrelated401 = NON_SESSION_401_PATHS.some(path => url.includes(path));
+        if (!isSessionUnrelated401) {
+          logout();
+          navigate('/login', { replace: true });
+        }
       }
       return response;
     };

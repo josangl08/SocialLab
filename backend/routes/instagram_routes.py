@@ -5,7 +5,7 @@ import logging
 import requests
 from typing import Optional
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
 from starlette.responses import RedirectResponse
 
 from database.supabase_client import get_supabase_client
@@ -22,11 +22,15 @@ admin_supabase = get_supabase_admin_client()
 from config import INSTAGRAM_APP_ID, INSTAGRAM_APP_SECRET, INSTAGRAM_REDIRECT_URI
 
 @router.get("/login")
-def instagram_login(token: str, current_user: User = Depends(get_current_user_from_query_token)):
+def instagram_login(
+    token: str,
+    account_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user_from_query_token)
+):
     if not INSTAGRAM_APP_ID:
         raise HTTPException(status_code=500, detail="INSTAGRAM_APP_ID no configurado.")
 
-    state_param = generate_state_token(current_user.id)
+    state_param = generate_state_token(current_user.id, account_id)
 
     auth_url = (
         f"https://graph.facebook.com/oauth/authorize?client_id={INSTAGRAM_APP_ID}"
@@ -52,10 +56,14 @@ def instagram_login(token: str, current_user: User = Depends(get_current_user_fr
 router_no_prefix = APIRouter(tags=["Instagram Integration"])
 
 @router_no_prefix.get("/instagram/login")
-def instagram_login_np(token: str, current_user: User = Depends(get_current_user_from_query_token)):
+def instagram_login_np(
+    token: str,
+    account_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user_from_query_token)
+):
     if not INSTAGRAM_APP_ID:
         raise HTTPException(status_code=500, detail="INSTAGRAM_APP_ID no configurado.")
-    state_param = generate_state_token(current_user.id)
+    state_param = generate_state_token(current_user.id, account_id)
     auth_url = (
         f"https://graph.facebook.com/oauth/authorize?client_id={INSTAGRAM_APP_ID}"
         f"&redirect_uri={INSTAGRAM_REDIRECT_URI}"
@@ -81,7 +89,9 @@ def instagram_callback(
         raise HTTPException(status_code=400, detail="No se recibió el ID de usuario en el parámetro state.")
 
     try:
-        sociallab_user_id = verify_state_token(state)
+        state_data = verify_state_token(state)
+        sociallab_user_id = state_data["user_id"]
+        target_account_id = state_data.get("account_id")
     except ValueError:
         raise HTTPException(status_code=400, detail="Parámetro state inválido o expirado.")
 
@@ -157,12 +167,25 @@ def instagram_callback(
 
         try:
             admin_supabase = get_supabase_admin_client()
-            admin_supabase.table('instagram_accounts').upsert({
-                'user_id': sociallab_user_id,
-                'instagram_business_account_id': instagram_business_account_id,
-                'long_lived_access_token': encrypt_token(long_lived_access_token),
-                'expires_at': expires_at.isoformat() + 'Z'
-            }, on_conflict='user_id,instagram_business_account_id').execute()
+            if target_account_id:
+                # Reconexión de una tarjeta concreta: actualiza esa fila exacta,
+                # sin importar qué instagram_business_account_id devuelva esta vez
+                # Facebook — evita crear una cuenta nueva por accidente si el
+                # usuario elige una página distinta en el popup de Meta.
+                admin_supabase.table('instagram_accounts').update({
+                    'instagram_business_account_id': instagram_business_account_id,
+                    'long_lived_access_token': encrypt_token(long_lived_access_token),
+                    'expires_at': expires_at.isoformat() + 'Z',
+                    'token_invalid': False
+                }).eq('id', target_account_id).eq('user_id', sociallab_user_id).execute()
+            else:
+                admin_supabase.table('instagram_accounts').upsert({
+                    'user_id': sociallab_user_id,
+                    'instagram_business_account_id': instagram_business_account_id,
+                    'long_lived_access_token': encrypt_token(long_lived_access_token),
+                    'expires_at': expires_at.isoformat() + 'Z',
+                    'token_invalid': False
+                }, on_conflict='user_id,instagram_business_account_id').execute()
             logger.info("Instagram account details saved to Supabase.")
         except Exception as e:
             logger.error(f"Error saving Instagram account details to Supabase: {e}")
@@ -184,6 +207,7 @@ def instagram_sync(
     """
     logger.info(f"🔄 Sincronizando Instagram para usuario: {current_user.id}")
 
+    account_id = None
     try:
         # Usar admin client: RLS bloquea instagram_accounts con cliente anon
         admin_db = get_supabase_admin_client()
@@ -282,7 +306,7 @@ def instagram_sync(
             }
             posts_to_upsert.append(post_data)
 
-        supabase.table('posts').upsert(
+        admin_supabase.table('posts').upsert(
             posts_to_upsert,
             on_conflict='instagram_post_id'
         ).execute()
@@ -297,7 +321,8 @@ def instagram_sync(
             'username': profile_data.get('username', ''),
             'account_name': profile_data.get('name', ''),
             'profile_picture_url': profile_data.get('profile_picture_url', ''),
-            'last_sync_at': datetime.utcnow().isoformat()
+            'last_sync_at': datetime.utcnow().isoformat(),
+            'token_invalid': False
         }).eq('id', account_id).execute()
 
         return {
@@ -310,9 +335,13 @@ def instagram_sync(
 
     except requests.exceptions.RequestException as e:
         error_detail = str(e)
-        if e.response:
+        if e.response is not None:
             error_detail = f"Status {e.response.status_code}: {e.response.text}"
-        if e.response and e.response.status_code in [400, 401]:
+        if e.response is not None and e.response.status_code in [400, 401]:
+            if account_id:
+                get_supabase_admin_client().table('instagram_accounts').update(
+                    {'token_invalid': True}
+                ).eq('id', account_id).execute()
             raise HTTPException(
                 status_code=401,
                 detail="El token de acceso de Instagram ha expirado. Vuelve a conectar tu cuenta."
@@ -544,7 +573,7 @@ def get_instagram_accounts(current_user: User = Depends(get_current_user)):
     """
     try:
         response = admin_supabase.table('instagram_accounts')\
-            .select('id, instagram_business_account_id, username, account_name, followers_count, profile_picture_url, expires_at, is_active, telegram_chat_id, drive_folder_id')\
+            .select('id, instagram_business_account_id, username, account_name, followers_count, profile_picture_url, expires_at, is_active, telegram_chat_id, drive_folder_id, token_invalid')\
             .eq('user_id', current_user.id)\
             .execute()
         return response.data
@@ -555,6 +584,7 @@ def get_instagram_accounts(current_user: User = Depends(get_current_user)):
 def update_account_config(
     account_id: str,
     config: InstagramAccountConfigUpdate,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user)
 ):
     existing = admin_supabase.table('instagram_accounts').select('id').eq('id', account_id).eq('user_id', current_user.id).execute()
@@ -564,6 +594,11 @@ def update_account_config(
     update_data = {k: v for k, v in config.model_dump().items() if v is not None}
     if update_data:
         admin_supabase.table('instagram_accounts').update(update_data).eq('id', account_id).execute()
+
+    if update_data.get('drive_folder_id'):
+        from services.drive_webhook_service import register_channel
+        background_tasks.add_task(register_channel, int(account_id), update_data['drive_folder_id'])
+
     return {"success": True}
 
 @router_no_prefix.delete("/instagram/accounts/{account_id}")

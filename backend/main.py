@@ -2,7 +2,8 @@ import os
 import sys
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, date, timedelta
+from typing import Optional
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -139,6 +140,75 @@ def run_agent_for_all_accounts():
         logger.error(f"❌ Error en run_agent_for_all_accounts: {e}")
 
 
+async def _run_monthly_strategy_for_all_accounts_async(accounts_data):
+    """Ejecuta run_monthly_strategy_session para cada cuenta de forma concurrente,
+    acotado por AGENT_CONCURRENCY_LIMIT, y envía la tarjeta de aprobación por
+    Telegram solo cuando el borrador fue realmente creado (design.md — decisión #6:
+    no reenviar tarjeta si ya había una campaña pendiente)."""
+    from services.hermes.monthly_strategy import run_monthly_strategy_session
+    from services.telegram_service import TelegramService
+
+    semaphore = asyncio.Semaphore(AGENT_CONCURRENCY_LIMIT)
+
+    async def _run_one(account):
+        async with semaphore:
+            try:
+                result = await run_monthly_strategy_session(account['id'])
+                if result.created and result.campaign_id and account.get('telegram_chat_id'):
+                    campaign_res = admin_supabase.table('monthly_campaigns')\
+                        .select('*').eq('id', result.campaign_id).execute()
+                    if campaign_res.data:
+                        await TelegramService().send_campaign_approval_card(
+                            str(account['telegram_chat_id']), campaign_res.data[0]
+                        )
+                logger.info(
+                    f"✅ Estrategia mensual procesada para cuenta {account['id']} "
+                    f"(created={result.created}, error={result.error})"
+                )
+            except Exception as e:
+                logger.error(f"❌ Error ejecutando estrategia mensual para cuenta {account['id']}: {e}")
+
+    await asyncio.gather(*(_run_one(account) for account in accounts_data))
+
+
+def _days_until_month_end(today: Optional[date] = None) -> int:
+    """Días restantes (incluyendo hoy) hasta el último día del mes en curso."""
+    today = today or date.today()
+    if today.month == 12:
+        next_month_first = date(today.year + 1, 1, 1)
+    else:
+        next_month_first = date(today.year, today.month + 1, 1)
+    last_day_of_month = next_month_first - timedelta(days=1)
+    return (last_day_of_month - today).days
+
+
+def run_monthly_strategy_for_all_accounts():
+    """
+    Cron job diario (08:00). A partir de 2 días antes de fin de mes, dispara para
+    cada cuenta activa la sesión de Hermes que redacta el borrador de campaña del
+    mes siguiente (idempotente — ver supabase_create_monthly_campaign).
+    """
+    logger.info("⏰ Iniciando comprobación diaria de estrategia mensual...")
+    try:
+        days_left = _days_until_month_end()
+        if days_left > 2:
+            logger.info(f"📅 Faltan {days_left} días para fin de mes — aún no toca generar campañas")
+            return
+
+        all_accounts = admin_supabase.table('instagram_accounts')\
+            .select('id, telegram_chat_id, is_active')\
+            .execute()
+
+        accounts_data = [
+            acc for acc in (all_accounts.data or [])
+            if acc.get('is_active') is not False
+        ]
+
+        asyncio.run(_run_monthly_strategy_for_all_accounts_async(accounts_data))
+    except Exception as e:
+        logger.error(f"❌ Error en run_monthly_strategy_for_all_accounts: {e}")
+
+
 def send_daily_briefings_for_all_accounts():
     """
     Cron job diario (09:00) que envía por Telegram las publicaciones de hoy.
@@ -168,6 +238,42 @@ def send_daily_briefings_for_all_accounts():
                 logger.error(f"❌ Error enviando briefing para cuenta {account['id']}: {e}")
     except Exception as e:
         logger.error(f"❌ Error en send_daily_briefings_for_all_accounts: {e}")
+
+
+def renew_drive_channels():
+    """
+    Cron job (cada 15 min) que renueva los canales de notificación push de Drive
+    próximos a caducar — confirmado empíricamente que Google los expira en ~1h
+    para este tipo de recurso, no en 24h/7 días como cabría asumir.
+    """
+    try:
+        from services.drive_webhook_service import renew_expiring_channels
+        renewed = renew_expiring_channels()
+        if renewed:
+            logger.info(f"✅ {renewed} canal(es) de Drive renovado(s)")
+    except Exception as e:
+        logger.error(f"❌ Error renovando canales de Drive: {e}")
+
+
+def refresh_niche_insights():
+    """
+    Cron job mensual que refresca los niche_insights de todos los nichos detectados
+    entre las cuentas existentes, para que estén vigentes sin depender de que una
+    sesión de Hermes los pida bajo demanda. run_niche_research_skill ya evita la
+    llamada real a Gemini si el insight sigue fresco.
+    """
+    try:
+        from services.hermes.skills import resolve_niche, run_niche_research_skill
+        supabase = get_supabase_admin_client()
+        accounts = supabase.table('instagram_accounts').select('sector,purpose').execute().data or []
+        niches = set()
+        for account in accounts:
+            niches.update(resolve_niche(account))
+        for niche in niches:
+            run_niche_research_skill(niche)
+        logger.info(f"✅ Insights de nicho refrescados: {sorted(niches)}")
+    except Exception as e:
+        logger.error(f"❌ Error refrescando insights de nicho: {e}")
 
 # --- Lifecycle Events ---
 @app.on_event("startup")
@@ -213,6 +319,15 @@ async def startup_event():
         logger.info("✅ Cron job de agente semanal configurado (domingos 22:00)")
 
         scheduler.scheduler.add_job(
+            run_monthly_strategy_for_all_accounts,
+            trigger=CronTrigger(hour=8),
+            id='run_monthly_strategy',
+            replace_existing=True,
+            max_instances=1
+        )
+        logger.info("✅ Cron job de estrategia mensual configurado (diario 08:00)")
+
+        scheduler.scheduler.add_job(
             send_daily_briefings_for_all_accounts,
             trigger=CronTrigger(hour=9),
             id='send_daily_briefings',
@@ -220,6 +335,24 @@ async def startup_event():
             max_instances=1
         )
         logger.info("✅ Cron job de briefing diario configurado (09:00)")
+
+        scheduler.scheduler.add_job(
+            renew_drive_channels,
+            trigger=CronTrigger(minute='*/15'),
+            id='renew_drive_channels',
+            replace_existing=True,
+            max_instances=1
+        )
+        logger.info("✅ Cron job de renovación de canales Drive configurado (cada 15 min)")
+
+        scheduler.scheduler.add_job(
+            refresh_niche_insights,
+            trigger=CronTrigger(day=1, hour=6),
+            id='refresh_niche_insights',
+            replace_existing=True,
+            max_instances=1
+        )
+        logger.info("✅ Cron job de refresco de insights de nicho configurado (día 1 de cada mes, 06:00)")
     except Exception as e:
         logger.error(f"❌ Error configurando cron job de métricas: {e}")
 
@@ -251,6 +384,7 @@ from routes.content_generation import router as content_router
 from routes.template_sync_routes import router as template_sync_router
 from routes.analytics_routes import router as analytics_router
 from routes.drive_routes import router as drive_router
+from routes.drive_webhook_routes import router as drive_webhook_router
 from routes.scheduler_routes import router as scheduler_router
 from routes.posts_routes import router as posts_router
 
@@ -275,6 +409,7 @@ app.include_router(content_router)
 app.include_router(template_sync_router)
 app.include_router(analytics_router)
 app.include_router(drive_router)
+app.include_router(drive_webhook_router)
 app.include_router(scheduler_router)
 app.include_router(posts_router)
 

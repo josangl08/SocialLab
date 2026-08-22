@@ -5,11 +5,11 @@ import re
 import logging
 import tempfile
 from datetime import datetime, date, timezone
-from zoneinfo import ZoneInfo
 from typing import Optional
 import httpx
 
 from services.gemini_service import regenerate_slot_caption
+from services.hermes.orchestrator import run_edit_session
 
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import TelegramMessage, TelegramCallbackQuery
@@ -19,6 +19,22 @@ import config
 logger = logging.getLogger(__name__)
 
 TELEGRAM_API_BASE = "https://api.telegram.org/bot"
+
+# Etiquetas en español para los eventos de progreso de run_edit_session — nombre de
+# tool MCP -> gerundio corto mostrado en el mensaje editado progresivamente.
+_PROGRESS_LABELS = {
+    "drive_list_files": "Buscando imágenes en Drive",
+    "supabase_update_post_image": "Actualizando la imagen",
+    "supabase_update_post_schedule": "Actualizando la fecha/hora",
+    "supabase_update_campaign_focus": "Actualizando el enfoque semanal",
+    "supabase_update_campaign_milestones": "Actualizando los hitos",
+    "supabase_update_campaign_details": "Actualizando el título/descripción",
+}
+
+# Margen defensivo entre ediciones de un mismo mensaje — Telegram no publica un
+# límite oficial para editMessageText repetido, pero HERMES_EDIT_MAX_TURNS acota
+# esto a un puñado de eventos por sesión de todos modos.
+_PROGRESS_EDIT_MIN_INTERVAL = 0.7
 
 
 class TelegramService:
@@ -86,6 +102,29 @@ class TelegramService:
             return is_owner
         except Exception as e:
             logger.error(f"Error verifying post owner for post {post_id}: {e}")
+            return False
+
+    async def _verify_campaign_owner(self, campaign_id: str, chat_id: str) -> bool:
+        if not campaign_id or not chat_id:
+            return False
+        try:
+            supabase = get_supabase_admin_client()
+            camp_res = supabase.table('monthly_campaigns')\
+                .select('account_id').eq('id', campaign_id).execute()
+            if not camp_res.data:
+                logger.warning(f"Campaign {campaign_id} not found when verifying owner")
+                return False
+            account_id = camp_res.data[0].get('account_id')
+            if not account_id:
+                logger.warning(f"Campaign {campaign_id} has no account_id")
+                return False
+
+            is_owner = await self._chat_owns_account(account_id, chat_id)
+            if not is_owner:
+                logger.warning(f"Unauthorized access attempt: chat {chat_id} does not own campaign {campaign_id} (account {account_id})")
+            return is_owner
+        except Exception as e:
+            logger.error(f"Error verifying campaign owner for campaign {campaign_id}: {e}")
             return False
 
     async def _verify_proposal_owner(self, proposal_id: str, chat_id: str) -> bool:
@@ -196,6 +235,13 @@ class TelegramService:
                 if not await self._verify_post_owner(post_id, chat_id):
                     return
                 await self._handle_edit_date(client, post_id, chat_id)
+            elif data.startswith("campaign:"):
+                parts = data.split(":", 2)
+                if len(parts) >= 3:
+                    campaign_id = parts[2]
+                    if not await self._verify_campaign_owner(campaign_id, chat_id):
+                        return
+                    await self._handle_campaign_callback(callback_query)
 
     async def _handle_approve(
         self,
@@ -288,6 +334,7 @@ class TelegramService:
             text_match    = re.search(r'#post_(\d+)(?!_date)', reply_text)
 
             imgselect_match = re.search(r'#imgselect_([\w-]+)_(\d+)', reply_text)
+            campaignchat_match = re.search(r'#campaignchat_([\w-]+)', reply_text)
 
             if swap_match and message.photo:
                 proposal_id = swap_match.group(1)
@@ -295,6 +342,11 @@ class TelegramService:
                 if not await self._verify_proposal_owner(proposal_id, chat_id):
                     return
                 await self._handle_photo_swap_reply(chat_id, proposal_id, slot_index, message.photo)
+            elif campaignchat_match:
+                campaign_id = campaignchat_match.group(1)
+                if not await self._verify_campaign_owner(campaign_id, chat_id):
+                    return
+                await self._handle_campaign_chat_reply(chat_id, campaign_id, text)
             elif imgselect_match:
                 proposal_id = imgselect_match.group(1)
                 slot_index = int(imgselect_match.group(2))
@@ -335,125 +387,121 @@ class TelegramService:
                 "text": confirmation
             })
 
-    async def _handle_imgselect_reply(self, chat_id: str, proposal_id: str, slot_index: int, text: str) -> None:
-        """Parses a 1-based image number from user reply and updates the slot's Drive image."""
+    async def _run_edit_session_with_progress(
+        self,
+        chat_id: str,
+        account_id: int,
+        edit_type: str,
+        context: dict,
+        user_message: str
+    ):
+        """Wraps run_edit_session with a placeholder message that gets edited
+        progressively as Hermes calls tools, so the user isn't staring at silence
+        for the 15-30s the reasoning loop can take. Mirrors the on_progress pattern
+        already used by the web chat's NDJSON stream, adapted to editMessageText."""
+        placeholder_id: Optional[int] = None
+        steps: list = []
+        last_edit_at = 0.0
+        last_sent_text: Optional[str] = None
+
         async with httpx.AsyncClient() as client:
-            try:
-                choice = int(text.strip())
-            except ValueError:
-                await client.post(self._bot_url("sendMessage"), json={
+            resp = await client.post(self._bot_url("sendMessage"), json={
+                "chat_id": chat_id,
+                "text": "🤖 Procesando…",
+            })
+            if resp.status_code == 200:
+                placeholder_id = resp.json().get("result", {}).get("message_id")
+
+        async def on_progress(event: dict) -> None:
+            nonlocal last_edit_at, last_sent_text
+            if placeholder_id is None:
+                return
+            label = _PROGRESS_LABELS.get(event.get("tool"), event.get("tool", ""))
+            if event.get("type") == "tool_call":
+                steps.append(f"🔎 {label}…")
+            elif event.get("type") == "tool_result":
+                icon = "✅" if event.get("ok") else "⚠️"
+                if steps:
+                    steps[-1] = f"{icon} {label}"
+                else:
+                    steps.append(f"{icon} {label}")
+            else:
+                return
+
+            text = "\n".join(steps)
+            if text == last_sent_text:
+                return
+            now = asyncio.get_event_loop().time()
+            if now - last_edit_at < _PROGRESS_EDIT_MIN_INTERVAL:
+                return
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(self._bot_url("editMessageText"), json={
                     "chat_id": chat_id,
-                    "text": "❌ Please reply with a number from the list.",
+                    "message_id": placeholder_id,
+                    "text": text,
                 })
-                return
+                if resp.status_code == 200:
+                    last_edit_at = now
+                    last_sent_text = text
 
-            supabase = get_supabase_admin_client()
-            proposal_res = supabase.table('content_proposals').select('slots, account_id').eq('id', proposal_id).execute()
-            if not proposal_res.data:
-                return
-            proposal = proposal_res.data[0]
-            slots = proposal.get('slots', [])
-            if slot_index >= len(slots):
-                return
+        result = await run_edit_session(
+            account_id=account_id,
+            edit_type=edit_type,
+            context=context,
+            user_message=user_message,
+            on_progress=on_progress,
+        )
 
-            account_id = proposal.get('account_id')
-            acc_res = supabase.table('instagram_accounts')\
-                .select('user_id, drive_folder_id').eq('id', account_id).execute()
-            if not acc_res.data:
-                return
-            acc = acc_res.data[0]
-            uid = str(acc.get('user_id', ''))
-            folder_id = acc.get('drive_folder_id')
-            if not folder_id:
-                return
-
-            try:
-                def _list():
-                    from services.google_drive_connector import get_drive_connector
-                    drive = get_drive_connector(uid)
-                    return drive.list_files(folder_id=folder_id)
-                files = await asyncio.get_event_loop().run_in_executor(None, _list)
-                images = [f for f in files if f.get('mimeType', '').startswith('image/')][:15]
-            except Exception as e:
-                logger.error(f"Drive list failed in imgselect_reply: {e}")
-                await client.post(self._bot_url("sendMessage"), json={
-                    "chat_id": chat_id, "text": "❌ Could not fetch Drive images."
-                })
-                return
-
-            if choice < 1 or choice > len(images):
-                await client.post(self._bot_url("sendMessage"), json={
+        if placeholder_id is not None:
+            final_text = "✅ Listo" if result.resolved else "⚠️ No pude completarlo"
+            async with httpx.AsyncClient() as client:
+                await client.post(self._bot_url("editMessageText"), json={
                     "chat_id": chat_id,
-                    "text": f"❌ Invalid choice. Pick a number between 1 and {len(images)}.",
+                    "message_id": placeholder_id,
+                    "text": final_text,
                 })
-                return
 
-            selected = images[choice - 1]
-            file_id = selected['id']
-            file_name = selected['name']
+        return result
 
-            post_id = slots[slot_index].get('post_id')
-            if post_id:
-                supabase.table('posts').update({'drive_file_id': file_id}).eq('id', post_id).execute()
-            slots[slot_index]['image_id'] = file_id
-            supabase.table('content_proposals').update({'slots': slots}).eq('id', proposal_id).execute()
-
-            day = slots[slot_index].get('day', '')
+    async def _reply_edit_session_result(self, chat_id: str, result) -> None:
+        icon = "✅" if result.resolved else "❌"
+        async with httpx.AsyncClient() as client:
             await client.post(self._bot_url("sendMessage"), json={
                 "chat_id": chat_id,
-                "text": f"✅ Image for *{day}* changed to *{file_name}*.",
-                "parse_mode": "Markdown",
+                "text": f"{icon} {result.message}",
             })
+
+    async def _handle_imgselect_reply(self, chat_id: str, proposal_id: str, slot_index: int, text: str) -> None:
+        """Pasa la descripción de imagen del usuario a Hermes, que la resuelve contra la
+        lista real de Drive y actualiza el post."""
+        supabase = get_supabase_admin_client()
+        proposal_res = supabase.table('content_proposals').select('account_id').eq('id', proposal_id).execute()
+        account_id = proposal_res.data[0].get('account_id') if proposal_res.data else None
+
+        result = await self._run_edit_session_with_progress(
+            chat_id=chat_id,
+            account_id=account_id,
+            edit_type="IMAGE_SELECT",
+            context={"proposal_id": proposal_id, "slot_index": slot_index},
+            user_message=text
+        )
+        await self._reply_edit_session_result(chat_id, result)
 
     async def _handle_timeedit_reply(self, chat_id: str, proposal_id: str, slot_index: int, text: str) -> None:
-        """Parses 'DD/MM HH:MM' from user reply and updates scheduled_at for the slot's post."""
-        m = re.match(r'(\d{1,2})/(\d{1,2})\s+(\d{1,2}):(\d{2})', text.strip())
-        async with httpx.AsyncClient() as client:
-            if not m:
-                await client.post(self._bot_url("sendMessage"), json={
-                    "chat_id": chat_id,
-                    "text": "❌ Invalid format. Use: `DD/MM HH:MM` (e.g. `18/07 14:30`)",
-                    "parse_mode": "Markdown",
-                })
-                return
-            day_num, month_num = int(m.group(1)), int(m.group(2))
-            hour, minute = int(m.group(3)), int(m.group(4))
-            year = datetime.now(timezone.utc).year
-            try:
-                scheduled_time = datetime(year, month_num, day_num, hour, minute, tzinfo=timezone.utc)
-            except ValueError:
-                await client.post(self._bot_url("sendMessage"), json={
-                    "chat_id": chat_id,
-                    "text": "❌ Invalid date. Check the day and month.",
-                    "parse_mode": "Markdown",
-                })
-                return
+        """Pasa la fecha/hora en lenguaje natural del usuario a Hermes, que la interpreta
+        y actualiza scheduled_at para el post del slot."""
+        supabase = get_supabase_admin_client()
+        proposal_res = supabase.table('content_proposals').select('account_id').eq('id', proposal_id).execute()
+        account_id = proposal_res.data[0].get('account_id') if proposal_res.data else None
 
-            supabase = get_supabase_admin_client()
-            proposal_res = supabase.table('content_proposals').select('slots').eq('id', proposal_id).execute()
-            if not proposal_res.data:
-                return
-            slots = proposal_res.data[0].get('slots', [])
-            if slot_index >= len(slots):
-                return
-            post_id = slots[slot_index].get('post_id')
-            if not post_id:
-                return
-
-            supabase.table('posts').update({'scheduled_at': scheduled_time.isoformat()}).eq('id', post_id).execute()
-            post_res = supabase.table('posts').select('media_url').eq('id', post_id).execute()
-            if post_res.data and post_res.data[0].get('media_url'):
-                try:
-                    PostScheduler().schedule_post(post_id, scheduled_time)
-                except Exception as e:
-                    logger.warning(f"No se pudo crear APScheduler job para post {post_id}: {e}")
-
-            day_name = slots[slot_index].get('day', '')
-            await client.post(self._bot_url("sendMessage"), json={
-                "chat_id": chat_id,
-                "text": f"✅ *{day_name}* scheduled for {day_num:02d}/{month_num:02d} at {hour:02d}:{minute:02d}",
-                "parse_mode": "Markdown",
-            })
+        result = await self._run_edit_session_with_progress(
+            chat_id=chat_id,
+            account_id=account_id,
+            edit_type="TIME",
+            context={"proposal_id": proposal_id, "slot_index": slot_index},
+            user_message=text
+        )
+        await self._reply_edit_session_result(chat_id, result)
 
     async def _handle_edit_reply(self, chat_id: str, post_id: int, new_content: str) -> None:
         supabase = get_supabase_admin_client()
@@ -463,27 +511,127 @@ class TelegramService:
         if post_result.data:
             await self.send_approval_message(post_id, chat_id, post_result.data[0])
 
-    async def _handle_date_reply(self, chat_id: str, post_id: int, date_text: str) -> None:
-        try:
-            tz = ZoneInfo(config.APP_TIMEZONE)
-            scheduled_at = datetime.strptime(date_text.strip(), "%Y-%m-%d %H:%M").replace(tzinfo=tz)
-        except (ValueError, KeyError):
-            async with httpx.AsyncClient() as client:
-                await client.post(self._bot_url("sendMessage"), json={
-                    "chat_id": chat_id,
-                    "text": "❌ Wrong format. Use: YYYY-MM-DD HH:MM (e.g. 2026-06-15 14:30)"
-                })
+    async def send_campaign_approval_card(self, chat_id, campaign: dict) -> None:
+        """Sends a single Telegram message with the drafted campaign summary and
+        Approve/Reject/Chat inline buttons, mirroring send_proposal_card's header."""
+        campaign_id = campaign.get("id")
+        title = campaign.get("title", "")
+        description = campaign.get("description") or ""
+        milestones = campaign.get("milestones") or []
+        weekly_focus = campaign.get("weekly_focus") or {}
+
+        lines = [f"🗓 *Propuesta de campaña — {title}*"]
+        if description:
+            lines.append(description)
+
+        focus_lines = "\n".join(f"  Semana {k}: {v}" for k, v in sorted(weekly_focus.items()) if v)
+        if focus_lines:
+            lines.append(f"*Enfoque semanal:*\n{focus_lines}")
+
+        if milestones:
+            milestone_lines = "\n".join(f"  {m.get('date')}: {m.get('event')}" for m in milestones)
+            lines.append(f"*Hitos:*\n{milestone_lines}")
+
+        lines.append("Revísala y decide antes de que empiece el mes.")
+        text = "\n\n".join(lines)
+
+        async with httpx.AsyncClient() as client:
+            await client.post(self._bot_url("sendMessage"), json={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "Markdown",
+                "reply_markup": {"inline_keyboard": [[
+                    {"text": "Aprobar ✅", "callback_data": f"campaign:approve:{campaign_id}"},
+                    {"text": "Rechazar ❌", "callback_data": f"campaign:reject:{campaign_id}"},
+                    {"text": "Chat 💬", "callback_data": f"campaign:chat:{campaign_id}"},
+                ]]}
+            })
+
+    async def _handle_campaign_callback(self, callback_query) -> None:
+        data = callback_query.data or ""
+        chat_id = str(callback_query.from_user.id)
+        message_id = callback_query.message.message_id if callback_query.message else None
+
+        parts = data.split(":", 2)
+        if len(parts) < 3:
             return
+        action, campaign_id = parts[1], parts[2]
 
         supabase = get_supabase_admin_client()
-        supabase.table('posts').update({
-            "scheduled_at": scheduled_at.isoformat(),
-            "status": "draft"
-        }).eq('id', post_id).execute()
 
-        post_result = supabase.table('posts').select('*').eq('id', post_id).execute()
-        if post_result.data:
-            await self.send_approval_message(post_id, chat_id, post_result.data[0])
+        async with httpx.AsyncClient() as client:
+            if action == "approve":
+                supabase.table('monthly_campaigns').update({
+                    "status": "approved",
+                    "resolved_at": datetime.now(timezone.utc).isoformat()
+                }).eq('id', campaign_id).execute()
+
+                if message_id:
+                    await client.post(self._bot_url("editMessageText"), json={
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "text": "✅ Campaña aprobada."
+                    })
+
+            elif action == "reject":
+                supabase.table('monthly_campaigns').update({
+                    "status": "rejected",
+                    "resolved_at": datetime.now(timezone.utc).isoformat()
+                }).eq('id', campaign_id).execute()
+
+                if message_id:
+                    await client.post(self._bot_url("editMessageText"), json={
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "text": "❌ Campaña rechazada — se generará un nuevo borrador."
+                    })
+
+            elif action == "chat":
+                await client.post(self._bot_url("sendMessage"), json={
+                    "chat_id": chat_id,
+                    "text": f"¿Qué te gustaría ajustar de la campaña?\n#campaignchat_{campaign_id}",
+                    "reply_markup": {"force_reply": True, "selective": True}
+                })
+
+    async def _handle_campaign_chat_reply(self, chat_id: str, campaign_id: str, text: str) -> None:
+        """Passes the user's natural-language adjustment to Hermes (CAMPAIGN_CHAT edit
+        type), replies with the result, and re-sends the force_reply prompt so the
+        conversation stays open for further tweaks."""
+        supabase = get_supabase_admin_client()
+        campaign_res = supabase.table('monthly_campaigns').select('account_id').eq('id', campaign_id).execute()
+        account_id = campaign_res.data[0].get('account_id') if campaign_res.data else None
+
+        result = await self._run_edit_session_with_progress(
+            chat_id=chat_id,
+            account_id=account_id,
+            edit_type="CAMPAIGN_CHAT",
+            context={"campaign_id": campaign_id},
+            user_message=text
+        )
+        await self._reply_edit_session_result(chat_id, result)
+
+        async with httpx.AsyncClient() as client:
+            await client.post(self._bot_url("sendMessage"), json={
+                "chat_id": chat_id,
+                "text": f"¿Algo más que ajustar?\n#campaignchat_{campaign_id}",
+                "reply_markup": {"force_reply": True, "selective": True}
+            })
+
+    async def _handle_date_reply(self, chat_id: str, post_id: int, date_text: str) -> None:
+        """Pasa la fecha en lenguaje natural del usuario a Hermes, que la interpreta y
+        actualiza scheduled_at para el post."""
+        supabase = get_supabase_admin_client()
+        post_res = supabase.table('posts').select('instagram_account_id').eq('id', post_id).execute()
+        account_id = post_res.data[0].get('instagram_account_id') if post_res.data else None
+
+        result = await self._run_edit_session_with_progress(
+            chat_id=chat_id,
+            account_id=account_id,
+            edit_type="DATE",
+            context={"post_id": post_id},
+            user_message=date_text
+        )
+        await self._reply_edit_session_result(chat_id, result)
 
     async def send_status_notification(
         self,

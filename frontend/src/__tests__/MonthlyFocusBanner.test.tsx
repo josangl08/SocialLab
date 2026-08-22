@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { MonthlyFocusBanner } from '../components/planner/MonthlyFocusBanner';
 import { useAuth } from '../context/AuthContext';
@@ -32,7 +33,7 @@ describe('MonthlyFocusBanner Component', () => {
     (useAuth as any).mockReturnValue({ token: mockToken });
   });
 
-  test('renders nothing when there is no campaign config', async () => {
+  test('shows a configure-campaign prompt when there is no campaign config', async () => {
     // Mock GET /api/agent/campaign returning null/None
     (global.fetch as any).mockImplementation(() =>
       Promise.resolve({
@@ -41,11 +42,25 @@ describe('MonthlyFocusBanner Component', () => {
       })
     );
 
-    const { container } = render(
-      <MonthlyFocusBanner accountId={12} currentDate={new Date('2026-07-15')} />
+    render(
+      <MemoryRouter>
+        <MonthlyFocusBanner accountId={12} currentDate={new Date('2026-07-15')} />
+      </MemoryRouter>
     );
 
-    // Wait a bit to verify it remains empty
+    await waitFor(() => {
+      expect(screen.getByText(/Sin campaña mensual configurada/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Configurar en Estrategia del Agente/i)).toBeInTheDocument();
+  });
+
+  test('renders nothing when no account is selected', async () => {
+    const { container } = render(
+      <MemoryRouter>
+        <MonthlyFocusBanner accountId={null} currentDate={new Date('2026-07-15')} />
+      </MemoryRouter>
+    );
+
     await new Promise(r => setTimeout(r, 50));
     expect(container.firstChild).toBeNull();
   });
@@ -61,7 +76,9 @@ describe('MonthlyFocusBanner Component', () => {
 
     // currentDate is 2026-07-10 (Day 10 -> Week 2)
     render(
-      <MonthlyFocusBanner accountId={12} currentDate={new Date('2026-07-10')} />
+      <MemoryRouter>
+        <MonthlyFocusBanner accountId={12} currentDate={new Date('2026-07-10')} />
+      </MemoryRouter>
     );
 
     await waitFor(() => {
@@ -93,7 +110,9 @@ describe('MonthlyFocusBanner Component', () => {
 
     // currentDate is 2026-07-28 (Day 28 -> Week 4)
     render(
-      <MonthlyFocusBanner accountId={12} currentDate={new Date('2026-07-28')} />
+      <MemoryRouter>
+        <MonthlyFocusBanner accountId={12} currentDate={new Date('2026-07-28')} />
+      </MemoryRouter>
     );
 
     await waitFor(() => {

@@ -130,6 +130,7 @@ class AgentConfig(BaseModel):
     best_times: list[str] = ["09:00", "18:00"]
     content_pillars: list[str] = []
     hashtag_strategy: Literal["minimal", "moderate", "maximum"] = "moderate"
+    caption_voice: Optional[Literal["personal", "professional"]] = None
     reference_accounts: list[str] = []
     posts_per_week: int = 3
     scheduling_mode: Literal["fixed", "flexible"] = "flexible"
@@ -173,6 +174,9 @@ class MonthlyCampaign(BaseModel):
     description: Optional[str] = None
     milestones: list[dict] = []
     weekly_focus: dict = {}
+    status: Literal["pending_approval", "approved", "rejected"] = "approved"
+    generated_by: Literal["manual", "hermes"] = "manual"
+    resolved_at: Optional[datetime] = None
 
 
 

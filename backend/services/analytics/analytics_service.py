@@ -966,6 +966,65 @@ class AnalyticsService:
             'summary_text': summary_text
         }
 
+    def get_visual_performance_data(
+        self,
+        instagram_account_id: int,
+        days: int = 180
+    ) -> List[Dict]:
+        """
+        Fila cruda por post publicado: tema/objetos/mood visual (de visual_analyses,
+        vía drive_file_id) + métricas reales de rendimiento. No agrega ni calcula
+        ninguna correlación — eso lo hace el código que genera Gemini con
+        code_execution (ver services/hermes/skills.py); esto solo junta los datos.
+        """
+        query = self.db.table('posts').select(
+            'drive_file_id, post_type, publication_date, '
+            'post_performance(likes, comments, saves, reach, impressions, total_interactions)'
+        ).eq('instagram_account_id', instagram_account_id).eq(
+            'status', 'published'
+        ).not_.is_('drive_file_id', 'null')
+
+        if days < 3650:
+            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            query = query.gte('publication_date', cutoff_date.isoformat())
+
+        posts_res = query.execute()
+        posts = [p for p in (posts_res.data or []) if p is not None]
+        if not posts:
+            return []
+
+        drive_file_ids = [p['drive_file_id'] for p in posts if p.get('drive_file_id')]
+        analyses_res = self.db.table('visual_analyses').select(
+            'drive_file_id, gemini_description'
+        ).in_('drive_file_id', drive_file_ids).execute()
+        analyses_by_file = {
+            row['drive_file_id']: row.get('gemini_description') or {}
+            for row in (analyses_res.data or [])
+        }
+
+        rows = []
+        for post in posts:
+            description = analyses_by_file.get(post['drive_file_id'])
+            if not description:
+                continue
+            perf = post.get('post_performance') or {}
+            if isinstance(perf, list):
+                perf = perf[0] if perf else {}
+            rows.append({
+                'objects': description.get('objects', []),
+                'theme': description.get('theme', ''),
+                'mood': description.get('mood', ''),
+                'post_type': post.get('post_type'),
+                'publication_date': post.get('publication_date'),
+                'likes': perf.get('likes', 0),
+                'comments': perf.get('comments', 0),
+                'saves': perf.get('saves', 0),
+                'reach': perf.get('reach', 0),
+                'impressions': perf.get('impressions', 0),
+                'total_interactions': perf.get('total_interactions', 0),
+            })
+        return rows
+
     def _calculate_trends(self, posts: List[Dict], days: int) -> List[Dict]:
         """
         Calcula tendencia de engagement por día.

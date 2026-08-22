@@ -44,7 +44,7 @@ async def google_callback(code: str, state: str):
     """Exchanges OAuth code for credentials and stores them in DB."""
     from services.drive_oauth_service import DriveOAuthService
     try:
-        user_id = verify_state_token(state)
+        user_id = verify_state_token(state)["user_id"]
     except ValueError:
         raise HTTPException(status_code=400, detail="Parámetro state inválido o expirado.")
     try:

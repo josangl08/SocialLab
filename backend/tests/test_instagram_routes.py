@@ -1,4 +1,5 @@
 import pytest
+import requests
 from datetime import datetime, timezone, timedelta
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
@@ -225,9 +226,69 @@ def test_callback_instagram_valid_state_succeeds(mock_admin_supabase):
     assert response.status_code in [302, 307]
     assert "instagram_connected=true" in response.headers.get("location", "")
 
+def test_callback_instagram_with_account_id_updates_targeted_row_not_upsert(mock_admin_supabase):
+    # Regression test: reconnecting a specific card (state carries account_id)
+    # must UPDATE that exact row, never upsert-by-instagram_business_account_id
+    # — otherwise picking a different Facebook Page in Meta's popup while
+    # reconnecting account #7 could silently create/touch a different account.
+    state_token = generate_state_token(USER_ID, account_id="7")
+
+    mock_post_response = MagicMock()
+    mock_post_response.json.return_value = {"access_token": "short-lived-token"}
+
+    mock_get_responses = [
+        MagicMock(json=MagicMock(return_value={"access_token": "long-lived-token", "expires_in": 5184000})),
+        MagicMock(json=MagicMock(return_value={"data": [{"id": "fb-page-1"}]})),
+        MagicMock(json=MagicMock(return_value={"instagram_business_account": {"id": "ig-account-1"}})),
+    ]
+
+    with patch("routes.instagram_routes.requests.post", return_value=mock_post_response), \
+         patch("routes.instagram_routes.requests.get", side_effect=mock_get_responses), \
+         patch("routes.instagram_routes.get_supabase_admin_client", return_value=mock_admin_supabase):
+        response = client.get(
+            f"/callback/instagram?code=auth_code&state={state_token}",
+            follow_redirects=False
+        )
+
+    assert response.status_code in [302, 307]
+    mock_admin_supabase.table.return_value.upsert.assert_not_called()
+    mock_admin_supabase.table.return_value.update.assert_called_once()
+    update_payload = mock_admin_supabase.table.return_value.update.call_args[0][0]
+    assert update_payload["instagram_business_account_id"] == "ig-account-1"
+    assert update_payload["token_invalid"] is False
+    mock_admin_supabase.table.return_value.update.return_value.eq.assert_any_call("id", "7")
+
 def test_callback_instagram_invalid_state_returns_400():
     response = client.get(
         "/callback/instagram?code=auth_code&state=not-a-valid-token",
         follow_redirects=False
     )
     assert response.status_code == 400
+
+def test_instagram_sync_expired_token_returns_401_not_500():
+    # Regression test: requests.Response.__bool__() reflects HTTP success (ok),
+    # not "is this object None" — `if e.response:` was always False for error
+    # responses, so an expired/invalid token always fell through to a generic
+    # 500 instead of the intended 401 "reconecta tu cuenta" message.
+    mock_admin_supabase = MagicMock()
+    mock_admin_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+        {"id": 7, "long_lived_access_token": "encrypted-token", "instagram_business_account_id": "ig-7"}
+    ]
+
+    error_response = MagicMock()
+    error_response.status_code = 400
+    error_response.text = '{"error": {"message": "Error validating access token"}}'
+    http_error = requests.exceptions.HTTPError(response=error_response)
+
+    mock_get_response = MagicMock()
+    mock_get_response.raise_for_status.side_effect = http_error
+
+    with patch("routes.instagram_routes.get_supabase_admin_client", return_value=mock_admin_supabase), \
+         patch("routes.instagram_routes.decrypt_token", return_value="plain-token"), \
+         patch("routes.instagram_routes.requests.get", return_value=mock_get_response):
+        response = client.get("/instagram/sync?instagram_account_id=7")
+
+    assert response.status_code == 401
+    assert "reconectar" in response.json()["detail"].lower() or "expirado" in response.json()["detail"].lower()
+    mock_admin_supabase.table.return_value.update.assert_called_once_with({"token_invalid": True})
+    mock_admin_supabase.table.return_value.update.return_value.eq.assert_called_once_with("id", 7)

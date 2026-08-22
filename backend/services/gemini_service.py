@@ -3,8 +3,8 @@ import json
 import re
 import asyncio
 import logging
-import google.generativeai as genai
-from google.api_core.exceptions import ResourceExhausted
+from google import genai
+from google.genai import types, errors
 
 from typing import Optional, List
 
@@ -13,15 +13,55 @@ from config import GOOGLE_API_KEY
 logger = logging.getLogger(__name__)
 
 PREFERRED_GEMINI_MODELS = [
-    'gemini-2.5-pro',
-    'gemini-2.5-flash',
+    'gemini-pro-latest',
+    'gemini-flash-latest',
 ]
 
-def _configure_genai():
-    api_key = GOOGLE_API_KEY
-    if not api_key:
-        raise Exception("GOOGLE_API_KEY no configurada. Necesaria para interactuar con Gemini.")
-    genai.configure(api_key=api_key)
+# Single-tool edits (Hermes run_edit_session) — high call frequency (every Telegram
+# reply / drawer chat message) but low reasoning depth, so skip the scarce Pro quota
+# and go straight to Flash, falling back to Flash-Lite's much larger free-tier RPD.
+EDIT_GEMINI_MODELS = [
+    'gemini-flash-latest',
+    'gemini-flash-lite-latest',
+]
+
+# Per-image vision analysis — called once per new Drive image within a single weekly
+# session, the highest-volume call site in the app. Flash-Lite's free-tier RPD is an
+# order of magnitude larger than Flash's, so it goes first here.
+VISION_GEMINI_MODELS = [
+    'gemini-flash-lite-latest',
+    'gemini-flash-latest',
+]
+
+# Resumen de correcciones pasadas (memoria persistente de Hermes) — llamada barata e
+# infrecuente (solo cuando hay correcciones nuevas desde el último resumen), Flash-Lite
+# es más que suficiente para condensar un puñado de filas en 2-4 frases.
+SUMMARY_GEMINI_MODELS = [
+    'gemini-flash-lite-latest',
+    'gemini-flash-latest',
+]
+
+# Skills dinámicas (code_execution / google_search) — confirmado por spike real
+# que 'gemini-flash-latest' soporta ambas herramientas en este SDK; no todos los
+# modelos lo hacen, de ahí una lista dedicada en vez de reutilizar las de arriba.
+SKILL_GEMINI_MODELS = [
+    'gemini-flash-latest',
+]
+
+_client: Optional[genai.Client] = None
+
+
+def get_gemini_client() -> genai.Client:
+    global _client
+    if _client is None:
+        if not GOOGLE_API_KEY:
+            raise Exception("GOOGLE_API_KEY no configurada. Necesaria para interactuar con Gemini.")
+        _client = genai.Client(api_key=GOOGLE_API_KEY)
+    return _client
+
+
+def _is_quota_exhausted(e: Exception) -> bool:
+    return isinstance(e, errors.ClientError) and e.code == 429
 
 async def clean_and_parse_json(raw_text: str) -> dict:
     """
@@ -35,9 +75,8 @@ async def clean_and_parse_json(raw_text: str) -> dict:
     return json.loads(text)
 
 def _sync_generate_content(prompt: str, model_name: str) -> str:
-    _configure_genai()
-    model = genai.GenerativeModel(model_name)
-    response = model.generate_content(prompt)
+    client = get_gemini_client()
+    response = client.models.generate_content(model=model_name, contents=prompt)
     if not response or not response.text:
         raise Exception(f"El modelo {model_name} no pudo generar una respuesta válida.")
     return response.text.strip()
@@ -47,7 +86,7 @@ async def generate_gemini_content(
     model_names: Optional[List[str]] = None,
 ) -> str:
     """
-    Configura genai, intenta cada modelo en orden ante ResourceExhausted, retorna response.text.strip().
+    Configura genai, intenta cada modelo en orden ante cuota agotada (429), retorna response.text.strip().
     Re-lanza la última excepción si todos los modelos fallan.
     """
     models = model_names or PREFERRED_GEMINI_MODELS
@@ -58,12 +97,11 @@ async def generate_gemini_content(
             logger.info(f"Intentando generar contenido con Gemini usando modelo: {model_name}")
             text = await asyncio.to_thread(_sync_generate_content, prompt, model_name)
             return text
-        except ResourceExhausted as e:
-            last_exception = e
-            logger.warning(f"Cuota excedida para el modelo {model_name}. Intentando con el siguiente... Detalles: {e}")
-            continue
         except Exception as e:
             last_exception = e
+            if _is_quota_exhausted(e):
+                logger.warning(f"Cuota excedida para el modelo {model_name}. Intentando con el siguiente... Detalles: {e}")
+                continue
             logger.error(f"Error con el modelo {model_name}: {e}")
             raise e
 
@@ -72,12 +110,26 @@ async def generate_gemini_content(
     raise Exception("No se especificaron modelos para generar contenido.")
 
 def _sync_analyze_image(image_bytes: bytes, mime_type: str, prompt: str) -> str:
-    _configure_genai()
-    model = genai.GenerativeModel('gemini-2.5-flash')
-    response = model.generate_content([{"mime_type": mime_type, "data": image_bytes}, prompt])
-    if not response or not response.text:
-        raise Exception("El modelo no pudo generar una respuesta válida para la imagen.")
-    return response.text.strip()
+    client = get_gemini_client()
+    last_exception = None
+
+    for model_name in VISION_GEMINI_MODELS:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[types.Part.from_bytes(data=image_bytes, mime_type=mime_type), prompt]
+            )
+            if not response or not response.text:
+                raise Exception("El modelo no pudo generar una respuesta válida para la imagen.")
+            return response.text.strip()
+        except Exception as e:
+            if _is_quota_exhausted(e):
+                last_exception = e
+                logger.warning(f"Cuota excedida para el modelo {model_name} (vision). Intentando con el siguiente...")
+                continue
+            raise
+
+    raise last_exception
 
 async def analyze_image_vision(
     image_bytes: bytes,
@@ -126,3 +178,33 @@ async def regenerate_slot_caption(
         )
 
     return await generate_gemini_content(prompt)
+
+
+async def summarize_corrections(rows: List[dict]) -> str:
+    """
+    Condensa las últimas correcciones del usuario (respuestas de run_edit_session que
+    resolvieron, ver services/hermes/memory.py) en 2-4 frases de patrones a tener en
+    cuenta al planificar futuras sesiones. rows viene ordenado de más antigua a más
+    reciente; cada fila trae edit_type/user_message/resolution.
+    """
+    lines = []
+    for row in rows:
+        content = row.get("content") or {}
+        edit_type = content.get("edit_type", "")
+        user_message = content.get("user_message", "")
+        resolution = content.get("resolution", "")
+        lines.append(f"- [{edit_type}] Usuario dijo: \"{user_message}\" → {resolution}")
+    corrections_text = "\n".join(lines)
+
+    prompt = (
+        "Estas son correcciones que un usuario ha hecho manualmente sobre propuestas de "
+        "contenido de Instagram generadas automáticamente:\n\n"
+        f"{corrections_text}\n\n"
+        "Resume en 2-4 frases, en español, los patrones o preferencias que se puedan "
+        "inferir de estas correcciones (ej. horarios que prefiere, tipos de contenido "
+        "que rechaza, tono que corrige). Sé concreto y accionable — esto se usará como "
+        "contexto para que un agente de IA planifique mejor la próxima vez. Responde "
+        "solo con el resumen, sin introducciones."
+    )
+
+    return await generate_gemini_content(prompt, model_names=SUMMARY_GEMINI_MODELS)

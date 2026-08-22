@@ -20,6 +20,7 @@ export interface InstagramAccount {
   profile_picture_url?: string | null;
   followers_count?: number | null;
   expires_at?: string | null;
+  token_invalid?: boolean;
   is_active?: boolean;
   telegram_chat_id?: string | null;
   drive_folder_id?: string | null;
@@ -53,4 +54,15 @@ export interface ContentProposal {
   slots: CalendarSlot[];
   status: 'pending_approval' | 'approved' | 'rejected';
   created_at?: string;
+}
+
+export interface AgentLog {
+  id: string;
+  account_id: number;
+  run_at: string;
+  images_scanned: number;
+  images_analyzed: number;
+  posts_drafted: number;
+  error: string | null;
+  duration_ms: number | null;
 }

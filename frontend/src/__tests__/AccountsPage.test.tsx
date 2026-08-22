@@ -29,6 +29,18 @@ describe('AccountsPage Component', () => {
       is_active: true,
       telegram_chat_id: null,
       drive_folder_id: null
+    },
+    {
+      id: 3,
+      username: 'revoked_user',
+      account_name: 'Revoked Account',
+      profile_picture_url: null,
+      followers_count: 20,
+      expires_at: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString(), // 20 days in future
+      token_invalid: true, // but Meta already invalidated it (e.g. password change)
+      is_active: true,
+      telegram_chat_id: null,
+      drive_folder_id: null
     }
   ];
 
@@ -102,6 +114,18 @@ describe('AccountsPage Component', () => {
     // Verify followers count is displayed correctly
     expect(screen.getByText(/5.000 seguidores/i)).toBeInTheDocument();
     expect(screen.getByText(/10 seguidores/i)).toBeInTheDocument();
+  });
+
+  test('shows "Reconectar" for a token_invalid account even with a future expires_at', async () => {
+    render(<AccountsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('@revoked_user')).toBeInTheDocument();
+    });
+
+    const revokedCard = screen.getByText('@revoked_user').closest('.st-account-card') as HTMLElement;
+    expect(within(revokedCard).getAllByText(/Reconectar/i).length).toBeGreaterThan(0);
+    expect(within(revokedCard).queryByText(/Conectada/i)).not.toBeInTheDocument();
   });
 
   test('allows disconnecting a account with confirmation', async () => {

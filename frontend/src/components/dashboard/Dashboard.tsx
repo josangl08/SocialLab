@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import 'bootstrap-icons/font/bootstrap-icons.css';
-import { apiClient } from '../../api/client';
+import { apiClient, ApiError } from '../../api/client';
 import './Dashboard.css';
 
 import { KPICard } from '../analytics/cards/KPICard';
@@ -73,6 +73,7 @@ const Dashboard: React.FC = () => {
 
   const location = useLocation();
   const [loading, setLoading] = useState<boolean>(true);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [stats, setStats] = useState<DashboardStats>({
     follower_count: 0,
     profile_views: 0,
@@ -201,13 +202,13 @@ const Dashboard: React.FC = () => {
     if (!token || !instagramAccountId) return;
 
     setSyncing(true);
+    setSyncError(null);
     try {
       const syncParam = instagramAccountId ? `?instagram_account_id=${instagramAccountId}` : '';
       try {
         await apiClient.get(`/instagram/sync${syncParam}`);
-      } catch {
-        console.error('Error al sincronizar posts de Instagram');
-        setLastSync(new Date());
+      } catch (error) {
+        setSyncError(error instanceof ApiError ? error.detail : 'Error al sincronizar posts de Instagram');
         return;
       }
 
@@ -218,13 +219,11 @@ const Dashboard: React.FC = () => {
         setTimeout(() => {
           fetchDashboardStats(true);
         }, 2000);
-      } catch {
-        console.error('Error al sincronizar métricas de Instagram');
-        setLastSync(new Date());
+      } catch (error) {
+        setSyncError(error instanceof ApiError ? error.detail : 'Error al sincronizar métricas de Instagram');
       }
     } catch (error) {
-      console.error('Error en la sincronización:', error);
-      setLastSync(new Date());
+      setSyncError(error instanceof ApiError ? error.detail : 'Error en la sincronización');
     } finally {
       setSyncing(false);
     }
@@ -371,6 +370,11 @@ const Dashboard: React.FC = () => {
                 <i className="bi bi-arrow-clockwise"></i>
                 {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
               </button>
+              {syncError && (
+                <span className="sl-sync-error" title={syncError}>
+                  <i className="bi bi-exclamation-triangle"></i> {syncError}
+                </span>
+              )}
             </div>
           </div>
         ) : (

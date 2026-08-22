@@ -38,8 +38,60 @@ def test_download_file_bytes_success():
 def test_download_file_bytes_failure():
     connector = GoogleDriveConnector()
     connector.service = MagicMock()
-    
+
     connector.service.files().get_media.side_effect = Exception("Drive API Error")
-    
+
     result = connector.download_file_bytes("test_file_id")
     assert result is None
+
+
+def test_watch_folder_returns_channel_id_resource_id_and_expiration():
+    connector = GoogleDriveConnector()
+    connector.service = MagicMock()
+    connector.service.files().watch.return_value.execute.return_value = {
+        "id": "chan-1",
+        "resourceId": "res-1",
+        "expiration": "1893456000000",
+    }
+
+    result = connector.watch_folder("folder-abc", "https://example.com/webhook", "chan-1", "tok-1")
+
+    assert result == {"channel_id": "chan-1", "resource_id": "res-1", "expiration": "1893456000000"}
+    call_kwargs = connector.service.files().watch.call_args
+    assert call_kwargs[1]["fileId"] == "folder-abc"
+    assert call_kwargs[1]["body"] == {
+        "id": "chan-1",
+        "type": "web_hook",
+        "address": "https://example.com/webhook",
+        "token": "tok-1",
+    }
+
+
+def test_watch_folder_returns_none_on_failure():
+    connector = GoogleDriveConnector()
+    connector.service = MagicMock()
+    connector.service.files().watch.side_effect = Exception("Drive API Error")
+
+    result = connector.watch_folder("folder-abc", "https://example.com/webhook", "chan-1", "tok-1")
+
+    assert result is None
+
+
+def test_stop_channel_success():
+    connector = GoogleDriveConnector()
+    connector.service = MagicMock()
+
+    result = connector.stop_channel("chan-1", "res-1")
+
+    assert result is True
+    connector.service.channels().stop.assert_called_once_with(body={"id": "chan-1", "resourceId": "res-1"})
+
+
+def test_stop_channel_failure():
+    connector = GoogleDriveConnector()
+    connector.service = MagicMock()
+    connector.service.channels().stop.side_effect = Exception("Drive API Error")
+
+    result = connector.stop_channel("chan-1", "res-1")
+
+    assert result is False

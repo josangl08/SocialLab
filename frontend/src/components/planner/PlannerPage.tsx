@@ -8,7 +8,7 @@ import WeeklyProposalPanel from './WeeklyProposalPanel';
 import { MonthlyFocusBanner } from './MonthlyFocusBanner';
 import { useAuth } from '../../context/AuthContext';
 import { apiClient, ApiError } from '../../api/client';
-import type { Post, InstagramAccount, ContentProposal } from '../../types';
+import type { Post, InstagramAccount, ContentProposal, AgentLog } from '../../types';
 import './PlannerPage.css';
 
 const PlannerPage: React.FC = () => {
@@ -29,7 +29,6 @@ const PlannerPage: React.FC = () => {
   const proposalPanelRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const proposalCountRef = useRef<number>(0);
-  const agentSyncBeforeRef = useRef<string | null>(null);
 
   const handleFocusProposalPost = useCallback((postId: number) => {
     setFocusPostId(postId);
@@ -57,12 +56,7 @@ const PlannerPage: React.FC = () => {
     setIsDriveError(false);
 
     try {
-      const [accounts, proposals] = await Promise.all([
-        apiClient.get<InstagramAccount[]>('/instagram/accounts'),
-        apiClient.get<ContentProposal[]>(`/api/agent/proposals?account_id=${primaryAccountId}`),
-      ]);
-      const acc = accounts.find((a) => a.id === primaryAccountId);
-      agentSyncBeforeRef.current = acc?.last_agent_sync ?? null;
+      const proposals = await apiClient.get<ContentProposal[]>(`/api/agent/proposals?account_id=${primaryAccountId}`);
       proposalCountRef.current = proposals.filter(p => p.status === 'pending_approval').length;
     } catch { /* proceed with trigger even if pre-fetch fails */ }
 
@@ -119,7 +113,7 @@ const PlannerPage: React.FC = () => {
   }, [token]);
 
   useEffect(() => {
-    if (!isAgentRunning || !token || !primaryAccountId) return;
+    if (!isAgentRunning || !token || !primaryAccountId || !agentStartedAt) return;
 
     const poll = async () => {
       try {
@@ -133,10 +127,15 @@ const PlannerPage: React.FC = () => {
           return;
         }
 
-        const accounts = await apiClient.get<InstagramAccount[]>('/instagram/accounts');
-        const account = accounts.find(a => a.id === primaryAccountId);
-        if (account?.last_agent_sync && account.last_agent_sync !== agentSyncBeforeRef.current) {
-          setAiStatus('No new images in Drive. Add photos to your folder to generate a proposal.');
+        const latestLog = await apiClient.get<AgentLog | null>(
+          `/api/agent/logs/latest?account_id=${primaryAccountId}`
+        );
+        if (latestLog && new Date(latestLog.run_at).getTime() >= agentStartedAt) {
+          setAiStatus(
+            latestLog.error
+              ? `The agent failed: ${latestLog.error}`
+              : 'No new images in Drive. Add photos to your folder to generate a proposal.'
+          );
           stopPolling();
         }
       } catch { /* ignore transient errors */ }
@@ -144,7 +143,7 @@ const PlannerPage: React.FC = () => {
 
     pollRef.current = setInterval(poll, 15_000);
     return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
-  }, [isAgentRunning, token, primaryAccountId, stopPolling]);
+  }, [isAgentRunning, token, primaryAccountId, agentStartedAt, stopPolling]);
 
   useEffect(() => {
     if (!agentStartedAt) return;

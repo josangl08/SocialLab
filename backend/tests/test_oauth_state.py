@@ -8,7 +8,16 @@ from tests.conftest import USER_ID
 
 def test_generate_and_verify_round_trip():
     token = generate_state_token(USER_ID)
-    assert verify_state_token(token) == USER_ID
+    payload = verify_state_token(token)
+    assert payload["user_id"] == USER_ID
+    assert payload["account_id"] is None
+
+
+def test_generate_and_verify_round_trip_with_account_id():
+    token = generate_state_token(USER_ID, account_id="7")
+    payload = verify_state_token(token)
+    assert payload["user_id"] == USER_ID
+    assert payload["account_id"] == "7"
 
 
 def test_verify_tampered_token_raises():

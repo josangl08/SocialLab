@@ -6,7 +6,8 @@ import type { InstagramAccount } from '../../types';
 
 type TokenStatus = 'valid' | 'expiring' | 'expired';
 
-function getTokenStatus(expiresAt: string | null | undefined): TokenStatus {
+function getTokenStatus(expiresAt: string | null | undefined, tokenInvalid?: boolean): TokenStatus {
+  if (tokenInvalid) return 'expired';
   if (!expiresAt) return 'expired';
   const exp = new Date(expiresAt);
   const now = new Date();
@@ -153,9 +154,11 @@ const AccountsPage: React.FC = () => {
     setDriveConnected(false);
   };
 
-  const handleReconnect = () => {
+  const handleReconnect = (accountId?: number) => {
     const token = localStorage.getItem('authToken');
-    if (token) window.location.href = apiClient.getUrl(`/instagram/login?token=${token}`);
+    if (!token) return;
+    const accountParam = accountId ? `&account_id=${accountId}` : '';
+    window.location.href = apiClient.getUrl(`/instagram/login?token=${token}${accountParam}`);
   };
 
   const statusBadge = (status: TokenStatus) => {
@@ -205,7 +208,7 @@ const AccountsPage: React.FC = () => {
           <i className="bi bi-instagram"></i>
           Cuentas de Instagram
         </h3>
-        <button className="st-btn st-btn-primary st-btn-sm" onClick={handleReconnect}>
+        <button className="st-btn st-btn-primary st-btn-sm" onClick={() => handleReconnect()}>
           <i className="bi bi-plus-circle"></i>Conectar cuenta
         </button>
       </div>
@@ -215,14 +218,14 @@ const AccountsPage: React.FC = () => {
           <i className="bi bi-instagram"></i>
           No tienes cuentas de Instagram conectadas.
           <br />
-          <button className="st-btn st-btn-ghost st-btn-sm" style={{ marginTop: 12 }} onClick={handleReconnect}>
+          <button className="st-btn st-btn-ghost st-btn-sm" style={{ marginTop: 12 }} onClick={() => handleReconnect()}>
             Conectar ahora
           </button>
         </div>
       ) : (
         <div className="st-accounts-grid">
           {accounts.map(account => {
-            const status = getTokenStatus(account.expires_at);
+            const status = getTokenStatus(account.expires_at, account.token_invalid);
             return (
               <div key={account.id} className="st-account-card">
                 {/* Profile row */}
@@ -274,7 +277,7 @@ const AccountsPage: React.FC = () => {
                 {/* Actions */}
                 <div style={{ display: 'flex', gap: 8 }}>
                   {status !== 'valid' && (
-                    <button className="st-btn st-btn-accent st-btn-sm" style={{ flex: 1 }} onClick={handleReconnect}>
+                    <button className="st-btn st-btn-accent st-btn-sm" style={{ flex: 1 }} onClick={() => handleReconnect(account.id)}>
                       <i className="bi bi-arrow-repeat"></i>Reconectar
                     </button>
                   )}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import AgentStrategyDrawer from '../features/agent/AgentStrategyDrawer';
 
@@ -155,5 +155,115 @@ describe('MonthlyCampaignSection in AgentStrategyDrawer', () => {
 
     // Verify it is gone
     expect(screen.queryByText('Lanzamiento Especial')).not.toBeInTheDocument();
+  });
+
+  test('shows "Generar con Hermes" button when no campaign exists, and triggers it', async () => {
+    render(
+      <AgentStrategyDrawer
+        accountId={12}
+        show={true}
+        onHide={mockOnHide}
+        onSave={mockOnSave}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Generar con Hermes/i)).toBeInTheDocument();
+    });
+
+    // No campaign yet — chat toggle shouldn't be offered
+    expect(screen.queryByText(/Chat con Hermes/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/Generar con Hermes/i));
+
+    await waitFor(() => {
+      const triggerCall = (global.fetch as any).mock.calls.find((c: any[]) => c[0].includes('/api/agent/campaign/trigger'));
+      expect(triggerCall).toBeTruthy();
+      const body = JSON.parse(triggerCall[1].body);
+      expect(body.account_id).toBe(12);
+    });
+  });
+
+  test('shows an error message when Hermes does not respond within the poll timeout', async () => {
+    render(
+      <AgentStrategyDrawer
+        accountId={12}
+        show={true}
+        onHide={mockOnHide}
+        onSave={mockOnSave}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Generar con Hermes/i)).toBeInTheDocument();
+    });
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        fireEvent.click(screen.getByText(/Generar con Hermes/i));
+      });
+
+      // Let the trigger POST's promise resolve (sets campaignGenStartedAt, which
+      // mounts the polling interval/timeout), then advance past the 45s timeout —
+      // in a few smaller steps, each wrapped in act so the resulting state updates
+      // (interval creation, timeout firing) are flushed to the DOM.
+      for (let i = 0; i < 10; i++) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5000);
+        });
+      }
+
+      expect(screen.getByText(/Hermes no respondió a tiempo/i)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('offers "Chat con Hermes" for an approved (non-pending) campaign', async () => {
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (url.includes('/api/agent/config/12')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+      }
+      if (url.includes('/api/agent/campaign?')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            id: 'campaign-approved-1',
+            account_id: 12,
+            month_date: '2026-07-01',
+            strategy_mode: 'personal_storyline',
+            title: 'Campaña aprobada',
+            description: '',
+            milestones: [],
+            weekly_focus: {},
+            status: 'approved',
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    render(
+      <AgentStrategyDrawer
+        accountId={12}
+        show={true}
+        onHide={mockOnHide}
+        onSave={mockOnSave}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Chat con Hermes/i)).toBeInTheDocument();
+    });
+
+    // Approved campaign already exists — no "Generar con Hermes" prompt
+    expect(screen.queryByText(/Generar con Hermes/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/Chat con Hermes/i));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('campaign-chat-box')).toBeInTheDocument();
+    });
   });
 });

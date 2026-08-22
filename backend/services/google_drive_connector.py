@@ -194,18 +194,34 @@ class GoogleDriveConnector:
     def get_file_direct_url(self, file_id: str) -> str:
         return f"https://drive.google.com/uc?export=download&id={file_id}"
 
-    def watch_folder(self, folder_id: str, webhook_url: str) -> Optional[str]:
+    def watch_folder(self, folder_id: str, webhook_url: str, channel_id: str, token: str) -> Optional[Dict]:
+        """Registers a Drive Push Notification channel for a folder. Returns the
+        full channel dict (id, resourceId, expiration) needed to later renew or
+        stop the channel — a bare channel id isn't enough for either operation."""
         try:
             body = {
-                'id': f'channel_{datetime.now().timestamp()}',
+                'id': channel_id,
                 'type': 'web_hook',
-                'address': webhook_url
+                'address': webhook_url,
+                'token': token,
             }
             response = self.service.files().watch(fileId=folder_id, body=body).execute()
-            return response.get('id')
+            return {
+                'channel_id': response.get('id'),
+                'resource_id': response.get('resourceId'),
+                'expiration': response.get('expiration'),
+            }
         except Exception as e:
             logger.error(f"Error configurando webhook: {str(e)}")
             return None
+
+    def stop_channel(self, channel_id: str, resource_id: str) -> bool:
+        try:
+            self.service.channels().stop(body={'id': channel_id, 'resourceId': resource_id}).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error deteniendo canal de Drive {channel_id}: {str(e)}")
+            return False
 
 
 def get_drive_connector(user_id: str) -> GoogleDriveConnector:

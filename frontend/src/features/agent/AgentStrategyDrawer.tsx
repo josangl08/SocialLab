@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { HybridSelect } from './HybridSelect';
+import { CampaignChatBox } from './CampaignChatBox';
 import { apiClient, ApiError } from '../../api/client';
 
 export interface ContentTypeMix {
@@ -21,6 +22,7 @@ export interface AgentStrategyConfig {
   best_times: string[];
   content_pillars: string[];
   hashtag_strategy: 'minimal' | 'moderate' | 'maximum';
+  caption_voice: 'personal' | 'professional' | null;
   reference_accounts: string[];
   posts_per_week: number;
   scheduling_mode: 'fixed' | 'flexible';
@@ -42,6 +44,9 @@ export interface MonthlyCampaign {
   description: string;
   milestones: Milestone[];
   weekly_focus: Record<string, string>;
+  status?: 'pending_approval' | 'approved' | 'rejected';
+  generated_by?: 'manual' | 'hermes';
+  resolved_at?: string | null;
 }
 
 export const getFirstOfDayOfMonth = (date: Date): string => {
@@ -64,7 +69,7 @@ const DEFAULT: AgentStrategyConfig = {
   account_type: 'personal', sector: '', purpose: '', target_audience: '',
   style_guide: '', default_tone: 'energetic', default_language: 'es',
   posting_frequency: 'few_times_week', best_times: ['09:00', '18:00'],
-  content_pillars: [], hashtag_strategy: 'moderate', reference_accounts: [],
+  content_pillars: [], hashtag_strategy: 'moderate', caption_voice: null, reference_accounts: [],
   posts_per_week: 3, scheduling_mode: 'flexible', preferred_days: [],
   content_type_mix: { post: 2, reel: 1, carousel: 1, story: 0 },
 };
@@ -107,6 +112,12 @@ const HASHTAG_OPTS = [
   { value: 'minimal'  as const, label: 'Mínimos',   desc: '3–5'   },
   { value: 'moderate' as const, label: 'Moderados', desc: '6–10'  },
   { value: 'maximum'  as const, label: 'Máximos',   desc: '11–15' },
+];
+
+const CAPTION_VOICE_OPTS = [
+  { value: null           as const, label: 'Automático', desc: 'hereda de la cuenta' },
+  { value: 'personal'     as const, label: 'Personal',    desc: 'corto, emojis' },
+  { value: 'professional' as const, label: 'Profesional', desc: 'semiformal' },
 ];
 
 const DAYS = [
@@ -219,6 +230,85 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
   const [campaign, setCampaign] = useState<MonthlyCampaign>(() => emptyCampaign(accountId, getFirstOfDayOfMonth(new Date())));
   const [newMilestoneDate, setNewMilestoneDate] = useState('');
   const [newMilestoneEvent, setNewMilestoneEvent] = useState('');
+  const [showCampaignChat, setShowCampaignChat] = useState(false);
+  const [campaignActionLoading, setCampaignActionLoading] = useState(false);
+  const [campaignError, setCampaignError] = useState<string | null>(null);
+  const [generatingCampaign, setGeneratingCampaign] = useState(false);
+  const [campaignGenStartedAt, setCampaignGenStartedAt] = useState<number | null>(null);
+
+  const handleApproveCampaign = async () => {
+    if (!campaign.id) return;
+    setCampaignActionLoading(true);
+    setCampaignError(null);
+    try {
+      const updated = await apiClient.post<Partial<MonthlyCampaign>>(`/api/agent/campaign/${campaign.id}/approve`);
+      setCampaign(prev => ({ ...prev, ...updated }));
+    } catch (e) {
+      setCampaignError(e instanceof ApiError ? e.detail : 'Error al aprobar la campaña');
+    } finally {
+      setCampaignActionLoading(false);
+    }
+  };
+
+  const handleRejectCampaign = async () => {
+    if (!campaign.id) return;
+    setCampaignActionLoading(true);
+    setCampaignError(null);
+    try {
+      const updated = await apiClient.post<Partial<MonthlyCampaign>>(`/api/agent/campaign/${campaign.id}/reject`);
+      setCampaign(prev => ({ ...prev, ...updated }));
+      setShowCampaignChat(false);
+    } catch (e) {
+      setCampaignError(e instanceof ApiError ? e.detail : 'Error al rechazar la campaña');
+    } finally {
+      setCampaignActionLoading(false);
+    }
+  };
+
+  const handleGenerateCampaign = async () => {
+    if (!accountId) return;
+    setGeneratingCampaign(true);
+    setCampaignError(null);
+    try {
+      await apiClient.post('/api/agent/campaign/trigger', { account_id: accountId, month_date: campaign.month_date });
+      setCampaignGenStartedAt(Date.now());
+    } catch (e) {
+      setCampaignError(e instanceof ApiError ? e.detail : 'Error al generar la campaña');
+      setGeneratingCampaign(false);
+    }
+  };
+
+  // ── Poll for the campaign Hermes is drafting after handleGenerateCampaign ──
+  useEffect(() => {
+    if (!campaignGenStartedAt || !accountId) return;
+
+    const poll = async () => {
+      try {
+        const data = await apiClient.get<Partial<MonthlyCampaign> | null>(
+          `/api/agent/campaign?account_id=${accountId}&month_date=${campaign.month_date}`
+        );
+        if (data?.id) {
+          const base = emptyCampaign(accountId, campaign.month_date);
+          setCampaign({
+            ...base, ...data,
+            weekly_focus: { ...base.weekly_focus, ...data.weekly_focus },
+            milestones: data.milestones ?? base.milestones,
+          });
+          setGeneratingCampaign(false);
+          setCampaignGenStartedAt(null);
+        }
+      } catch { /* ignore transient errors, keep polling until timeout */ }
+    };
+
+    const interval = setInterval(poll, 4000);
+    const timeout = setTimeout(() => {
+      setGeneratingCampaign(false);
+      setCampaignGenStartedAt(null);
+      setCampaignError('Hermes no respondió a tiempo. Inténtalo de nuevo en unos segundos.');
+    }, 45000);
+
+    return () => { clearInterval(interval); clearTimeout(timeout); };
+  }, [campaignGenStartedAt, accountId, campaign.month_date]);
 
   const addMilestone = () => {
     const date = newMilestoneDate;
@@ -464,6 +554,7 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
 
           ) : (
             <>
+
               {generatedBanner && (
                 <div className="alert py-2 px-3 mb-3 small d-flex align-items-center gap-2" style={{ backgroundColor: 'rgba(99,102,241,0.15)', border: '1px solid rgba(129,140,248,0.4)', color: '#a5b4fc', borderRadius: 10 }}>
                   <i className="bi bi-stars" /> Estrategia generada — revisa y guarda.
@@ -543,9 +634,19 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
                   ))}
                 </div>
               </div>
-              <div className="mb-4">
+              <div className="mb-3">
                 <FL icon="bi-pencil" label="Guía de Estilo" />
                 <textarea className="form-control form-control-sm" style={{ ...inp, resize: 'none' }} rows={3} value={cfg.style_guide} onChange={e => set('style_guide', e.target.value)} placeholder="Ej: Tono cercano e inspirador, combinar fútbol con fotografía y viajes" />
+              </div>
+              <div className="mb-4">
+                <FL icon="bi-chat-quote" label="Estilo de Caption" />
+                <div className="d-flex gap-2">
+                  {CAPTION_VOICE_OPTS.map(o => (
+                    <button key={o.label} type="button" onClick={() => set('caption_voice', o.value)} className={`btn btn-sm flex-grow-1 ${cfg.caption_voice === o.value ? 'btn-primary' : 'btn-outline-secondary'}`}>
+                      {o.label}<div style={{ fontSize: '0.62rem', opacity: 0.65, fontWeight: 400 }}>{o.desc}</div>
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <Sep />
@@ -689,7 +790,55 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
 
               {/* Enfoque del Mes */}
               <SL icon="bi-calendar3-range" label="Enfoque del Mes" />
-              
+
+              <div className="d-flex gap-2 mb-3">
+                {(!campaign.id || campaign.status === 'rejected') && (
+                  <button type="button" className="btn btn-sm btn-outline-primary flex-grow-1" onClick={handleGenerateCampaign} disabled={generatingCampaign}>
+                    {generatingCampaign
+                      ? <><span className="spinner-border spinner-border-sm me-1" />Generando...</>
+                      : <><i className="bi bi-robot me-1" />Generar con Hermes</>}
+                  </button>
+                )}
+                {campaign.id && (
+                  <button type="button" className="btn btn-sm btn-outline-secondary flex-grow-1" onClick={() => setShowCampaignChat(v => !v)}>
+                    <i className="bi bi-chat-dots me-1" />Chat con Hermes
+                  </button>
+                )}
+              </div>
+
+              {campaign.status === 'pending_approval' && (
+                <div className="mb-3" style={{ backgroundColor: 'rgba(99,102,241,0.08)', border: '1px solid rgba(129,140,248,0.35)', borderRadius: 12, padding: 16 }}>
+                  <div className="d-flex align-items-center gap-2 mb-2">
+                    <i className="bi bi-robot" style={{ color: '#a5b4fc', fontSize: '1.1rem' }} />
+                    <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.9rem' }}>Hermes propone una campaña</span>
+                  </div>
+                  <p style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.6)', marginBottom: 12 }}>
+                    Hermes generó este borrador para {campaign.month_date} — revísalo antes de que empiece el mes.
+                  </p>
+                  <div className="d-flex gap-2">
+                    <button type="button" className="btn btn-sm btn-success flex-grow-1" onClick={handleApproveCampaign} disabled={campaignActionLoading}>
+                      <i className="bi bi-check-lg me-1" />Aprobar
+                    </button>
+                    <button type="button" className="btn btn-sm btn-outline-danger flex-grow-1" onClick={handleRejectCampaign} disabled={campaignActionLoading}>
+                      <i className="bi bi-x-lg me-1" />Rechazar
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {campaignError && <div className="alert alert-danger py-2 px-3 mb-3 small">{campaignError}</div>}
+
+              {showCampaignChat && campaign.id && (
+                <div className="mb-3">
+                  <CampaignChatBox
+                    campaignId={campaign.id}
+                    accountId={accountId}
+                    monthDate={campaign.month_date}
+                    onCampaignUpdated={(updated) => setCampaign(prev => ({ ...prev, ...updated }))}
+                  />
+                </div>
+              )}
+
               <div className="mb-3">
                 <FL icon="bi-calendar-date" label="Mes Objetivo" />
                 <input 

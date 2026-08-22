@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Literal, Optional
 from database.supabase_client import get_supabase_admin_client
@@ -6,11 +7,13 @@ from models.schemas import User, AgentConfig, ContentProposal, MonthlyCampaign
 from auth.dependencies import get_current_user, get_user_supabase_client
 from supabase import Client
 from datetime import datetime, timezone, timedelta
+import asyncio
 import uuid
 import json
 import logging
 from services.gemini_service import generate_gemini_content, clean_and_parse_json, regenerate_slot_caption
 from services.analytics.analytics_service import AnalyticsService
+from services.hermes.orchestrator import run_edit_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["Agent"])
@@ -61,6 +64,73 @@ def trigger_agent(
         logger.error(f"Error triggering agent: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al iniciar el agente: {str(e)}")
 
+
+class CampaignTriggerRequest(BaseModel):
+    account_id: int
+    month_date: Optional[str] = None  # defaults to next calendar month, like the daily cron
+
+
+@router.post("/campaign/trigger")
+def trigger_monthly_campaign(
+    request: CampaignTriggerRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Manually asks Hermes to draft a monthly campaign for the given account/month
+    on demand (the drawer's "Generar con Hermes" button), instead of waiting for
+    the daily cron. Idempotency (no duplicate/overwrite of a pending or approved
+    campaign) is already handled inside supabase_create_monthly_campaign.
+    """
+    acc_res = admin_supabase.table('instagram_accounts').select('user_id').eq('id', request.account_id).execute()
+    if not acc_res.data:
+        raise HTTPException(status_code=404, detail="Cuenta de Instagram no encontrada")
+    if str(acc_res.data[0]['user_id']) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esta cuenta")
+
+    background_tasks.add_task(_run_monthly_campaign_trigger, request.account_id, request.month_date)
+
+    return {"status": "started"}
+
+
+async def _run_monthly_campaign_trigger(account_id: int, month_date: Optional[str]) -> None:
+    """Background-task wrapper for the on-demand monthly campaign trigger. Without
+    this, an exception inside run_monthly_strategy_session fails silently — no
+    HTTP response to catch it (already sent), no agent_logs-style record anywhere
+    the frontend could poll. At minimum, make failures visible in server logs."""
+    try:
+        from services.hermes.monthly_strategy import run_monthly_strategy_session
+        result = await run_monthly_strategy_session(account_id, month_date)
+        logger.info(
+            f"[MonthlyCampaign] On-demand trigger complete — account_id={account_id}, "
+            f"created={result.created}, campaign_id={result.campaign_id}, error={result.error}"
+        )
+    except Exception as e:
+        logger.error(f"[MonthlyCampaign] On-demand trigger failed for account {account_id}: {e}")
+
+@router.get("/logs/latest")
+def get_latest_agent_log(
+    account_id: int,
+    current_user: User = Depends(get_current_user)
+):
+    """Returns the most recent agent_logs row for account_id, or null if the
+    agent has never run for it. Lets the planner poll for the outcome (including
+    the error message) of a triggered run instead of guessing from side effects."""
+    acc_res = admin_supabase.table('instagram_accounts').select('user_id').eq('id', account_id).execute()
+    if not acc_res.data:
+        raise HTTPException(status_code=404, detail="Cuenta de Instagram no encontrada")
+    if str(acc_res.data[0]['user_id']) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esta cuenta")
+
+    log_res = admin_supabase.table('agent_logs')\
+        .select('*')\
+        .eq('account_id', account_id)\
+        .order('run_at', desc=True)\
+        .limit(1)\
+        .execute()
+    return log_res.data[0] if log_res.data else None
+
+
 @router.get("/proposals", response_model=list[ContentProposal])
 def list_proposals(
     account_id: int,
@@ -86,13 +156,19 @@ def list_proposals(
 
         proposals = []
         for row in proposals_res.data:
-            proposals.append(ContentProposal(
-                id=str(row['id']),
-                account_id=str(row['account_id']),
-                week_start=str(row['week_start']),
-                slots=row['slots'],
-                status=row['status']
-            ))
+            try:
+                proposals.append(ContentProposal(
+                    id=str(row['id']),
+                    account_id=str(row['account_id']),
+                    week_start=str(row['week_start']),
+                    slots=row['slots'],
+                    status=row['status']
+                ))
+            except Exception as e:
+                # A malformed legacy row (e.g. incomplete slots from before the
+                # CalendarSlot schema was enforced) shouldn't hide every other
+                # proposal behind a 500 — skip it and keep serving the rest.
+                logger.warning(f"Skipping malformed proposal {row.get('id')}: {e}")
         return proposals
     except HTTPException:
         raise
@@ -179,7 +255,7 @@ def reject_proposal(
 STRATEGY_FIELDS = (
     'id, account_type, sector, purpose, target_audience, style_guide, '
     'default_tone, default_language, posting_frequency, best_times, '
-    'content_pillars, hashtag_strategy, reference_accounts, '
+    'content_pillars, hashtag_strategy, caption_voice, reference_accounts, '
     'posts_per_week, scheduling_mode, preferred_days, content_type_mix, last_agent_sync'
 )
 
@@ -207,6 +283,7 @@ def get_agent_config(
             'best_times': row.get('best_times') or ['09:00', '18:00'],
             'content_pillars': row.get('content_pillars') or [],
             'hashtag_strategy': row.get('hashtag_strategy', 'moderate'),
+            'caption_voice': row.get('caption_voice'),
             'reference_accounts': row.get('reference_accounts') or [],
             'posts_per_week': row.get('posts_per_week', 3),
             'scheduling_mode': row.get('scheduling_mode', 'flexible'),
@@ -248,6 +325,7 @@ def update_agent_config(
             'best_times': config.best_times,
             'content_pillars': config.content_pillars,
             'hashtag_strategy': config.hashtag_strategy,
+            'caption_voice': config.caption_voice,
             'reference_accounts': config.reference_accounts,
             'posts_per_week': config.posts_per_week,
             'scheduling_mode': config.scheduling_mode,
@@ -678,4 +756,106 @@ def get_monthly_campaign(
     except Exception as e:
         logger.error(f"Error getting monthly campaign: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al obtener la campaña mensual: {str(e)}")
+
+
+def _get_campaign_and_verify_owner(campaign_id: str, user_id: str, supabase: Client) -> dict:
+    """Shared helper for the approve/reject/chat campaign endpoints: validates
+    ownership through the campaign's account and returns the campaign row."""
+    campaign_res = supabase.table('monthly_campaigns').select('*').eq('id', campaign_id).execute()
+    if not campaign_res.data:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    campaign = campaign_res.data[0]
+    acc_res = admin_supabase.table('instagram_accounts').select('user_id').eq('id', campaign['account_id']).execute()
+    if not acc_res.data or str(acc_res.data[0]['user_id']) != str(user_id):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esta campaña")
+    return campaign
+
+
+@router.post("/campaign/{campaign_id}/approve")
+def approve_campaign(
+    campaign_id: str,
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
+):
+    campaign = _get_campaign_and_verify_owner(campaign_id, str(current_user.id), supabase)
+    if campaign.get('status') != 'pending_approval':
+        raise HTTPException(status_code=409, detail="La campaña no está pendiente de aprobación")
+
+    update_res = admin_supabase.table('monthly_campaigns').update({
+        'status': 'approved',
+        'resolved_at': datetime.now(timezone.utc).isoformat()
+    }).eq('id', campaign_id).execute()
+
+    return update_res.data[0] if update_res.data else {}
+
+
+@router.post("/campaign/{campaign_id}/reject")
+def reject_campaign(
+    campaign_id: str,
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
+):
+    campaign = _get_campaign_and_verify_owner(campaign_id, str(current_user.id), supabase)
+    if campaign.get('status') != 'pending_approval':
+        raise HTTPException(status_code=409, detail="La campaña no está pendiente de aprobación")
+
+    update_res = admin_supabase.table('monthly_campaigns').update({
+        'status': 'rejected',
+        'resolved_at': datetime.now(timezone.utc).isoformat()
+    }).eq('id', campaign_id).execute()
+
+    return update_res.data[0] if update_res.data else {}
+
+
+class CampaignChatRequest(BaseModel):
+    message: str
+
+
+@router.post("/campaign/{campaign_id}/chat")
+async def chat_with_campaign(
+    campaign_id: str,
+    request: CampaignChatRequest,
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
+):
+    """Streams Hermes' progress (tool calls) and final answer as NDJSON while it
+    interprets a natural-language adjustment to a monthly campaign. Ownership is
+    checked before the stream opens; any error afterwards becomes a 'done' line
+    since headers are already sent (design.md §API Changes)."""
+    campaign = _get_campaign_and_verify_owner(campaign_id, str(current_user.id), supabase)
+    account_id = campaign['account_id']
+
+    async def event_stream():
+        queue: asyncio.Queue = asyncio.Queue()
+        done_marker = object()
+
+        def on_progress(event):
+            queue.put_nowait(event)
+
+        async def run():
+            try:
+                result = await run_edit_session(
+                    account_id=account_id,
+                    edit_type="CAMPAIGN_CHAT",
+                    context={"campaign_id": campaign_id},
+                    user_message=request.message,
+                    on_progress=on_progress
+                )
+                queue.put_nowait({"type": "done", "resolved": result.resolved, "message": result.message})
+            except Exception as e:
+                queue.put_nowait({"type": "done", "resolved": False, "message": str(e)})
+            finally:
+                queue.put_nowait(done_marker)
+
+        task = asyncio.create_task(run())
+        try:
+            while True:
+                event = await queue.get()
+                if event is done_marker:
+                    break
+                yield (json.dumps(event) + "\n").encode()
+        finally:
+            await task
+
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
 

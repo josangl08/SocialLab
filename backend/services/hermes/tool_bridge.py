@@ -1,0 +1,138 @@
+import json
+from typing import List, Dict, Any, Optional
+from google.genai import types
+
+
+def _unwrap_mcp_result(result: Any) -> Any:
+    """FastMCP's call_tool() always wraps the tool's real return value in a list
+    of TextContent (JSON-encoded text), even for in-process calls — a dict becomes
+    one TextContent, a list becomes one TextContent per element. Left unwrapped,
+    this raw MCP wire format leaks into Gemini's function response and blows up
+    with "Object of type TextContent is not JSON serializable". Reconstruct the
+    original Python value the tool actually returned.
+    """
+    if not isinstance(result, list):
+        return result
+
+    texts = []
+    for item in result:
+        text = getattr(item, "text", None)
+        if text is None:
+            return result  # non-text content (image, etc.) — nothing sensible to unwrap
+        texts.append(text)
+
+    def _parse(text: str) -> Any:
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return text
+
+    if len(texts) == 1:
+        return _parse(texts[0])
+    return [_parse(t) for t in texts]
+
+
+def _sanitize_schema(schema: Dict[str, Any], defs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Convierte un JSON Schema generado por Pydantic/FastMCP al subconjunto que soporta
+    google.genai.types.FunctionDeclaration. FastMCP genera 'title'/'default' en cada
+    propiedad y representa Optional[...] como anyOf: [{type: X}, {type: null}] — ninguno de
+    los dos lo acepta el Schema de genai (falla con "Unknown field for Schema: title").
+    Nested Pydantic models (e.g. a tool param typed List[SomeModel]) come through as
+    {"$ref": "#/$defs/SomeModel"} — defs resolves those against the root schema's $defs,
+    threaded through every recursive call so nested objects aren't silently flattened to
+    an untyped STRING. required is propagated at every level (not just the top-level tool
+    params) so the model actually sees which nested fields are mandatory.
+    """
+    if not isinstance(schema, dict):
+        return {"type": "STRING"}
+
+    defs = defs or {}
+
+    if "$ref" in schema:
+        ref_name = schema["$ref"].rsplit("/", 1)[-1]
+        return _sanitize_schema(defs.get(ref_name, {}), defs)
+
+    if "anyOf" in schema:
+        real_branch = next(
+            (s for s in schema["anyOf"] if isinstance(s, dict) and s.get("type") != "null"),
+            {}
+        )
+        return _sanitize_schema(real_branch, defs)
+
+    sanitized: Dict[str, Any] = {"type": schema.get("type", "string").upper()}
+    if "description" in schema:
+        sanitized["description"] = schema["description"]
+    if "enum" in schema:
+        sanitized["enum"] = schema["enum"]
+    if "items" in schema:
+        sanitized["items"] = _sanitize_schema(schema["items"], defs)
+    if "properties" in schema:
+        sanitized["properties"] = {k: _sanitize_schema(v, defs) for k, v in schema["properties"].items()}
+    if "required" in schema:
+        sanitized["required"] = schema["required"]
+    return sanitized
+
+
+class ToolBridge:
+    def __init__(self, mcp_servers: List[Any], allowed_tools: Optional[List[str]] = None):
+        self.mcp_servers = mcp_servers
+        self.allowed_tools = set(allowed_tools) if allowed_tools is not None else None
+        self.tools_map = {}
+
+    async def discover_tools(self) -> List[types.FunctionDeclaration]:
+        declarations = []
+        self.tools_map = {}
+        for server in self.mcp_servers:
+            tools = await server.list_tools()
+            for tool in tools:
+                if self.allowed_tools is not None and tool.name not in self.allowed_tools:
+                    continue
+                self.tools_map[tool.name] = (server, tool)
+
+                # inputSchema is a dict representing the JSON Schema
+                schema_dict = getattr(tool, "inputSchema", {})
+                defs = schema_dict.get("$defs", {})
+
+                properties = schema_dict.get("properties", {})
+                filtered_properties = {}
+                for k, v in properties.items():
+                    if k not in ["account_id", "instagram_account_id"]:
+                        filtered_properties[k] = _sanitize_schema(v, defs)
+
+                required = schema_dict.get("required", [])
+                filtered_required = [r for r in required if r not in ["account_id", "instagram_account_id"]]
+
+                parameters = {
+                    "type": "OBJECT",
+                    "properties": filtered_properties,
+                }
+                if filtered_required:
+                    parameters["required"] = filtered_required
+
+                decl = types.FunctionDeclaration(
+                    name=tool.name,
+                    description=tool.description,
+                    parameters=parameters
+                )
+                declarations.append(decl)
+
+        return declarations
+
+    async def dispatch(self, name: str, arguments: Dict[str, Any], account_id: int) -> Any:
+        if name not in self.tools_map:
+            raise ValueError(f"Tool {name} not found")
+        
+        server, tool = self.tools_map[name]
+        actual_args = dict(arguments)
+        
+        # Check if the original input schema had account_id or instagram_account_id
+        schema_dict = getattr(tool, "inputSchema", {})
+        properties = schema_dict.get("properties", {})
+        
+        if "account_id" in properties:
+            actual_args["account_id"] = account_id
+        if "instagram_account_id" in properties:
+            actual_args["instagram_account_id"] = account_id
+            
+        result = await server.call_tool(name, actual_args)
+        return _unwrap_mcp_result(result)

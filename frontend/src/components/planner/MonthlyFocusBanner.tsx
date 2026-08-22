@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { getFirstOfDayOfMonth } from '../../features/agent/AgentStrategyDrawer';
 import type { MonthlyCampaign } from '../../features/agent/AgentStrategyDrawer';
 import { useAuth } from '../../context/AuthContext';
@@ -36,8 +37,20 @@ export const MonthlyFocusBanner: React.FC<MonthlyFocusBannerProps> = ({ accountI
       });
   }, [token, accountId, currentDate]);
 
-  if (loading || !campaign) {
+  if (loading || !accountId) {
     return null;
+  }
+
+  if (!campaign) {
+    return (
+      <div className="monthly-focus-banner monthly-focus-banner--empty p-3 mb-4 rounded-3 d-flex align-items-center gap-2">
+        <i className="bi bi-info-circle text-white-50" />
+        <span className="text-white-50 small">Sin campaña mensual configurada para este mes.</span>
+        <Link to="/settings" className="ms-auto small fw-semibold text-decoration-none" style={{ color: '#a78bfa' }}>
+          Configurar en Estrategia del Agente →
+        </Link>
+      </div>
+    );
   }
 
   const currentWeek = Math.min(Math.floor((currentDate.getDate() - 1) / 7) + 1, 4);

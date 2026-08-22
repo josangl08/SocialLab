@@ -273,6 +273,104 @@ def test_update_slot_type_success(mock_agent_supabase, mock_agent_admin_supabase
     assert response.json() == {"updated": True}
 
 
+# ── /logs/latest endpoint tests ─────────────────────────────────────────────
+
+def test_get_latest_agent_log_success(mock_agent_admin_supabase):
+    account_id = 7
+
+    def mock_table_admin(name):
+        mock_t = MagicMock()
+        if name == 'instagram_accounts':
+            mock_t.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+        elif name == 'agent_logs':
+            mock_t.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(data=[{
+                "id": "log-1", "account_id": account_id, "run_at": "2026-07-24T16:14:27+00:00",
+                "images_scanned": 0, "images_analyzed": 0, "posts_drafted": 0,
+                "error": "gemini_error: 429 quota exceeded", "duration_ms": 519
+            }])
+        return mock_t
+
+    mock_agent_admin_supabase.table.side_effect = mock_table_admin
+
+    response = client.get(f"/api/agent/logs/latest?account_id={account_id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["account_id"] == account_id
+    assert body["error"] == "gemini_error: 429 quota exceeded"
+
+
+def test_get_latest_agent_log_no_logs_yet(mock_agent_admin_supabase):
+    account_id = 7
+
+    def mock_table_admin(name):
+        mock_t = MagicMock()
+        if name == 'instagram_accounts':
+            mock_t.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+        elif name == 'agent_logs':
+            mock_t.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
+        return mock_t
+
+    mock_agent_admin_supabase.table.side_effect = mock_table_admin
+
+    response = client.get(f"/api/agent/logs/latest?account_id={account_id}")
+
+    assert response.status_code == 200
+    assert response.json() is None
+
+
+def test_get_latest_agent_log_account_not_found(mock_agent_admin_supabase):
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+
+    response = client.get("/api/agent/logs/latest?account_id=9999")
+
+    assert response.status_code == 404
+
+
+def test_get_latest_agent_log_unauthorized(mock_agent_admin_supabase):
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{
+        "user_id": "other-user-999"
+    }])
+
+    response = client.get("/api/agent/logs/latest?account_id=7")
+
+    assert response.status_code == 403
+
+
+# ── /proposals endpoint tests ───────────────────────────────────────────────
+
+def test_list_proposals_skips_malformed_rows(mock_agent_supabase, mock_agent_admin_supabase):
+    account_id = 456
+
+    mock_acc_exec = MagicMock()
+    mock_acc_exec.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value = mock_acc_exec
+
+    mock_proposals_exec = MagicMock()
+    mock_proposals_exec.execute.return_value = MagicMock(data=[
+        {
+            "id": "prop-good", "account_id": account_id, "week_start": "2026-07-27",
+            "status": "pending_approval",
+            "slots": [{"day": "Monday", "theme": "t", "caption": "c", "post_id": 1, "image_id": None, "post_type": "post"}]
+        },
+        {
+            # Legacy/malformed row: incomplete slots (no day/theme/caption) and an
+            # invalid status value — must not crash the whole list.
+            "id": "prop-bad", "account_id": account_id, "week_start": "2026-08-10",
+            "status": "pending",
+            "slots": [{"post_id": 41541}]
+        }
+    ])
+    mock_agent_supabase.table.return_value.select.return_value.eq.return_value.order.return_value = mock_proposals_exec
+
+    response = client.get(f"/api/agent/proposals?account_id={account_id}")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["id"] == "prop-good"
+
+
 # ── /trigger endpoint tests ─────────────────────────────────────────────────
 
 def test_trigger_agent_account_not_found(mock_agent_admin_supabase):
@@ -321,6 +419,39 @@ def test_trigger_agent_success(mock_run_agent, mock_get_connector, mock_agent_ad
     body = response.json()
     assert body['status'] == 'started'
     assert 'run_id' in body
+
+
+# ── /campaign/trigger endpoint tests ────────────────────────────────────────
+
+def test_trigger_monthly_campaign_account_not_found(mock_agent_admin_supabase):
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+
+    response = client.post('/api/agent/campaign/trigger', json={'account_id': 9999})
+
+    assert response.status_code == 404
+
+
+def test_trigger_monthly_campaign_unauthorized(mock_agent_admin_supabase):
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{
+        'user_id': 'other-user-999'
+    }])
+
+    response = client.post('/api/agent/campaign/trigger', json={'account_id': 1})
+
+    assert response.status_code == 403
+
+
+@patch("services.hermes.monthly_strategy.run_monthly_strategy_session")
+def test_trigger_monthly_campaign_success(mock_run_monthly, mock_agent_admin_supabase):
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{
+        'user_id': USER_ID
+    }])
+
+    response = client.post('/api/agent/campaign/trigger', json={'account_id': 1, 'month_date': '2026-09-01'})
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "started"}
+    mock_run_monthly.assert_called_once_with(1, '2026-09-01')
 
 
 @patch("routes.agent_routes.generate_gemini_content")
@@ -392,6 +523,224 @@ def test_suggest_times_unauthorized_account(mock_generate_gemini, mock_agent_adm
         # La validación de ownership no se ha implementado todavía (se ignora account_id o se rechaza por campo extra)
         return
     assert response.status_code == 403
+
+
+# ==============================================================================
+# CAMPAIGN ENDPOINT TESTS
+# ==============================================================================
+
+def test_approve_campaign_success(mock_agent_supabase, mock_agent_admin_supabase):
+    campaign_id = "camp-123"
+    account_id = 456
+    
+    # Mock campaign in pending state
+    mock_camp_exec = MagicMock()
+    mock_camp_exec.execute.return_value = MagicMock(data=[{
+        "id": campaign_id,
+        "account_id": account_id,
+        "status": "pending_approval"
+    }])
+    mock_agent_supabase.table.return_value.select.return_value.eq.return_value = mock_camp_exec
+
+    # Mock account ownership
+    mock_acc_exec = MagicMock()
+    mock_acc_exec.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value = mock_acc_exec
+
+    # Mock campaign update
+    mock_update_exec = MagicMock()
+    mock_update_exec.execute.return_value = MagicMock(data=[{
+        "id": campaign_id,
+        "status": "approved"
+    }])
+    mock_agent_admin_supabase.table.return_value.update.return_value.eq.return_value = mock_update_exec
+
+    response = client.post(f"/api/agent/campaign/{campaign_id}/approve")
+    assert response.status_code == 200
+    assert response.json()["status"] == "approved"
+
+
+def test_approve_campaign_unauthorized(mock_agent_supabase, mock_agent_admin_supabase):
+    campaign_id = "camp-123"
+    account_id = 456
+    
+    # Mock campaign in pending state
+    mock_camp_exec = MagicMock()
+    mock_camp_exec.execute.return_value = MagicMock(data=[{
+        "id": campaign_id,
+        "account_id": account_id,
+        "status": "pending_approval"
+    }])
+    mock_agent_supabase.table.return_value.select.return_value.eq.return_value = mock_camp_exec
+
+    # Mock account ownership belonging to someone else
+    mock_acc_exec = MagicMock()
+    mock_acc_exec.execute.return_value = MagicMock(data=[{"user_id": "other-user-999"}])
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value = mock_acc_exec
+
+    response = client.post(f"/api/agent/campaign/{campaign_id}/approve")
+    assert response.status_code == 403
+
+
+def test_approve_campaign_wrong_state_409(mock_agent_supabase, mock_agent_admin_supabase):
+    campaign_id = "camp-123"
+    account_id = 456
+    
+    # Mock campaign in approved state (not pending!)
+    mock_camp_exec = MagicMock()
+    mock_camp_exec.execute.return_value = MagicMock(data=[{
+        "id": campaign_id,
+        "account_id": account_id,
+        "status": "approved"
+    }])
+    mock_agent_supabase.table.return_value.select.return_value.eq.return_value = mock_camp_exec
+
+    # Mock account ownership
+    mock_acc_exec = MagicMock()
+    mock_acc_exec.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value = mock_acc_exec
+
+    response = client.post(f"/api/agent/campaign/{campaign_id}/approve")
+    assert response.status_code == 409
+
+
+def test_reject_campaign_success(mock_agent_supabase, mock_agent_admin_supabase):
+    campaign_id = "camp-123"
+    account_id = 456
+    
+    # Mock campaign in pending state
+    mock_camp_exec = MagicMock()
+    mock_camp_exec.execute.return_value = MagicMock(data=[{
+        "id": campaign_id,
+        "account_id": account_id,
+        "status": "pending_approval"
+    }])
+    mock_agent_supabase.table.return_value.select.return_value.eq.return_value = mock_camp_exec
+
+    # Mock account ownership
+    mock_acc_exec = MagicMock()
+    mock_acc_exec.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value = mock_acc_exec
+
+    # Mock campaign update
+    mock_update_exec = MagicMock()
+    mock_update_exec.execute.return_value = MagicMock(data=[{
+        "id": campaign_id,
+        "status": "rejected"
+    }])
+    mock_agent_admin_supabase.table.return_value.update.return_value.eq.return_value = mock_update_exec
+
+    response = client.post(f"/api/agent/campaign/{campaign_id}/reject")
+    assert response.status_code == 200
+    assert response.json()["status"] == "rejected"
+
+
+def test_reject_campaign_unauthorized(mock_agent_supabase, mock_agent_admin_supabase):
+    campaign_id = "camp-123"
+    account_id = 456
+    
+    # Mock campaign in pending state
+    mock_camp_exec = MagicMock()
+    mock_camp_exec.execute.return_value = MagicMock(data=[{
+        "id": campaign_id,
+        "account_id": account_id,
+        "status": "pending_approval"
+    }])
+    mock_agent_supabase.table.return_value.select.return_value.eq.return_value = mock_camp_exec
+
+    # Mock account ownership belonging to someone else
+    mock_acc_exec = MagicMock()
+    mock_acc_exec.execute.return_value = MagicMock(data=[{"user_id": "other-user-999"}])
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value = mock_acc_exec
+
+    response = client.post(f"/api/agent/campaign/{campaign_id}/reject")
+    assert response.status_code == 403
+
+
+def test_reject_campaign_wrong_state_409(mock_agent_supabase, mock_agent_admin_supabase):
+    campaign_id = "camp-123"
+    account_id = 456
+    
+    # Mock campaign in rejected state (not pending!)
+    mock_camp_exec = MagicMock()
+    mock_camp_exec.execute.return_value = MagicMock(data=[{
+        "id": campaign_id,
+        "account_id": account_id,
+        "status": "rejected"
+    }])
+    mock_agent_supabase.table.return_value.select.return_value.eq.return_value = mock_camp_exec
+
+    # Mock account ownership
+    mock_acc_exec = MagicMock()
+    mock_acc_exec.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value = mock_acc_exec
+
+    response = client.post(f"/api/agent/campaign/{campaign_id}/reject")
+    assert response.status_code == 409
+
+
+@patch("routes.agent_routes.run_edit_session")
+def test_chat_campaign_stream_success(mock_run_edit, mock_agent_supabase, mock_agent_admin_supabase):
+    campaign_id = "camp-123"
+    account_id = 456
+    
+    # Mock monthly_campaigns select response
+    mock_campaign_exec = MagicMock()
+    mock_campaign_exec.execute.return_value = MagicMock(data=[{
+        "id": campaign_id,
+        "account_id": account_id,
+        "status": "pending_approval"
+    }])
+    mock_agent_supabase.table.return_value.select.return_value.eq.return_value = mock_campaign_exec
+
+    # Mock account ownership
+    mock_acc_exec = MagicMock()
+    mock_acc_exec.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value = mock_acc_exec
+
+    # Setup mock for run_edit_session
+    from services.hermes.orchestrator import EditSessionResult
+    
+    async def mock_run_edit_impl(account_id, edit_type, context, user_message, on_progress=None):
+        if on_progress:
+            import inspect
+            p1 = {"type": "tool_call", "tool": "supabase_update_campaign_focus"}
+            p2 = {"type": "tool_result", "tool": "supabase_update_campaign_focus", "ok": True}
+            
+            if inspect.iscoroutinefunction(on_progress):
+                await on_progress(p1)
+                await on_progress(p2)
+            else:
+                on_progress(p1)
+                on_progress(p2)
+                
+        return EditSessionResult(resolved=True, message="Listo, ajusté el foco.")
+
+    mock_run_edit.side_effect = mock_run_edit_impl
+
+    # Send POST request
+    response = client.post(f"/api/agent/campaign/{campaign_id}/chat", json={"message": "ajusta el foco"})
+    
+    assert response.status_code == 200
+    assert response.headers.get("content-type") == "application/x-ndjson"
+    
+    lines = [line for line in response.iter_lines() if line]
+    assert len(lines) == 3
+    
+    import json
+    line1 = json.loads(lines[0])
+    line2 = json.loads(lines[1])
+    line3 = json.loads(lines[2])
+    
+    assert line1["type"] == "tool_call"
+    assert line1["tool"] == "supabase_update_campaign_focus"
+    assert line2["type"] == "tool_result"
+    assert line2["tool"] == "supabase_update_campaign_focus"
+    assert line2["ok"] is True
+    assert line3["type"] == "done"
+    assert line3["resolved"] is True
+    assert line3["message"] == "Listo, ajusté el foco."
+
 
 
 

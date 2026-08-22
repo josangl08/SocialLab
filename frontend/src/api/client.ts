@@ -69,4 +69,67 @@ export const apiClient = {
       body: params.toString(),
     }),
   getUrl: (path: string) => `${BASE_URL}${path}`,
+  async postStream<T>(
+    path: string,
+    body: unknown,
+    options: { signal?: AbortSignal; onLine: (line: T) => void }
+  ): Promise<void> {
+    const token = localStorage.getItem('authToken');
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: options.signal,
+    });
+
+    if (!res.ok) {
+      throw new ApiError(res.status, await parseErrorDetail(res));
+    }
+
+    const reader = res.body?.getReader();
+    if (!reader) return;
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed) {
+            try {
+              const parsed = JSON.parse(trimmed) as T;
+              options.onLine(parsed);
+            } catch (err) {
+              console.error('Error parsing NDJSON line:', err, trimmed);
+            }
+          }
+        }
+      }
+      const trimmed = buffer.trim();
+      if (trimmed) {
+        try {
+          const parsed = JSON.parse(trimmed) as T;
+          options.onLine(parsed);
+        } catch (err) {
+          console.error('Error parsing remaining NDJSON line:', err, trimmed);
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  },
 };
+

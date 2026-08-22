@@ -1,7 +1,7 @@
 import pytest
 import os
 import json
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock, AsyncMock, ANY
 from datetime import datetime, timezone, timedelta
 from fastapi.testclient import TestClient
 
@@ -561,3 +561,417 @@ async def test_register_webhook_failure_redacts_token_in_log(mock_post, caplog):
 
     assert "mock-bot-token" not in caplog.text
     assert "<REDACTED>" in caplog.text
+
+
+@pytest.mark.asyncio
+@patch("httpx.AsyncClient.post")
+@patch("services.telegram_service.run_edit_session")
+async def test_handle_timeedit_reply_success(mock_run_edit, mock_post, mock_service_supabase):
+    from services.hermes.orchestrator import EditSessionResult
+    mock_run_edit.return_value = EditSessionResult(resolved=True, message="Time updated successfully!")
+
+    from models.schemas import TelegramMessage
+    msg_data = {
+        "message_id": 101,
+        "chat": {"id": 999, "type": "private"},
+        "date": 1600000000,
+        "text": "mañana a las 5pm",
+        "reply_to_message": {
+            "message_id": 100,
+            "chat": {"id": 999, "type": "private"},
+            "date": 1600000000,
+            "text": "Envía el nuevo horario: #timeedit_mock-proposal-id_0"
+        }
+    }
+    message = TelegramMessage(**msg_data)
+
+    service = TelegramService()
+    await service.handle_message(message)
+
+    mock_run_edit.assert_called_once_with(
+        account_id="mock-account-id",
+        edit_type="TIME",
+        context={"proposal_id": "mock-proposal-id", "slot_index": 0},
+        user_message="mañana a las 5pm",
+        on_progress=ANY
+    )
+
+    args, kwargs = mock_post.call_args
+    assert "sendMessage" in args[0]
+    payload = kwargs["json"]
+    assert payload["chat_id"] == 999 or payload["chat_id"] == "999"
+    assert "Time updated successfully!" in payload["text"]
+
+
+@pytest.mark.asyncio
+@patch("httpx.AsyncClient.post")
+@patch("services.telegram_service.run_edit_session")
+async def test_handle_date_reply_success(mock_run_edit, mock_post, mock_service_supabase):
+    from services.hermes.orchestrator import EditSessionResult
+    mock_run_edit.return_value = EditSessionResult(resolved=True, message="Date updated successfully!")
+
+    from models.schemas import TelegramMessage
+    msg_data = {
+        "message_id": 101,
+        "chat": {"id": 999, "type": "private"},
+        "date": 1600000000,
+        "text": "el próximo lunes a las 10:00",
+        "reply_to_message": {
+            "message_id": 100,
+            "chat": {"id": 999, "type": "private"},
+            "date": 1600000000,
+            "text": "Elige la fecha: #post_1_date"
+        }
+    }
+    message = TelegramMessage(**msg_data)
+
+    service = TelegramService()
+    await service.handle_message(message)
+
+    mock_run_edit.assert_called_once_with(
+        account_id="mock-account-id",
+        edit_type="DATE",
+        context={"post_id": 1},
+        user_message="el próximo lunes a las 10:00",
+        on_progress=ANY
+    )
+
+    args, kwargs = mock_post.call_args
+    assert "sendMessage" in args[0]
+    payload = kwargs["json"]
+    assert payload["chat_id"] == 999 or payload["chat_id"] == "999"
+    assert "Date updated successfully!" in payload["text"]
+
+
+@pytest.mark.asyncio
+@patch("httpx.AsyncClient.post")
+@patch("services.telegram_service.run_edit_session")
+async def test_handle_imgselect_reply_success(mock_run_edit, mock_post, mock_service_supabase):
+    from services.hermes.orchestrator import EditSessionResult
+    mock_run_edit.return_value = EditSessionResult(resolved=True, message="Image updated successfully!")
+
+    from models.schemas import TelegramMessage
+    msg_data = {
+        "message_id": 101,
+        "chat": {"id": 999, "type": "private"},
+        "date": 1600000000,
+        "text": "la segunda opción",
+        "reply_to_message": {
+            "message_id": 100,
+            "chat": {"id": 999, "type": "private"},
+            "date": 1600000000,
+            "text": "Selecciona la imagen: #imgselect_mock-proposal-id_0"
+        }
+    }
+    message = TelegramMessage(**msg_data)
+
+    service = TelegramService()
+    await service.handle_message(message)
+
+    mock_run_edit.assert_called_once_with(
+        account_id="mock-account-id",
+        edit_type="IMAGE_SELECT",
+        context={"proposal_id": "mock-proposal-id", "slot_index": 0},
+        user_message="la segunda opción",
+        on_progress=ANY
+    )
+
+    args, kwargs = mock_post.call_args
+    assert "sendMessage" in args[0]
+    payload = kwargs["json"]
+    assert payload["chat_id"] == 999 or payload["chat_id"] == "999"
+    assert "Image updated successfully!" in payload["text"]
+
+
+@pytest.mark.asyncio
+@patch("httpx.AsyncClient.post")
+@patch("services.telegram_service.run_edit_session")
+async def test_handle_edit_reply_not_resolved(mock_run_edit, mock_post, mock_service_supabase):
+    from services.hermes.orchestrator import EditSessionResult
+    mock_run_edit.return_value = EditSessionResult(resolved=False, message="No se pudo interpretar el cambio.")
+
+    from models.schemas import TelegramMessage
+    msg_data = {
+        "message_id": 101,
+        "chat": {"id": 999, "type": "private"},
+        "date": 1600000000,
+        "text": "cualquier cosa inválida",
+        "reply_to_message": {
+            "message_id": 100,
+            "chat": {"id": 999, "type": "private"},
+            "date": 1600000000,
+            "text": "Elige la fecha: #post_1_date"
+        }
+    }
+    message = TelegramMessage(**msg_data)
+
+    service = TelegramService()
+    await service.handle_message(message)
+
+    mock_run_edit.assert_called_once_with(
+        account_id="mock-account-id",
+        edit_type="DATE",
+        context={"post_id": 1},
+        user_message="cualquier cosa inválida",
+        on_progress=ANY
+    )
+
+    args, kwargs = mock_post.call_args
+    assert "sendMessage" in args[0]
+    payload = kwargs["json"]
+    assert payload["chat_id"] == 999 or payload["chat_id"] == "999"
+    assert "No se pudo interpretar" in payload["text"]
+
+
+# ==============================================================================
+# CAMPAIGN TESTS
+# ==============================================================================
+
+@pytest.mark.asyncio
+@patch("httpx.AsyncClient.post")
+async def test_send_campaign_approval_card(mock_post):
+    # Mock HTTP response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"ok": True}
+    mock_post.return_value = mock_response
+
+    service = TelegramService()
+    campaign = {
+        "id": "mock-campaign-id",
+        "month_date": "2026-08-01",
+        "title": "Campaña de Agosto",
+        "description": "Foco de verano y rebajas",
+        "milestones": [{"date": "2026-08-15", "event": "Lanzamiento"}],
+        "weekly_focus": {"1": "Introducción", "2": "Rebajas"}
+    }
+
+    await service.send_campaign_approval_card(chat_id=999, campaign=campaign)
+
+    mock_post.assert_called_once()
+    args, kwargs = mock_post.call_args
+    assert "sendMessage" in args[0]
+    payload = kwargs["json"]
+    assert payload["chat_id"] == 999 or payload["chat_id"] == "999"
+    assert "Campaña de Agosto" in payload["text"]
+    
+    # Verify markup contains Approve / Reject / Chat buttons
+    reply_markup = payload["reply_markup"]
+    assert "inline_keyboard" in reply_markup
+    buttons = reply_markup["inline_keyboard"][0]
+    callback_datas = [b["callback_data"] for b in buttons]
+    assert "campaign:approve:mock-campaign-id" in callback_datas
+    assert "campaign:reject:mock-campaign-id" in callback_datas
+    assert "campaign:chat:mock-campaign-id" in callback_datas
+
+
+@pytest.mark.asyncio
+@patch("httpx.AsyncClient.post")
+async def test_handle_campaign_callback_approve_success(mock_post, mock_service_supabase):
+    # Mock HTTP response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"ok": True}
+    mock_post.return_value = mock_response
+
+    from models.schemas import TelegramCallbackQuery
+    cb_data = {
+        "id": "cb-camp-approve",
+        "from": {"id": 999, "is_bot": False, "first_name": "Test"},
+        "message": {
+            "message_id": 100,
+            "chat": {"id": 999, "type": "private"},
+            "date": 1600000000,
+            "text": "Campaña de Agosto"
+        },
+        "data": "campaign:approve:mock-campaign-id"
+    }
+    callback_query = TelegramCallbackQuery(**cb_data)
+
+    # Setup campaign select mock in mock_service_supabase
+    mock_service_supabase.table('monthly_campaigns').select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{
+        "id": "mock-campaign-id",
+        "account_id": "mock-account-id"
+    }])
+    mock_service_supabase.table('monthly_campaigns').update.return_value.eq.return_value.execute.return_value = MagicMock(data=[{
+        "id": "mock-campaign-id",
+        "status": "approved"
+    }])
+
+    service = TelegramService()
+    await service.handle_callback_query(callback_query)
+
+    # Verify update status to approved
+    mock_service_supabase.table('monthly_campaigns').update.assert_called_once()
+    args_update = mock_service_supabase.table('monthly_campaigns').update.call_args[0][0]
+    assert args_update["status"] == "approved"
+    assert "resolved_at" in args_update
+
+    # Verify we answered callback query and edited message text
+    assert mock_post.call_count >= 2
+
+
+@pytest.mark.asyncio
+@patch("httpx.AsyncClient.post")
+async def test_handle_campaign_callback_reject_success(mock_post, mock_service_supabase):
+    # Mock HTTP response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"ok": True}
+    mock_post.return_value = mock_response
+
+    from models.schemas import TelegramCallbackQuery
+    cb_data = {
+        "id": "cb-camp-reject",
+        "from": {"id": 999, "is_bot": False, "first_name": "Test"},
+        "message": {
+            "message_id": 100,
+            "chat": {"id": 999, "type": "private"},
+            "date": 1600000000,
+            "text": "Campaña de Agosto"
+        },
+        "data": "campaign:reject:mock-campaign-id"
+    }
+    callback_query = TelegramCallbackQuery(**cb_data)
+
+    # Setup campaign select mock in mock_service_supabase
+    mock_service_supabase.table('monthly_campaigns').select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{
+        "id": "mock-campaign-id",
+        "account_id": "mock-account-id"
+    }])
+    mock_service_supabase.table('monthly_campaigns').update.return_value.eq.return_value.execute.return_value = MagicMock(data=[{
+        "id": "mock-campaign-id",
+        "status": "rejected"
+    }])
+
+    service = TelegramService()
+    await service.handle_callback_query(callback_query)
+
+    # Verify update status to rejected
+    mock_service_supabase.table('monthly_campaigns').update.assert_called_once()
+    args_update = mock_service_supabase.table('monthly_campaigns').update.call_args[0][0]
+    assert args_update["status"] == "rejected"
+    assert "resolved_at" in args_update
+
+
+@pytest.mark.asyncio
+@patch("httpx.AsyncClient.post")
+async def test_handle_campaign_callback_chat_success(mock_post, mock_service_supabase):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"ok": True}
+    mock_post.return_value = mock_response
+
+    from models.schemas import TelegramCallbackQuery
+    cb_data = {
+        "id": "cb-camp-chat",
+        "from": {"id": 999, "is_bot": False, "first_name": "Test"},
+        "message": {
+            "message_id": 100,
+            "chat": {"id": 999, "type": "private"},
+            "date": 1600000000,
+            "text": "Campaña de Agosto"
+        },
+        "data": "campaign:chat:mock-campaign-id"
+    }
+    callback_query = TelegramCallbackQuery(**cb_data)
+
+    # Setup campaign select mock in mock_service_supabase
+    mock_service_supabase.table('monthly_campaigns').select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{
+        "id": "mock-campaign-id",
+        "account_id": "mock-account-id"
+    }])
+
+    service = TelegramService()
+    await service.handle_callback_query(callback_query)
+
+    # Verify we answered callback query and sent a message with force reply
+    assert mock_post.call_count >= 2
+    sent_msgs = [call[1]["json"] for call in mock_post.call_args_list if "sendMessage" in call[0][0]]
+    assert len(sent_msgs) > 0
+    assert "#campaignchat_mock-campaign-id" in sent_msgs[0]["text"]
+    assert sent_msgs[0]["reply_markup"]["force_reply"] is True
+
+
+@pytest.mark.asyncio
+@patch("httpx.AsyncClient.post")
+@patch("services.telegram_service.run_edit_session")
+async def test_handle_campaign_chat_reply_success(mock_run_edit, mock_post, mock_service_supabase):
+    from services.hermes.orchestrator import EditSessionResult
+    mock_run_edit.return_value = EditSessionResult(resolved=True, message="Campana actualizada")
+
+    from models.schemas import TelegramMessage
+    msg_data = {
+        "message_id": 101,
+        "chat": {"id": 999, "type": "private"},
+        "date": 1600000000,
+        "text": "ajusta los hitos",
+        "reply_to_message": {
+            "message_id": 100,
+            "chat": {"id": 999, "type": "private"},
+            "date": 1600000000,
+            "text": "¿Qué deseas ajustar? #campaignchat_mock-campaign-id"
+        }
+    }
+    message = TelegramMessage(**msg_data)
+
+    # Setup mocks for owner verification
+    mock_service_supabase.table('monthly_campaigns').select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{
+        "id": "mock-campaign-id",
+        "account_id": "mock-account-id"
+    }])
+
+    service = TelegramService()
+    await service.handle_message(message)
+
+    # Verify run_edit_session called with type CAMPAIGN_CHAT
+    mock_run_edit.assert_called_once_with(
+        account_id="mock-account-id",
+        edit_type="CAMPAIGN_CHAT",
+        context={"campaign_id": "mock-campaign-id"},
+        user_message="ajusta los hitos",
+        on_progress=ANY
+    )
+
+    # Verify response sent and force reply prompt re-sent (sent_msgs[0] is now the
+    # "🤖 Procesando…" progress placeholder from _run_edit_session_with_progress)
+    sent_msgs = [call[1]["json"] for call in mock_post.call_args_list if "sendMessage" in call[0][0]]
+    assert len(sent_msgs) >= 3
+    assert "Campana actualizada" in sent_msgs[1]["text"]
+    assert "#campaignchat_mock-campaign-id" in sent_msgs[2]["text"]
+    assert sent_msgs[2]["reply_markup"]["force_reply"] is True
+
+
+@pytest.mark.asyncio
+@patch("httpx.AsyncClient.post")
+async def test_handle_campaign_chat_reply_unauthorized(mock_post, mock_service_supabase):
+    from models.schemas import TelegramMessage
+    msg_data = {
+        "message_id": 101,
+        "chat": {"id": 12345, "type": "private"}, # Unauth chat ID
+        "date": 1600000000,
+        "text": "haz lo que sea",
+        "reply_to_message": {
+            "message_id": 100,
+            "chat": {"id": 12345, "type": "private"},
+            "date": 1600000000,
+            "text": "¿Qué deseas ajustar? #campaignchat_mock-campaign-id"
+        }
+    }
+    message = TelegramMessage(**msg_data)
+
+    # Campaign belongs to a different account that does not own 12345
+    mock_service_supabase.table('monthly_campaigns').select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{
+        "id": "mock-campaign-id",
+        "account_id": "mock-account-id"
+    }])
+
+    service = TelegramService()
+    await service.handle_message(message)
+
+    # Should not call edit session or update DB
+    sent_msgs = [call[1]["json"] for call in mock_post.call_args_list if "sendMessage" in call[0][0]]
+    if sent_msgs:
+        assert "No tienes permiso" in sent_msgs[0]["text"]
+
+

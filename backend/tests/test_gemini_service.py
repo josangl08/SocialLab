@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from google.api_core.exceptions import ResourceExhausted
+from google.genai import errors
 
 from services.gemini_service import (
     clean_and_parse_json,
@@ -8,6 +8,11 @@ from services.gemini_service import (
     regenerate_slot_caption,
     analyze_image_vision,
 )
+
+
+def _quota_exhausted_error() -> errors.ClientError:
+    return errors.ClientError(code=429, response_json={}, response=MagicMock())
+
 
 @pytest.mark.asyncio
 async def test_clean_and_parse_json():
@@ -31,42 +36,49 @@ async def test_clean_and_parse_json():
         await clean_and_parse_json("{invalid json")
 
 @pytest.mark.asyncio
-@patch("google.generativeai.GenerativeModel")
-@patch("services.gemini_service._configure_genai")
-async def test_generate_gemini_content_success(mock_configure, mock_gen_model):
-    mock_model_instance = MagicMock()
+@patch("services.gemini_service.get_gemini_client")
+async def test_generate_gemini_content_success(mock_get_client):
+    mock_client = MagicMock()
     mock_response = MagicMock()
     mock_response.text = "Generated content text"
-    mock_model_instance.generate_content.return_value = mock_response
-    mock_gen_model.return_value = mock_model_instance
+    mock_client.models.generate_content.return_value = mock_response
+    mock_get_client.return_value = mock_client
 
     result = await generate_gemini_content("Test prompt")
     assert result == "Generated content text"
-    mock_gen_model.assert_any_call("gemini-2.5-pro")
+    mock_client.models.generate_content.assert_any_call(model="gemini-pro-latest", contents="Test prompt")
 
 @pytest.mark.asyncio
-@patch("google.generativeai.GenerativeModel")
-@patch("services.gemini_service._configure_genai")
-async def test_generate_gemini_content_fallback_resource_exhausted(mock_configure, mock_gen_model):
-    mock_model_pro = MagicMock()
-    mock_model_pro.generate_content.side_effect = ResourceExhausted("Resource Exhausted Details")
-
-    mock_model_flash = MagicMock()
+@patch("services.gemini_service.get_gemini_client")
+async def test_generate_gemini_content_fallback_quota_exhausted(mock_get_client):
+    mock_client = MagicMock()
     mock_response = MagicMock()
     mock_response.text = "Flash model response"
-    mock_model_flash.generate_content.return_value = mock_response
 
-    def get_mock_model(model_name):
-        if model_name == "gemini-2.5-pro":
-            return mock_model_pro
-        return mock_model_flash
+    def generate_content_side_effect(model, contents):
+        if model == "gemini-pro-latest":
+            raise _quota_exhausted_error()
+        return mock_response
 
-    mock_gen_model.side_effect = get_mock_model
+    mock_client.models.generate_content.side_effect = generate_content_side_effect
+    mock_get_client.return_value = mock_client
 
     result = await generate_gemini_content("Test prompt")
     assert result == "Flash model response"
-    mock_model_pro.generate_content.assert_called_once()
-    mock_model_flash.generate_content.assert_called_once()
+    assert mock_client.models.generate_content.call_count == 2
+
+@pytest.mark.asyncio
+@patch("services.gemini_service.get_gemini_client")
+async def test_generate_gemini_content_non_quota_error_raises_immediately(mock_get_client):
+    mock_client = MagicMock()
+    mock_client.models.generate_content.side_effect = ValueError("something else broke")
+    mock_get_client.return_value = mock_client
+
+    with pytest.raises(ValueError):
+        await generate_gemini_content("Test prompt")
+
+    # Must not try the fallback model for a non-quota error
+    assert mock_client.models.generate_content.call_count == 1
 
 @pytest.mark.asyncio
 @patch("services.gemini_service.generate_gemini_content")
@@ -87,15 +99,13 @@ async def test_regenerate_slot_caption_languages(mock_generate):
     assert "Generate a new creative Instagram caption" in args[0]
 
 @pytest.mark.asyncio
-@patch("google.generativeai.GenerativeModel")
-@patch("google.generativeai.upload_file")
-@patch("services.gemini_service._configure_genai")
-async def test_analyze_image_vision_success(mock_configure, mock_upload_file, mock_gen_model):
-    mock_model_instance = MagicMock()
+@patch("services.gemini_service.get_gemini_client")
+async def test_analyze_image_vision_success(mock_get_client):
+    mock_client = MagicMock()
     mock_response = MagicMock()
     mock_response.text = '{"objects": ["logo"], "text_visible": "SocialLab", "mood": "professional", "theme": "marketing", "raw_description": "A nice logo.", "suggested_caption": "Check this out!"}'
-    mock_model_instance.generate_content.return_value = mock_response
-    mock_gen_model.return_value = mock_model_instance
+    mock_client.models.generate_content.return_value = mock_response
+    mock_get_client.return_value = mock_client
 
     image_bytes = b"fake_png_data"
     mime_type = "image/png"
@@ -112,23 +122,21 @@ async def test_analyze_image_vision_success(mock_configure, mock_upload_file, mo
     assert result["theme"] == "marketing"
     assert result["suggested_caption"] == "Check this out!"
 
-    # Verify upload_file was NOT called
-    mock_upload_file.assert_not_called()
+    # Verify generate_content was called with the primary vision model (highest
+    # free-tier RPD for this high-volume per-image call site) and the inline
+    # image data + prompt containing the strategy
+    assert mock_client.models.generate_content.called
+    call_kwargs = mock_client.models.generate_content.call_args.kwargs
+    assert call_kwargs["model"] == "gemini-flash-lite-latest"
 
-    # Verify GenerativeModel was instantiated with gemini-2.5-flash
-    mock_gen_model.assert_called_once_with("gemini-2.5-flash")
+    contents = call_kwargs["contents"]
+    assert isinstance(contents, list)
+    assert len(contents) == 2
 
-    # Verify generate_content was called with the inline data and the prompt containing the strategy
-    assert mock_model_instance.generate_content.called
-    call_args = mock_model_instance.generate_content.call_args[0][0]
-    
-    assert isinstance(call_args, list)
-    assert len(call_args) == 2
-    
-    inline_data = call_args[0]
-    assert inline_data == {"mime_type": mime_type, "data": image_bytes}
-    
-    prompt = call_args[1]
+    image_part = contents[0]
+    assert image_part.inline_data.data == image_bytes
+    assert image_part.inline_data.mime_type == mime_type
+
+    prompt = contents[1]
     assert "Analiza detalladamente" in prompt
     assert strategy in prompt
-
