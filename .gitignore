@@ -120,6 +120,14 @@ ANTIGRAVITY.md
 # Agent Coordination & OpenSpec Workflow
 AGENTS.md
 openspec/
+.mcp.json
+
+# Docs de trabajo (inputs del flujo OpenSpec — no documentación del sistema)
+docs/BACKLOG_MEJORAS.md
+docs/AUDITORIA_SOCIALLAB.md
+docs/OPTIMIZACIONES_PROCESOS_Y_TOKENS.md
+docs/context_session_*.md
+docs/dashboard-analytics-avanzado/
 
 # ==============================================================================
 # Databases
