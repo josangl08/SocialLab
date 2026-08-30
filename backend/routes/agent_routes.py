@@ -14,6 +14,7 @@ import logging
 from services.gemini_service import generate_gemini_content, clean_and_parse_json, regenerate_slot_caption
 from services.analytics.analytics_service import AnalyticsService
 from services.hermes.orchestrator import run_edit_session
+from services.hermes.memory import append_correction
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["Agent"])
@@ -858,4 +859,427 @@ async def chat_with_campaign(
             await task
 
     return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+
+
+# ==============================================================================
+# HERMES MIND — DECISION INTELLIGENCE ENDPOINTS
+# ==============================================================================
+
+def _verify_account_owner(account_id: int, user_id: str) -> None:
+    """Ownership check reused verbatim by all Hermes Mind endpoints (design.md §API
+    Changes) — matches the pattern already used across this file's other routes."""
+    acc_res = admin_supabase.table('instagram_accounts').select('user_id').eq('id', account_id).execute()
+    if not acc_res.data:
+        raise HTTPException(status_code=404, detail="Cuenta de Instagram no encontrada")
+    if str(acc_res.data[0]['user_id']) != str(user_id):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esta cuenta")
+
+
+def _get_decision_and_verify_owner(decision_id: int, user_id: str) -> dict:
+    """Shared helper: fetches an agent_decisions row and validates ownership via its
+    account_id, same 403/404 shape as _verify_account_owner."""
+    dec_res = admin_supabase.table('agent_decisions').select('*').eq('id', decision_id).execute()
+    if not dec_res.data:
+        raise HTTPException(status_code=404, detail="Decisión no encontrada")
+    decision = dec_res.data[0]
+    account_id = decision.get('account_id')
+    if account_id is None:
+        raise HTTPException(status_code=404, detail="Decisión no encontrada")
+    _verify_account_owner(account_id, user_id)
+    return decision
+
+
+def _proposal_scope(account_id: int, proposal_id: Optional[str]):
+    """Given a proposal_id, returns (proposal_id, [post_ids in its slots]) so a
+    decisions query can be scoped to that week. Returns (None, None) when no
+    proposal_id is passed — callers then don't filter."""
+    if not proposal_id:
+        return None, None
+    res = admin_supabase.table('content_proposals')\
+        .select('id, slots').eq('id', proposal_id).eq('account_id', account_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Propuesta no encontrada")
+    slots = res.data[0].get('slots') or []
+    return proposal_id, [s['post_id'] for s in slots if s.get('post_id')]
+
+
+def _apply_proposal_filter(query, proposal_id: Optional[str], post_ids):
+    """Adds `related_proposal_id == proposal_id OR related_post_id IN post_ids` to a
+    Supabase decisions query. No-op when proposal_id is falsy."""
+    if not proposal_id:
+        return query
+    ors = [f"related_proposal_id.eq.{proposal_id}"]
+    if post_ids:
+        ors.append(f"related_post_id.in.({','.join(str(p) for p in post_ids)})")
+    return query.or_(",".join(ors))
+
+
+@router.get("/decisions")
+async def list_decisions(
+    account_id: int,
+    page: int = 1,
+    per_page: int = 20,
+    proposal_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    _verify_account_owner(account_id, str(current_user.id))
+    scoped_proposal_id, scoped_post_ids = _proposal_scope(account_id, proposal_id)
+
+    offset = (page - 1) * per_page
+    query = admin_supabase.table('agent_decisions')\
+        .select(
+            'id, decision_type, confidence_score, applied_rule_labels, rationale, status, '
+            'created_at, related_post_id, related_proposal_id, campaign_id',
+            count='exact',
+        )\
+        .eq('account_id', account_id)
+    query = _apply_proposal_filter(query, scoped_proposal_id, scoped_post_ids)
+    res = query\
+        .order('created_at', desc=True)\
+        .range(offset, offset + per_page - 1)\
+        .execute()
+
+    decisions = res.data or []
+
+    # Enrich each decision with a short human label for what it targeted (post
+    # type + date, or "Propuesta", or the campaign title) so the card can say
+    # what it refers to without a second request.
+    post_ids = [d['related_post_id'] for d in decisions if d.get('related_post_id')]
+    posts_by_id = {}
+    if post_ids:
+        posts_res = admin_supabase.table('posts')\
+            .select('id, post_type, scheduled_at, media_url, drive_file_id').in_('id', post_ids).execute()
+        posts_by_id = {p['id']: p for p in (posts_res.data or [])}
+    campaign_ids = list({d['campaign_id'] for d in decisions if d.get('campaign_id')})
+    campaigns_by_id = {}
+    if campaign_ids:
+        camp_res = admin_supabase.table('monthly_campaigns').select('id, title').in_('id', campaign_ids).execute()
+        campaigns_by_id = {c['id']: c for c in (camp_res.data or [])}
+
+    for d in decisions:
+        target = None
+        d['media_url'] = None
+        d['post_type'] = None
+        d['drive_file_id'] = None
+        if d.get('related_post_id') and d['related_post_id'] in posts_by_id:
+            p = posts_by_id[d['related_post_id']]
+            ptype = (p.get('post_type') or 'post').capitalize()
+            sched = p.get('scheduled_at')
+            target = f"{ptype} · {sched[:10]}" if sched else f"{ptype} #{d['related_post_id']}"
+            d['media_url'] = p.get('media_url')
+            d['post_type'] = p.get('post_type')
+            d['drive_file_id'] = p.get('drive_file_id')
+        elif d.get('related_proposal_id'):
+            target = "Propuesta semanal"
+        d['target_label'] = target
+        d['campaign_label'] = campaigns_by_id.get(d.get('campaign_id'), {}).get('title') if d.get('campaign_id') else None
+
+    total = res.count if isinstance(res.count, int) else 0
+    return {
+        "data": decisions,
+        "meta": {"total": total, "page": page, "per_page": per_page},
+    }
+
+
+@router.get("/decisions/{decision_id}")
+async def get_decision_detail(decision_id: int, current_user: User = Depends(get_current_user)):
+    decision = _get_decision_and_verify_owner(decision_id, str(current_user.id))
+
+    applied_rules = []
+    rule_ids = decision.get("applied_rule_ids") or []
+    if rule_ids:
+        rules_res = admin_supabase.table('account_brand_rules').select('*').in_('id', rule_ids).execute()
+        applied_rules = rules_res.data or []
+
+    # The post/proposal this decision produced, so the Órbita panel can preview it
+    # without a second request.
+    post = None
+    if decision.get("related_post_id"):
+        post_res = admin_supabase.table('posts')\
+            .select('id, post_type, scheduled_at, content, media_url, status, drive_file_id')\
+            .eq('id', decision['related_post_id']).execute()
+        post = post_res.data[0] if post_res.data else None
+
+    proposal = None
+    if decision.get("related_proposal_id"):
+        prop_res = admin_supabase.table('content_proposals')\
+            .select('id, week_start, status, slots')\
+            .eq('id', decision['related_proposal_id']).execute()
+        if prop_res.data:
+            row = prop_res.data[0]
+            proposal = {
+                "id": row["id"], "week_start": row.get("week_start"), "status": row.get("status"),
+                "slots": len(row.get("slots") or []),
+            }
+
+    return {"decision": decision, "applied_rules": applied_rules, "post": post, "proposal": proposal}
+
+
+@router.get("/decisions/{decision_id}/audit-trail")
+async def get_decision_audit_trail(decision_id: int, current_user: User = Depends(get_current_user)):
+    decision = _get_decision_and_verify_owner(decision_id, str(current_user.id))
+
+    applied_rules = []
+    rule_ids = decision.get("applied_rule_ids") or []
+    if rule_ids:
+        rules_res = admin_supabase.table('account_brand_rules').select('*').in_('id', rule_ids).execute()
+        applied_rules = rules_res.data or []
+
+    correction_ids = [r['source_correction_id'] for r in applied_rules if r.get('source_correction_id') is not None]
+    source_corrections = []
+    if correction_ids:
+        corrections_res = admin_supabase.table('agent_memory').select('*').in_('id', correction_ids).execute()
+        source_corrections = corrections_res.data or []
+
+    return {
+        "decision": decision,
+        "applied_rules": applied_rules,
+        "source_corrections": source_corrections,
+    }
+
+
+@router.get("/context-graph")
+async def get_context_graph(
+    account_id: int,
+    proposal_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+):
+    acc_res = admin_supabase.table('instagram_accounts').select('*').eq('id', account_id).execute()
+    if not acc_res.data:
+        raise HTTPException(status_code=404, detail="Cuenta de Instagram no encontrada")
+    account = acc_res.data[0]
+    if str(account['user_id']) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esta cuenta")
+    account_label = account.get('username') or f"Cuenta {account_id}"
+    scoped_proposal_id, scoped_post_ids = _proposal_scope(account_id, proposal_id)
+
+    nodes = [{"id": f"account-{account_id}", "type": "account", "data": {"label": account_label}}]
+    edges = []
+
+    # --- Strategy node: always present (spec: aparece con o sin reglas activas) ---
+    strategy_node_id = f"strategy-{account_id}"
+    nodes.append({
+        "id": strategy_node_id,
+        "type": "strategy",
+        "data": {
+            "label": "Estrategia de cuenta",
+            "tone": account.get("default_tone"),
+            "style_guide": account.get("style_guide"),
+            "target_audience": account.get("target_audience"),
+            "hashtag_strategy": account.get("hashtag_strategy"),
+            "posting_frequency": account.get("posting_frequency"),
+            "best_times": account.get("best_times"),
+            "content_type_mix": account.get("content_type_mix"),
+            "memory_summary": account.get("agent_memory_summary"),
+        },
+    })
+    edges.append({
+        "id": f"e-account-strategy-{account_id}",
+        "source": f"account-{account_id}",
+        "target": strategy_node_id,
+    })
+
+    # --- Rule nodes: version-aware. Fetch ALL rules (incl. inactive) so version
+    # chains can be walked; only active rules become graph nodes. `.order('id')`
+    # keeps this from matching the single-.eq() chain some tests stub. ---
+    all_rules = admin_supabase.table('account_brand_rules')\
+        .select('*').eq('account_id', account_id).order('id').execute().data or []
+    rules_by_id = {r["id"]: r for r in all_rules if r.get("id") is not None}
+    active_rules = [r for r in all_rules if r.get("is_active")]
+    active_rule_ids = {r["id"] for r in active_rules}
+
+    def _version_chain(rule: dict) -> list:
+        chain, seen, cur = [], set(), rule
+        while cur and cur.get("id") not in seen:
+            seen.add(cur.get("id"))
+            chain.append({
+                "id": cur.get("id"),
+                "rule_text": cur.get("rule_text"),
+                "created_at": cur.get("created_at"),
+            })
+            pv = cur.get("previous_version_id")
+            cur = rules_by_id.get(pv) if pv else None
+        return list(reversed(chain))
+
+    for rule in active_rules:
+        rid = rule["id"]
+        rule_node_id = f"rule-{rid}"
+        cwid = rule.get("conflicts_with_id")
+        conflicts_with = None
+        if cwid and cwid in rules_by_id:
+            conflicts_with = {"id": cwid, "rule_text": rules_by_id[cwid].get("rule_text")}
+        nodes.append({
+            "id": rule_node_id,
+            "type": "rule",
+            "data": {
+                "label": rule.get("rule_text", ""),
+                "rule_type": rule.get("rule_type"),
+                "rule_text": rule.get("rule_text", ""),
+                "version_chain": _version_chain(rule),
+                "conflicts_with": conflicts_with,
+            },
+        })
+        edges.append({"id": f"e-account-{rid}", "source": f"account-{account_id}", "target": rule_node_id})
+        if conflicts_with and cwid in active_rule_ids:
+            edges.append({
+                "id": f"e-conflict-rule-{rid}-rule-{cwid}",
+                "source": rule_node_id,
+                "target": f"rule-{cwid}",
+                "type": "conflict",
+            })
+
+    decisions_query = admin_supabase.table('agent_decisions')\
+        .select('id, decision_type, related_post_id, campaign_id, applied_rule_ids, created_at')\
+        .eq('account_id', account_id)
+    decisions_query = _apply_proposal_filter(decisions_query, scoped_proposal_id, scoped_post_ids)
+    decisions_res = decisions_query\
+        .order('created_at', desc=True)\
+        .limit(30)\
+        .execute()
+    decisions = decisions_res.data or []
+
+    post_ids = list({d["related_post_id"] for d in decisions if d.get("related_post_id") is not None})
+    posts_by_id = {}
+    if post_ids:
+        posts_res = admin_supabase.table('posts')\
+            .select('id, post_type, scheduled_at, content, media_url, status, drive_file_id')\
+            .in_('id', post_ids).execute()
+        posts_by_id = {p['id']: p for p in (posts_res.data or [])}
+
+    seen_post_ids = set()
+    for decision in decisions:
+        post_id = decision.get("related_post_id")
+        if post_id is None or post_id in seen_post_ids:
+            continue
+        seen_post_ids.add(post_id)
+        post_node_id = f"post-{post_id}"
+        post_row = posts_by_id.get(post_id, {})
+        post_type = (post_row.get("post_type") or "post").capitalize()
+        scheduled_at = post_row.get("scheduled_at")
+        date_label = scheduled_at[:10] if scheduled_at else f"#{post_id}"
+        nodes.append({"id": post_node_id, "type": "post", "data": {
+            "label": f"{post_type} · {date_label}",
+            "post_id": post_id,
+            "post_type": post_row.get("post_type"),
+            "scheduled_at": scheduled_at,
+            "status": post_row.get("status"),
+            "caption": post_row.get("content"),
+            "media_url": post_row.get("media_url"),
+            "drive_file_id": post_row.get("drive_file_id"),
+        }})
+        for rule_id in (decision.get("applied_rule_ids") or []):
+            edges.append({
+                "id": f"e-rule-{rule_id}-post-{post_id}",
+                "source": f"rule-{rule_id}",
+                "target": post_node_id,
+            })
+
+    # --- Campaign nodes: one per DISTINCT campaign_id among the decisions shown ---
+    campaign_ids = list({d["campaign_id"] for d in decisions if d.get("campaign_id")})
+    campaigns_by_id = {}
+    if campaign_ids:
+        camp_res = admin_supabase.table('monthly_campaigns')\
+            .select('id, title, description, strategy_mode, weekly_focus, milestones')\
+            .in_('id', campaign_ids).execute()
+        campaigns_by_id = {c["id"]: c for c in (camp_res.data or [])}
+
+    for cid in campaign_ids:
+        c = campaigns_by_id.get(cid, {})
+        campaign_node_id = f"campaign-{cid}"
+        nodes.append({
+            "id": campaign_node_id,
+            "type": "campaign",
+            "data": {
+                "label": c.get("title") or "Campaña",
+                "title": c.get("title"),
+                "description": c.get("description"),
+                "strategy_mode": c.get("strategy_mode"),
+                "weekly_focus": c.get("weekly_focus"),
+                "milestones": c.get("milestones") or [],
+            },
+        })
+        edges.append({
+            "id": f"e-account-campaign-{cid}",
+            "source": f"account-{account_id}",
+            "target": campaign_node_id,
+        })
+
+    for decision in decisions:
+        cid = decision.get("campaign_id")
+        post_id = decision.get("related_post_id")
+        if cid and post_id and post_id in seen_post_ids:
+            edges.append({
+                "id": f"e-campaign-{cid}-post-{post_id}",
+                "source": f"campaign-{cid}",
+                "target": f"post-{post_id}",
+            })
+
+    return {"nodes": nodes, "edges": edges}
+
+
+class DecisionOverrideRequest(BaseModel):
+    user_message: str
+
+
+@router.post("/decisions/{decision_id}/override")
+async def override_decision(
+    decision_id: int,
+    request: DecisionOverrideRequest,
+    current_user: User = Depends(get_current_user)
+):
+    decision = _get_decision_and_verify_owner(decision_id, str(current_user.id))
+
+    correction = append_correction(
+        account_id=decision['account_id'],
+        edit_type="HERMES_MIND_OVERRIDE",
+        user_message=request.user_message,
+        resolution=f"Usuario anuló la decisión #{decision_id} ({decision.get('decision_type')})",
+    )
+
+    admin_supabase.table('agent_decisions').update({
+        "status": "overridden",
+        "overridden_at": datetime.now(timezone.utc).isoformat(),
+        "override_correction_id": correction.get("id"),
+    }).eq('id', decision_id).execute()
+
+    return {"overridden": True, "correction_id": correction.get("id")}
+
+
+# Which account-config column each suggestion type writes when accepted, and the
+# key inside the decision's tool_args holding the value to write.
+_SUGGESTION_APPLY = {
+    "suggest_schedule_change": ("best_times", "suggested_best_times"),
+    "suggest_mix_change": ("content_type_mix", "suggested_content_type_mix"),
+}
+
+
+@router.post("/decisions/{decision_id}/accept-suggestion")
+async def accept_suggestion(decision_id: int, current_user: User = Depends(get_current_user)):
+    """Accepts a Hermes schedule/mix suggestion: writes the suggested value into the
+    account's configuration and marks the decision `accepted`. Only valid on a
+    `suggested`-status decision of a known suggestion type."""
+    decision = _get_decision_and_verify_owner(decision_id, str(current_user.id))
+
+    if decision.get("status") != "suggested":
+        raise HTTPException(status_code=409, detail="Esta decisión no es una sugerencia pendiente")
+
+    apply = _SUGGESTION_APPLY.get(decision.get("decision_type"))
+    if apply is None:
+        raise HTTPException(status_code=422, detail="Este tipo de sugerencia no se puede aplicar automáticamente")
+
+    config_column, args_key = apply
+    suggested_value = (decision.get("tool_args") or {}).get(args_key)
+    if not suggested_value:
+        raise HTTPException(status_code=422, detail="La sugerencia no incluye un valor aplicable")
+
+    admin_supabase.table('instagram_accounts').update({
+        config_column: suggested_value,
+    }).eq('id', decision['account_id']).execute()
+
+    admin_supabase.table('agent_decisions').update({
+        "status": "accepted",
+        "accepted_at": datetime.now(timezone.utc).isoformat(),
+    }).eq('id', decision_id).execute()
+
+    return {"accepted": True, "config_column": config_column, "applied_value": suggested_value}
 

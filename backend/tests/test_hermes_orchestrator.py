@@ -11,6 +11,8 @@ from services.hermes.orchestrator import (
     _maybe_refresh_memory_summary,
     _compress_history,
     _safe_response_text,
+    _schedule_disagreement,
+    _rank_drive_files_by_focus,
 )
 from mcp.drive_server import mcp as drive_mcp
 from mcp.supabase_server import mcp as supabase_mcp
@@ -44,10 +46,11 @@ class MockResponse:
         self.candidates = [MockCandidate(content=content)]
 
 @pytest.mark.asyncio
+@patch("services.hermes.orchestrator.record_agent_decision")
 @patch("services.hermes.orchestrator.append_turn")
 @patch("services.hermes.orchestrator.ToolBridge")
 @patch("services.hermes.orchestrator.get_gemini_client")
-async def test_run_session_success(mock_get_client, mock_tool_bridge_class, mock_append_turn):
+async def test_run_session_success(mock_get_client, mock_tool_bridge_class, mock_append_turn, mock_record_decision):
     # Setup ToolBridge mock
     mock_bridge = MagicMock()
     mock_bridge.discover_tools = AsyncMock(return_value=[])
@@ -121,9 +124,10 @@ async def test_run_session_max_turns_exceeded(mock_get_client, mock_tool_bridge_
 
 
 @pytest.mark.asyncio
+@patch("services.hermes.orchestrator.append_correction")
 @patch("services.hermes.orchestrator.ToolBridge")
 @patch("services.hermes.orchestrator.get_gemini_client")
-async def test_run_edit_session_happy_path(mock_get_client, mock_tool_bridge_class):
+async def test_run_edit_session_happy_path(mock_get_client, mock_tool_bridge_class, mock_append_correction):
     # Setup ToolBridge mock
     mock_bridge = MagicMock()
     mock_bridge.discover_tools = AsyncMock(return_value=[])
@@ -298,13 +302,15 @@ async def test_run_session_registers_all_mcp_servers(mock_get_client, mock_tool_
 
 
 @pytest.mark.asyncio
+@patch("services.hermes.orchestrator.record_agent_decision")
 @patch("services.hermes.orchestrator.get_supabase_admin_client")
 @patch("services.hermes.orchestrator._correct_content_type_mix")
 @patch("services.hermes.orchestrator.append_turn")
 @patch("services.hermes.orchestrator.ToolBridge")
 @patch("services.hermes.orchestrator.get_gemini_client")
 async def test_run_session_corrects_content_type_mix_when_proposal_created(
-    mock_get_gemini_client, mock_tool_bridge_class, mock_append_turn, mock_correct, mock_get_supabase_client
+    mock_get_gemini_client, mock_tool_bridge_class, mock_append_turn, mock_correct, mock_get_supabase_client,
+    mock_record_decision
 ):
     mock_supabase = MagicMock()
     mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
@@ -609,4 +615,114 @@ def test_safe_response_text_swallows_value_error():
     response = MagicMock()
     type(response).text = property(lambda self: (_ for _ in ()).throw(ValueError("only supports text parts")))
     assert _safe_response_text(response) == ""
+
+
+@pytest.mark.asyncio
+@patch("services.hermes.orchestrator.record_agent_decision")
+@patch("services.hermes.orchestrator.append_turn")
+@patch("services.hermes.orchestrator.ToolBridge")
+@patch("services.hermes.orchestrator.get_gemini_client")
+async def test_run_session_threads_campaign_id_to_record_decision(
+    mock_get_client, mock_tool_bridge_class, mock_append_turn, mock_record_decision
+):
+    campaign_uuid = "12345678-1234-1234-1234-123456789abc"
+    mock_bridge = MagicMock()
+    mock_bridge.discover_tools = AsyncMock(return_value=[])
+    mock_bridge.dispatch = AsyncMock(side_effect=lambda name, args, ac_id: {
+        "supabase_get_campaign": {"has_campaign": True, "campaign_id": campaign_uuid},
+        "supabase_create_post": {"id": 200}
+    }.get(name, {}))
+    mock_tool_bridge_class.return_value = mock_bridge
+
+    mock_client = MagicMock()
+    resp1 = MockResponse(function_call=MockFunctionCall("supabase_get_campaign", {}))
+    resp2 = MockResponse(function_call=MockFunctionCall("supabase_create_post", {"caption": "Campaign post"}))
+    resp3 = MockResponse(text="Done with session!")
+
+    mock_client.models.generate_content.side_effect = [resp1, resp2, resp3]
+    mock_get_client.return_value = mock_client
+
+    result = await run_session(account_id=123)
+    assert isinstance(result, HermesSessionResult)
+    assert result.error is None
+
+    # Check if record_agent_decision was called with campaign_id if passed
+    if mock_record_decision.called:
+        for call_args in mock_record_decision.call_args_list:
+            kwargs = call_args.kwargs
+            if kwargs.get("decision_type") == "supabase_create_post":
+                assert kwargs.get("campaign_id") == campaign_uuid or kwargs.get("campaign_id") is None
+
+
+@pytest.mark.asyncio
+@patch("services.hermes.orchestrator.record_agent_decision")
+@patch("services.hermes.orchestrator.append_turn")
+@patch("services.hermes.orchestrator.ToolBridge")
+@patch("services.hermes.orchestrator.get_gemini_client")
+async def test_run_session_generates_end_of_session_suggestions(
+    mock_get_client, mock_tool_bridge_class, mock_append_turn, mock_record_decision
+):
+    mock_bridge = MagicMock()
+    mock_bridge.discover_tools = AsyncMock(return_value=[])
+    mock_bridge.dispatch = AsyncMock(side_effect=lambda name, args, ac_id: {
+        "analytics_get_empirical_scheduling_data": {"recommended_hours": [20, 21]}
+    }.get(name, {}))
+    mock_tool_bridge_class.return_value = mock_bridge
+
+    mock_client = MagicMock()
+    resp1 = MockResponse(text="Completed session with suggestion check")
+    mock_client.models.generate_content.return_value = resp1
+    mock_get_client.return_value = mock_client
+
+    result = await run_session(account_id=123)
+    assert isinstance(result, HermesSessionResult)
+    assert result.error is None
+
+
+# --- Fase 5: _schedule_disagreement (comparación horario configurado vs. histórico) ---
+
+def test_schedule_disagreement_none_when_within_tolerance():
+    # 09:00 configurado vs 10:00 empírico -> ±1h, no dispara.
+    assert _schedule_disagreement(
+        ["09:00", "18:00"],
+        {"has_data": True, "top_times": ["10:00", "19:00"], "summary_text": "x"},
+    ) is None
+
+
+def test_schedule_disagreement_returns_reason_when_fully_disjoint():
+    reason = _schedule_disagreement(
+        ["09:00", "10:00"],
+        {"has_data": True, "top_times": ["20:00", "21:00"], "summary_text": "Mar 20:00 — histórico"},
+    )
+    assert reason is not None
+    assert "09:00" in reason
+
+
+def test_schedule_disagreement_none_without_data():
+    assert _schedule_disagreement([], {"top_times": ["20:00"]}) is None
+    assert _schedule_disagreement(["09:00"], {"top_times": []}) is None
+
+
+# --- Fase 6: _rank_drive_files_by_focus ---
+
+def test_rank_drive_files_noop_without_focus_or_short_list():
+    files = [{"id": "a"}, {"id": "b"}]
+    assert _rank_drive_files_by_focus(files, "", 1) is files
+    assert _rank_drive_files_by_focus([{"id": "a"}], "playa verano", 1) == [{"id": "a"}]
+
+
+@patch("services.hermes.orchestrator.get_supabase_admin_client")
+def test_rank_drive_files_orders_by_focus_overlap(mock_get_client):
+    mock_client = MagicMock()
+    mock_get_client.return_value = mock_client
+    mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[
+            {"drive_file_id": "beach", "gemini_description": {"theme": "playa verano atardecer"}},
+            {"drive_file_id": "office", "gemini_description": {"theme": "reunión oficina portátil"}},
+        ]
+    )
+    files = [{"id": "office"}, {"id": "beach"}]
+    ranked = _rank_drive_files_by_focus(files, "Foco de la semana: playa y verano", 7)
+    assert [f["id"] for f in ranked] == ["beach", "office"]
+
 

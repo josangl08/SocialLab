@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any
 from database.supabase_client import get_supabase_admin_client
+from services.hermes.memory import get_active_brand_rules
 
 _SPANISH_WEEKDAYS = [
     "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"
@@ -106,6 +107,22 @@ def _build_strategy_context(account: dict) -> str:
     return f"{voice} {' '.join(extra)}".strip()
 
 
+def _build_brand_rules_context(account_id: int) -> str:
+    """Construye el bloque de reglas de marca activas (aprendidas de correcciones,
+    ver services/hermes/memory.py) como restricciones de alta prioridad para el
+    prompt — coexisten con style_guide, no lo reemplazan (design.md)."""
+    rules = get_active_brand_rules(account_id)
+    if not rules:
+        return ""
+
+    rules_lines = "\n".join(f"- {r['rule_text']}" for r in rules if r.get("rule_text"))
+    return (
+        "\n\nReglas de marca aprendidas de correcciones anteriores del usuario "
+        "(alta prioridad, respétalas por encima de cualquier otra preferencia genérica):\n"
+        f"{rules_lines}"
+    )
+
+
 def get_system_prompt(account_id: int) -> str:
     """Construye el system prompt de Hermes para una cuenta: persona + instrucciones
     de la sesión + perfil de cuenta como contexto."""
@@ -164,7 +181,7 @@ def get_system_prompt(account_id: int) -> str:
         "llamadas a tools) para señalar que la sesión terminó."
     )
 
-    return f"{task_instructions}\n\n{strategy_context}".strip()
+    return f"{task_instructions}\n\n{strategy_context}{_build_brand_rules_context(account_id)}".strip()
 
 
 def _resolve_edit_post_id(context: dict) -> Any:
@@ -294,5 +311,5 @@ def get_monthly_strategy_prompt(account_id: int, target_month: str) -> str:
         "para señalar que la sesión terminó."
     )
 
-    return f"{task_instructions}\n\n{strategy_context}".strip()
+    return f"{task_instructions}\n\n{strategy_context}{_build_brand_rules_context(account_id)}".strip()
 

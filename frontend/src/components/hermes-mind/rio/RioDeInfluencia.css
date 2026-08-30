@@ -1,0 +1,75 @@
+.rio {
+  flex: none;
+  padding: 12px 20px 6px;
+  position: relative;
+}
+
+.rio-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 2px;
+}
+
+.rio-hint {
+  font-size: 0.72rem;
+  color: var(--hm-faint);
+}
+.rio-hint b {
+  color: var(--hm-muted);
+  font-weight: 600;
+}
+
+.rio-svg-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.rio-svg {
+  width: 100%;
+  min-width: 680px;
+  height: 150px;
+  display: block;
+}
+
+.rio-ribbon {
+  cursor: pointer;
+  transition: fill-opacity 0.18s ease;
+}
+
+.rio-label {
+  font: 600 12px var(--hm-sans);
+  fill: var(--hm-text);
+  dominant-baseline: middle;
+  cursor: pointer;
+}
+
+.rio.is-filtered .rio-label:not(.is-active) {
+  opacity: 0.4;
+}
+
+.rio-hub-text {
+  font: 800 13px var(--hm-sans);
+  fill: var(--hm-text);
+  text-anchor: middle;
+  dominant-baseline: middle;
+  font-weight: 600;
+}
+
+.rio-out {
+  cursor: pointer;
+}
+.rio-out-text {
+  font: 600 11px var(--hm-sans);
+  fill: var(--hm-muted);
+  dominant-baseline: middle;
+  transition: fill 0.18s ease, opacity 0.18s ease;
+}
+.rio-out-text.is-active {
+  fill: var(--hm-text);
+  font-weight: 700;
+}
+.rio.is-filtered .rio-out-text:not(.is-active) {
+  opacity: 0.4;
+}

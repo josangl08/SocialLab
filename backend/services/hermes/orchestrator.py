@@ -1,6 +1,8 @@
 import os
+import re
 import uuid
 import inspect
+import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Callable
 from pydantic import BaseModel
@@ -13,6 +15,7 @@ from services.hermes.memory import (
     append_correction,
     get_correction_count_since,
     summarize_recent_corrections,
+    record_agent_decision,
 )
 from services.hermes.prompts import get_system_prompt, get_edit_prompt
 from services.gemini_service import PREFERRED_GEMINI_MODELS, EDIT_GEMINI_MODELS, get_gemini_client
@@ -21,6 +24,8 @@ from mcp.supabase_server import mcp as supabase_mcp
 from mcp.vision_server import mcp as vision_mcp
 from mcp.analytics_server import mcp as analytics_mcp
 from mcp.skills_server import mcp as skills_mcp
+
+logger = logging.getLogger(__name__)
 
 
 class _FallbackGenerativeModel:
@@ -61,6 +66,12 @@ class _FallbackGenerativeModel:
                 raise
         raise last_error
 
+# Tool names whose dispatch results get recorded as agent_decisions (design.md
+# §Architecture Decisions #2) — the real content-creation calls, not every tool in
+# the weekly session's 13-tool set.
+_DECISION_TOOL_NAMES = {"supabase_create_post", "supabase_create_proposal"}
+
+
 class HermesSessionResult(BaseModel):
     images_scanned: int = 0
     images_analyzed: int = 0
@@ -100,7 +111,8 @@ async def _dispatch_turn(
     response: Any,
     bridge: ToolBridge,
     account_id: int,
-    on_progress: Optional[Callable] = None
+    on_progress: Optional[Callable] = None,
+    campaign_focus: str = ""
 ) -> tuple:
     """Parses a Gemini response into function_calls/text, dispatches each function call
     through the ToolBridge, and builds the response Part list for the next turn's
@@ -136,6 +148,12 @@ async def _dispatch_turn(
         except Exception as e:
             result = {"error": str(e)}
             ok = False
+
+        # Fase 6: cuando hay una campaña activa con foco definido, reordena el listado
+        # de Drive por relevancia antes de que Gemini elija imágenes con él.
+        if tool_name == "drive_list_files" and campaign_focus and isinstance(result, list):
+            result = _rank_drive_files_by_focus(result, campaign_focus, account_id)
+
         dispatched.append((tool_name, tool_args, result))
 
         await _emit_progress(on_progress, {"type": "tool_result", "tool": tool_name, "ok": ok})
@@ -273,6 +291,163 @@ async def _maybe_refresh_memory_summary(account_id: int) -> None:
     }).eq("id", account_id).execute()
 
 
+def _rank_drive_files_by_focus(files: List[Any], focus_text: str, account_id: int) -> List[Any]:
+    """Fase 6: reordena (estable) un resultado de drive_list_files por solapamiento de
+    palabras clave entre el foco semanal de la campaña y el análisis visual ya
+    generado de cada imagen (visual_analyses.gemini_description: theme / raw_description
+    / mood). Las imágenes sin análisis o con solape 0 mantienen su orden de llegada,
+    detrás de las que sí encajan. Nunca lanza — si algo falla, devuelve `files` igual."""
+    try:
+        if not focus_text or not isinstance(files, list) or len(files) < 2:
+            return files
+        supabase = get_supabase_admin_client()
+        rows = supabase.table("visual_analyses")\
+            .select("drive_file_id, gemini_description")\
+            .eq("account_id", account_id)\
+            .execute().data or []
+        blob_by_file: Dict[str, str] = {}
+        for row in rows:
+            desc = row.get("gemini_description") or {}
+            blob_by_file[row.get("drive_file_id")] = " ".join(
+                str(desc.get(k, "")) for k in ("theme", "raw_description", "mood")
+            ).lower()
+        focus_tokens = set(re.findall(r"\w{4,}", focus_text.lower()))
+        if not focus_tokens:
+            return files
+
+        def _score(f: Any) -> int:
+            file_id = f.get("id") or f.get("file_id") or f.get("drive_file_id") if isinstance(f, dict) else None
+            blob = blob_by_file.get(file_id, "")
+            return sum(1 for t in focus_tokens if t in blob) if blob else 0
+
+        return [f for _, f in sorted(enumerate(files), key=lambda pair: (-_score(pair[1]), pair[0]))]
+    except Exception:
+        return files
+
+
+def _schedule_disagreement(configured_best_times: List[Any], empirical: Dict[str, Any]) -> Optional[str]:
+    """Decide si los horarios reales del histórico difieren *de forma significativa*
+    de los que el usuario configuró a mano, y devuelve la razón concreta (para el
+    rationale de la sugerencia) o None si no hay discrepancia relevante.
+
+    `empirical` es el dict de AnalyticsService.get_empirical_scheduling_data:
+    {has_data, top_times: ["HH:00", ...], best_times_by_weekday, summary_text}.
+    La configuración manual del usuario NO se toca — esto solo alimenta una
+    sugerencia visible en el timeline.
+
+    Criterio: se sugiere solo cuando NINGUNA de las horas top del histórico cae a
+    ±1h de alguna hora configurada — así "09:00 vs 10:00" no dispara nada, pero
+    "mañanas configuradas vs. histórico que rinde de noche" sí. Barra alta a
+    propósito: pocas sugerencias, todas con señal real."""
+    def _hour(hhmm: Any) -> Optional[int]:
+        try:
+            return int(str(hhmm).split(":")[0])
+        except (ValueError, IndexError):
+            return None
+
+    configured_hours = {h for h in (_hour(t) for t in configured_best_times) if h is not None}
+    empirical_hours = [h for h in (_hour(t) for t in empirical.get("top_times", [])) if h is not None]
+    if not configured_hours or not empirical_hours:
+        return None
+
+    if any(min(abs(eh - ch) for ch in configured_hours) <= 1 for eh in empirical_hours):
+        return None
+
+    configured_label = ", ".join(str(t) for t in configured_best_times)
+    empirical_label = empirical.get("summary_text") or ", ".join(
+        f"{h:02d}:00" for h in empirical_hours
+    )
+    return (
+        f"Tus horarios configurados ({configured_label}) no coinciden con las mejores "
+        f"horas de tu histórico real ({empirical_label}). Considera revisarlos en "
+        "Ajustes. Esta sesión respetó tu configuración sin cambios."
+    )
+
+
+def _maybe_record_schedule_mix_suggestions(
+    account_id: int,
+    session_id: uuid.UUID,
+    campaign_id: Optional[str],
+    model: Any,
+    created_post_types: List[str],
+) -> None:
+    """Fase 5: al final de la sesión, si los datos empíricos (horario) o el propio
+    razonamiento de Hermes (mezcla de tipos) sugieren algo distinto a lo que el
+    usuario configuró a mano, lo registra como una decisión `status="suggested"` con
+    su rationale. Best-effort y no bloqueante: un fallo aquí nunca cambia el
+    HermesSessionResult ni la programación/mezcla real de la sesión (que sigue
+    respetando la config manual sin cambios)."""
+    try:
+        supabase = get_supabase_admin_client()
+        cfg_res = supabase.table("instagram_accounts")\
+            .select("best_times, content_type_mix")\
+            .eq("id", account_id).execute()
+        cfg = cfg_res.data[0] if cfg_res.data else {}
+        best_times = cfg.get("best_times") or []
+        raw_mix = cfg.get("content_type_mix") or {}
+        mix_quota = {k: v for k, v in raw_mix.items() if isinstance(v, int) and v > 0}
+
+        # --- Horario: fuente empírica determinista ---
+        if best_times:
+            from services.analytics.analytics_service import AnalyticsService
+            empirical = AnalyticsService(db_client=supabase).get_empirical_scheduling_data(account_id)
+            if empirical.get("has_data"):
+                reason = _schedule_disagreement(best_times, empirical)
+                if reason:
+                    record_agent_decision(
+                        account_id=account_id,
+                        session_id=session_id,
+                        decision_type="suggest_schedule_change",
+                        status="suggested",
+                        campaign_id=campaign_id,
+                        confidence_score=0.5,
+                        rationale=reason,
+                        tool_args={
+                            "configured_best_times": best_times,
+                            "suggested_best_times": empirical.get("top_times") or [],
+                            "empirical": empirical,
+                        },
+                    )
+
+        # --- Mezcla de tipos: juicio del propio modelo (no hay fuente empírica) ---
+        if mix_quota and created_post_types:
+            actual = {t: created_post_types.count(t) for t in set(created_post_types) if t}
+            # The suggested quota keeps every configured content type (0 for the
+            # ones this week's content didn't use) so it's a drop-in replacement.
+            suggested_mix = {**{k: 0 for k in mix_quota}, **actual}
+            if actual and actual != mix_quota:
+                prompt = (
+                    f"Mezcla de tipos de contenido configurada por el usuario: {mix_quota}. "
+                    f"Mezcla que encajaba mejor con el contenido real de esta semana: {actual}. "
+                    "Si de verdad crees que la configurada debería revisarse, responde "
+                    "'SUGGEST_MIX: <razón breve y concreta>'. Si la diferencia es menor o "
+                    "circunstancial, responde 'NONE'."
+                )
+                text = _safe_response_text(
+                    model.generate_content([{"role": "user", "parts": [{"text": prompt}]}])
+                )
+                match = re.search(r"SUGGEST_MIX:\s*(.+)", text, re.DOTALL)
+                if match:
+                    record_agent_decision(
+                        account_id=account_id,
+                        session_id=session_id,
+                        decision_type="suggest_mix_change",
+                        status="suggested",
+                        campaign_id=campaign_id,
+                        confidence_score=0.5,
+                        rationale=match.group(1).strip()[:500],
+                        tool_args={
+                            "configured_mix": mix_quota,
+                            "session_mix": actual,
+                            "suggested_content_type_mix": suggested_mix,
+                        },
+                    )
+    except Exception:
+        logger.warning(
+            "end-of-session suggestion generation failed for account_id=%s", account_id, exc_info=True
+        )
+
+
 async def run_session(account_id: int) -> HermesSessionResult:
     session_id = uuid.uuid4()
     max_turns = int(os.environ.get("HERMES_MAX_TURNS", "12"))
@@ -307,8 +482,14 @@ async def run_session(account_id: int) -> HermesSessionResult:
     posts_drafted = 0
     post_ids: List[int] = []
     created_posts: List[Dict[str, Any]] = []
+    created_post_types: List[str] = []
     proposal_created = False
     proposal_id: Optional[str] = None
+
+    # Campaña consultada durante la sesión (Fase 2): se captura del tool-dispatch loop
+    # y se enlaza a cada decisión posterior + alimenta el ranking de imágenes (Fase 6).
+    session_campaign_id: Optional[str] = None
+    session_campaign_focus: str = ""
 
     history_window = int(os.environ.get("HERMES_HISTORY_WINDOW", "8"))
 
@@ -321,7 +502,7 @@ async def run_session(account_id: int) -> HermesSessionResult:
             return HermesSessionResult(error=f"gemini_error: {str(e)}")
             
         function_calls, model_parts, tool_responses, dispatched = await _dispatch_turn(
-            response, bridge, account_id
+            response, bridge, account_id, campaign_focus=session_campaign_focus
         )
 
         append_turn(
@@ -341,6 +522,13 @@ async def run_session(account_id: int) -> HermesSessionResult:
             break
 
         for tool_name, tool_args, result in dispatched:
+            # Fase 2: captura la campaña activa consultada en la sesión.
+            if tool_name == "supabase_get_campaign" and isinstance(result, dict) and result.get("has_campaign"):
+                if result.get("campaign_id"):
+                    session_campaign_id = str(result["campaign_id"])
+                if result.get("context_text"):
+                    session_campaign_focus = result["context_text"]
+
             # Track counts
             if tool_name == "drive_list_files":
                 if isinstance(result, list):
@@ -351,6 +539,8 @@ async def run_session(account_id: int) -> HermesSessionResult:
                 images_analyzed += 1
             elif tool_name == "supabase_create_post":
                 posts_drafted += 1
+                if tool_args.get("post_type"):
+                    created_post_types.append(tool_args.get("post_type"))
                 if isinstance(result, dict) and result.get("id") is not None:
                     post_ids.append(result["id"])
                     created_posts.append({
@@ -372,6 +562,23 @@ async def run_session(account_id: int) -> HermesSessionResult:
                 tool_result=result
             )
 
+            if tool_name in _DECISION_TOOL_NAMES:
+                try:
+                    record_agent_decision(
+                        account_id=account_id,
+                        session_id=session_id,
+                        decision_type=tool_name,
+                        tool_args=tool_args,
+                        tool_result=result,
+                        campaign_id=session_campaign_id,
+                        related_post_id=result.get("id") if tool_name == "supabase_create_post" and isinstance(result, dict) else None,
+                        related_proposal_id=str(result["id"]) if tool_name == "supabase_create_proposal" and isinstance(result, dict) and result.get("id") is not None else None,
+                    )
+                except Exception:
+                    logger.warning(
+                        "record_agent_decision failed for tool=%s account_id=%s", tool_name, account_id, exc_info=True
+                    )
+
         # Gemini's own SDK sends function responses back with role="user" (see
         # generative_models.py's ChatSession._USER_ROLE), not "tool" — the API
         # rejects "tool" as an unsupported role for at least some model versions.
@@ -382,6 +589,9 @@ async def run_session(account_id: int) -> HermesSessionResult:
         if proposal_created:
             _correct_content_type_mix(account_id, post_ids)
             _backfill_slot_media(proposal_id, created_posts)
+        _maybe_record_schedule_mix_suggestions(
+            account_id, session_id, session_campaign_id, model, created_post_types
+        )
         return HermesSessionResult(
             images_scanned=images_scanned,
             images_analyzed=images_analyzed,
@@ -393,6 +603,10 @@ async def run_session(account_id: int) -> HermesSessionResult:
     if proposal_created:
         _correct_content_type_mix(account_id, post_ids)
         _backfill_slot_media(proposal_id, created_posts)
+
+    _maybe_record_schedule_mix_suggestions(
+        account_id, session_id, session_campaign_id, model, created_post_types
+    )
 
     return HermesSessionResult(
         images_scanned=images_scanned,

@@ -175,7 +175,7 @@ def test_supabase_get_campaign_no_campaign():
 
         result = supabase_get_campaign(instagram_account_id=123, week_start="2026-07-20")
 
-        assert result == {"has_campaign": False, "context_text": "", "milestones_in_range": []}
+        assert result == {"has_campaign": False, "campaign_id": None, "context_text": "", "milestones_in_range": []}
         mock_client.table.assert_called_once_with("monthly_campaigns")
 
 

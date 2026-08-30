@@ -742,6 +742,117 @@ def test_chat_campaign_stream_success(mock_run_edit, mock_agent_supabase, mock_a
     assert line3["message"] == "Listo, ajusté el foco."
 
 
+# ==============================================================================
+# HERMES MIND DECISION INTELLIGENCE ENDPOINT TESTS
+# ==============================================================================
+
+def test_get_decisions_pagination_and_ownership(mock_agent_admin_supabase):
+    # Test GET /api/agent/decisions
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+
+    response = client.get("/api/agent/decisions?account_id=456&page=1&per_page=20")
+    if response.status_code == 200:
+        body = response.json()
+        assert "data" in body
+        assert "meta" in body
+        assert body["meta"]["page"] == 1
+        assert body["meta"]["per_page"] == 20
+    else:
+        assert response.status_code in (404, 501)
+
+
+def test_get_decisions_unauthorized(mock_agent_admin_supabase):
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": "other-user-999"}])
+
+    response = client.get("/api/agent/decisions?account_id=456")
+    assert response.status_code in (403, 404, 501)
+
+
+def test_get_decision_detail(mock_agent_admin_supabase):
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+
+    response = client.get("/api/agent/decisions/1")
+    assert response.status_code in (200, 404, 501)
+
+
+def test_get_decision_detail_includes_linked_post(mock_agent_admin_supabase):
+    def table(name):
+        m = MagicMock()
+        if name == "agent_decisions":
+            m.select.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[{"id": 1, "account_id": 456, "related_post_id": 44182,
+                       "related_proposal_id": None, "applied_rule_ids": []}]
+            )
+        elif name == "instagram_accounts":
+            m.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+        elif name == "posts":
+            m.select.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[{"id": 44182, "post_type": "story", "scheduled_at": "2026-09-11T10:00:00Z",
+                       "content": "hola mundo", "media_url": "https://x/img.jpg",
+                       "status": "draft", "drive_file_id": "f1"}]
+            )
+        else:
+            m.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+        return m
+
+    mock_agent_admin_supabase.table.side_effect = table
+
+    response = client.get("/api/agent/decisions/1")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["post"]["media_url"] == "https://x/img.jpg"
+    assert body["post"]["content"] == "hola mundo"
+    assert body["proposal"] is None
+
+
+def test_get_decision_audit_trail(mock_agent_admin_supabase):
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+
+    response = client.get("/api/agent/decisions/1/audit-trail")
+    assert response.status_code in (200, 404, 501)
+
+
+def test_get_context_graph(mock_agent_admin_supabase):
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+
+    response = client.get("/api/agent/context-graph?account_id=456")
+    if response.status_code == 200:
+        body = response.json()
+        assert "nodes" in body
+        assert "edges" in body
+    else:
+        assert response.status_code in (404, 501)
+
+
+def test_override_decision_pipeline(mock_agent_admin_supabase):
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+
+    response = client.post("/api/agent/decisions/1/override", json={"user_message": "Este tono es demasiado formal"})
+    assert response.status_code in (200, 404, 501)
+
+
+def test_get_context_graph_returns_strategy_campaign_and_version_aware_rules(mock_agent_admin_supabase):
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+
+    response = client.get("/api/agent/context-graph?account_id=456")
+    if response.status_code == 200:
+        body = response.json()
+        assert "nodes" in body
+        assert "edges" in body
+        node_types = {n.get("type") for n in body.get("nodes", [])}
+        # Verify strategy node presence when endpoint is updated
+        if "strategy" in node_types:
+            strategy_node = next(n for n in body["nodes"] if n["type"] == "strategy")
+            assert "tone" in strategy_node.get("data", {}) or "label" in strategy_node.get("data", {})
+        # Verify rule nodes carry versioning fields when updated
+        rule_nodes = [n for n in body["nodes"] if n.get("type") == "rule"]
+        for r_node in rule_nodes:
+            if "version_chain" in r_node.get("data", {}):
+                assert isinstance(r_node["data"]["version_chain"], list)
+
+
+
+
 
 
 

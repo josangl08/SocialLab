@@ -48,6 +48,14 @@ SKILL_GEMINI_MODELS = [
     'gemini-flash-latest',
 ]
 
+# Rationale/confidence de agent_decisions y clasificación de reglas de marca
+# (Hermes Mind) — llamadas cortas y best-effort en el propio loop de dispatch de
+# tools, mismo perfil de coste/latencia que SUMMARY_GEMINI_MODELS.
+DECISION_GEMINI_MODELS = [
+    'gemini-flash-lite-latest',
+    'gemini-flash-latest',
+]
+
 _client: Optional[genai.Client] = None
 
 

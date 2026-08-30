@@ -179,6 +179,43 @@ class MonthlyCampaign(BaseModel):
     resolved_at: Optional[datetime] = None
 
 
+class BrandRule(BaseModel):
+    id: Optional[int] = None
+    account_id: int
+    rule_type: Literal["tone", "frequency", "format", "topic", "brand_safety", "other"]
+    rule_text: str
+    source_correction_id: Optional[int] = None
+    confidence: float = 1.0
+    is_active: bool = True
+    times_applied: int = 0
+    previous_version_id: Optional[int] = None
+    conflicts_with_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class AgentDecision(BaseModel):
+    id: Optional[int] = None
+    account_id: int
+    session_id: Optional[str] = None
+    decision_type: str
+    related_post_id: Optional[int] = None
+    related_proposal_id: Optional[str] = None
+    campaign_id: Optional[str] = None
+    applied_rule_ids: list[int] = []
+    applied_rule_labels: list[str] = []
+    confidence_score: float = 0.5
+    rationale: Optional[str] = None
+    tool_args: Optional[dict] = None
+    tool_result: Optional[dict] = None
+    status: Literal["active", "overridden", "suggested", "accepted"] = "active"
+    overridden_at: Optional[datetime] = None
+    override_correction_id: Optional[int] = None
+    accepted_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+
+
 
 # --- Modelos de Google Drive ---
 class DriveToken(BaseModel):

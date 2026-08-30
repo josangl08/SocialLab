@@ -146,7 +146,7 @@ def supabase_get_campaign(instagram_account_id: int, week_start: str, include_pe
         campaign = None
 
     if not campaign:
-        return {"has_campaign": False, "context_text": "", "milestones_in_range": []}
+        return {"has_campaign": False, "campaign_id": None, "context_text": "", "milestones_in_range": []}
 
     week_of_month = min(((week_start_date.day - 1) // 7) + 1, 4)
     focus = (campaign.get("weekly_focus") or {}).get(str(week_of_month), "").strip()
@@ -158,7 +158,7 @@ def supabase_get_campaign(instagram_account_id: int, week_start: str, include_pe
     ]
 
     if not focus and not milestones_in_range:
-        return {"has_campaign": True, "context_text": "", "milestones_in_range": []}
+        return {"has_campaign": True, "campaign_id": campaign["id"], "context_text": "", "milestones_in_range": []}
 
     strategy_mode = campaign.get("strategy_mode", "personal_storyline")
     title = campaign.get("title", "")
@@ -178,6 +178,7 @@ def supabase_get_campaign(instagram_account_id: int, week_start: str, include_pe
 
     return {
         "has_campaign": True,
+        "campaign_id": campaign["id"],
         "context_text": " ".join(parts),
         "milestones_in_range": milestones_in_range
     }
