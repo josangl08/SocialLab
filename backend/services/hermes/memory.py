@@ -179,7 +179,12 @@ def record_agent_decision(
     try:
         active_rules = get_active_brand_rules(account_id)
         applied_rule_ids = [r["id"] for r in active_rules if r.get("id") is not None]
-        applied_rule_labels = [_humanize_rule_type(r["rule_type"]) for r in active_rules if r.get("rule_type")]
+        # Dedupe labels: two active rules of the same rule_type (a conflict pair)
+        # would otherwise repeat the label and render as duplicate chips in the UI.
+        # applied_rule_ids keeps both so the conflict detail is still available.
+        applied_rule_labels = list(dict.fromkeys(
+            _humanize_rule_type(r["rule_type"]) for r in active_rules if r.get("rule_type")
+        ))
 
         if rationale is None and confidence_score is None:
             confidence_score, rationale = _generate_decision_rationale(decision_type, tool_args, active_rules)

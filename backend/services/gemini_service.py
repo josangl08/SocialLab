@@ -9,6 +9,7 @@ from google.genai import types, errors
 from typing import Optional, List
 
 from config import GOOGLE_API_KEY
+from models.schemas import VisualAnalysisResult
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,7 @@ async def analyze_image_vision(
     strategy_context: Optional[str] = None,
 ) -> dict:
     """
-    Envía la imagen como inline data (sin genai.upload_file), usa el prompt estructurado unificado y retorna el dict ya parseado.
+    Envía la imagen como inline data (sin genai.upload_file), usa el prompt estructurado unificado y retorna el dict ya parseado y validado.
     """
     strategy_part = f"siguiendo estas instrucciones: {strategy_context}" if strategy_context else "sugerido para Instagram (1-2 frases con hashtags relevantes)"
     prompt = f"""Analiza detalladamente esta imagen. Retorna SOLO un objeto JSON con esta estructura exacta:
@@ -155,11 +156,33 @@ async def analyze_image_vision(
   "mood": "uno de: energetic, calm, professional, fun, inspiring, nostalgic",
   "theme": "tema principal en 2-3 palabras",
   "raw_description": "descripción detallada en 2-3 frases",
-  "suggested_caption": "caption {strategy_part}"
+  "suggested_caption": "caption {strategy_part}",
+  "aesthetic_score": 7,
+  "composition_type": "uno de: primer_plano, detalle, paisaje, producto, accion, retrato",
+  "content_type_fit": "uno de: feed_post, carousel_slide, story",
+  "suggested_hook": "gancho de primera línea sugerido para abrir el caption"
 }}"""
 
     text = await asyncio.to_thread(_sync_analyze_image, image_bytes, mime_type, prompt)
-    return await clean_and_parse_json(text)
+    parsed = await clean_and_parse_json(text)
+    try:
+        valid_comp = {"primer_plano", "detalle", "paisaje", "producto", "accion", "retrato"}
+        valid_fit = {"feed_post", "carousel_slide", "story"}
+        if parsed.get("composition_type") not in valid_comp:
+            parsed["composition_type"] = "primer_plano"
+        if parsed.get("content_type_fit") not in valid_fit:
+            parsed["content_type_fit"] = "feed_post"
+        if "aesthetic_score" not in parsed or not isinstance(parsed.get("aesthetic_score"), (int, float)):
+            parsed["aesthetic_score"] = 5
+        else:
+            parsed["aesthetic_score"] = max(1, min(10, int(parsed["aesthetic_score"])))
+        if "suggested_hook" not in parsed:
+            parsed["suggested_hook"] = ""
+
+        validated = VisualAnalysisResult(**parsed)
+        return validated.model_dump()
+    except Exception:
+        return parsed
 
 
 async def regenerate_slot_caption(

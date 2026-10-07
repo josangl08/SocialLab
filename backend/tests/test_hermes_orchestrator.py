@@ -13,6 +13,12 @@ from services.hermes.orchestrator import (
     _safe_response_text,
     _schedule_disagreement,
     _rank_drive_files_by_focus,
+    _drive_file_id,
+    _filter_unavailable_drive_files,
+    _rank_drive_files,
+    _log_empty_drive_result,
+    _is_transient_gemini_error,
+    _FallbackGenerativeModel,
 )
 from mcp.drive_server import mcp as drive_mcp
 from mcp.supabase_server import mcp as supabase_mcp
@@ -490,7 +496,7 @@ async def test_run_session_refreshes_memory_summary_before_building_prompt(
 ):
     call_order = []
     mock_refresh.side_effect = lambda account_id: call_order.append(("refresh", account_id))
-    mock_get_prompt.side_effect = lambda account_id: call_order.append(("prompt", account_id)) or "system prompt"
+    mock_get_prompt.side_effect = lambda account_id, **kwargs: call_order.append(("prompt", account_id)) or "system prompt"
 
     mock_bridge = MagicMock()
     mock_bridge.discover_tools = AsyncMock(return_value=[])
@@ -646,12 +652,15 @@ async def test_run_session_threads_campaign_id_to_record_decision(
     assert isinstance(result, HermesSessionResult)
     assert result.error is None
 
-    # Check if record_agent_decision was called with campaign_id if passed
-    if mock_record_decision.called:
-        for call_args in mock_record_decision.call_args_list:
-            kwargs = call_args.kwargs
-            if kwargs.get("decision_type") == "supabase_create_post":
-                assert kwargs.get("campaign_id") == campaign_uuid or kwargs.get("campaign_id") is None
+    # The campaign_id captured from supabase_get_campaign (has_campaign=True, even
+    # for a pending campaign) must be threaded into the create_post decision.
+    post_decisions = [
+        c for c in mock_record_decision.call_args_list
+        if c.kwargs.get("decision_type") == "supabase_create_post"
+    ]
+    assert post_decisions, "expected a supabase_create_post decision"
+    for call_args in post_decisions:
+        assert call_args.kwargs.get("campaign_id") == campaign_uuid
 
 
 @pytest.mark.asyncio
@@ -705,9 +714,8 @@ def test_schedule_disagreement_none_without_data():
 
 # --- Fase 6: _rank_drive_files_by_focus ---
 
-def test_rank_drive_files_noop_without_focus_or_short_list():
-    files = [{"id": "a"}, {"id": "b"}]
-    assert _rank_drive_files_by_focus(files, "", 1) is files
+def test_rank_drive_files_noop_short_list_legacy():
+    assert _rank_drive_files_by_focus([], "", 1) == []
     assert _rank_drive_files_by_focus([{"id": "a"}], "playa verano", 1) == [{"id": "a"}]
 
 
@@ -726,3 +734,496 @@ def test_rank_drive_files_orders_by_focus_overlap(mock_get_client):
     assert [f["id"] for f in ranked] == ["beach", "office"]
 
 
+# --- Eje 1 & 2 Tests: Deduplicación y Ranking Visual ---
+
+def test_drive_file_id_extractor():
+    assert _drive_file_id({"id": "abc"}) == "abc"
+    assert _drive_file_id({"file_id": "def"}) == "def"
+    assert _drive_file_id({"drive_file_id": "ghi"}) == "ghi"
+    assert _drive_file_id(None) is None
+    assert _drive_file_id("not_a_dict") is None
+
+
+@patch("services.hermes.orchestrator.get_supabase_admin_client")
+def test_filter_unavailable_drive_files_filters_posts_and_slots(mock_get_client):
+    mock_client = MagicMock()
+    mock_get_client.return_value = mock_client
+
+    # Mock posts query (draft, scheduled, published)
+    mock_posts_select = MagicMock()
+    mock_posts_select.eq.return_value.in_.return_value.not_.is_.return_value.execute.return_value = MagicMock(
+        data=[
+            {"drive_file_id": "file_draft"},
+            {"drive_file_id": "file_sched"},
+            {"drive_file_id": "file_pub"},
+        ]
+    )
+
+    # Mock content_proposals query (pending_approval, approved)
+    mock_props_select = MagicMock()
+    mock_props_select.eq.return_value.in_.return_value.execute.return_value = MagicMock(
+        data=[
+            {"slots": [{"image_id": "file_pending_slot"}, {"image_id": None}]},
+            {"slots": [{"image_id": "file_approved_slot"}]},
+        ]
+    )
+
+    def table_side_effect(table_name):
+        mock_t = MagicMock()
+        if table_name == "posts":
+            mock_t.select.return_value = mock_posts_select
+        elif table_name == "content_proposals":
+            mock_t.select.return_value = mock_props_select
+        return mock_t
+
+    mock_client.table.side_effect = table_side_effect
+
+    files = [
+        {"id": "file_draft"},
+        {"id": "file_sched"},
+        {"id": "file_pub"},
+        {"id": "file_pending_slot"},
+        {"id": "file_approved_slot"},
+        {"id": "file_rejected_slot"},
+        {"id": "file_free"},
+    ]
+
+    result = _filter_unavailable_drive_files(files, account_id=1)
+    result_ids = [f["id"] for f in result]
+
+    assert "file_draft" not in result_ids
+    assert "file_sched" not in result_ids
+    assert "file_pub" not in result_ids
+    assert "file_pending_slot" not in result_ids
+    assert "file_approved_slot" not in result_ids
+    assert "file_rejected_slot" in result_ids
+    assert "file_free" in result_ids
+
+
+@patch("services.hermes.orchestrator.get_supabase_admin_client")
+def test_filter_unavailable_drive_files_returns_intact_on_exception(mock_get_client):
+    mock_client = MagicMock()
+    mock_get_client.return_value = mock_client
+    mock_client.table.side_effect = Exception("DB error")
+
+    files = [{"id": "1"}, {"id": "2"}]
+    assert _filter_unavailable_drive_files(files, account_id=1) is files
+
+
+def test_log_empty_drive_result_distinguishes_causes(caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="services.hermes.orchestrator"):
+        _log_empty_drive_result(0, account_id=7)
+        _log_empty_drive_result(5, account_id=7)
+
+    messages = "\n".join(caplog.messages)
+    assert "no_images_in_drive" in messages
+    assert "all_images_already_used" in messages
+    assert "filtered_out=5" in messages
+
+
+@patch("services.hermes.orchestrator.get_supabase_admin_client")
+def test_rank_drive_files_formula_and_aesthetic(mock_get_client):
+    mock_client = MagicMock()
+    mock_get_client.return_value = mock_client
+
+    # file_a: overlap 1 token (playa) -> score = 1*2 + 4 = 6
+    # file_b: overlap 0 tokens -> score = 0*2 + 8 = 8
+    # file_b ranks first (8 > 6)
+    mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[
+            {"drive_file_id": "file_a", "gemini_description": {"theme": "playa arena", "aesthetic_score": 4}},
+            {"drive_file_id": "file_b", "gemini_description": {"theme": "ciudad noche", "aesthetic_score": 8}},
+        ]
+    )
+
+    files = [{"id": "file_a"}, {"id": "file_b"}]
+    ranked = _rank_drive_files(files, "Foco: ir a la playa", account_id=1)
+
+    assert [f["id"] for f in ranked] == ["file_b", "file_a"]
+
+
+@patch("services.hermes.orchestrator.get_supabase_admin_client")
+def test_rank_drive_files_aesthetic_only_without_focus(mock_get_client):
+    mock_client = MagicMock()
+    mock_get_client.return_value = mock_client
+
+    mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[
+            {"drive_file_id": "low", "gemini_description": {"aesthetic_score": 3}},
+            {"drive_file_id": "high", "gemini_description": {"aesthetic_score": 9}},
+        ]
+    )
+
+    files = [{"id": "low"}, {"id": "high"}]
+    ranked = _rank_drive_files(files, focus_text="", account_id=1)
+
+    assert [f["id"] for f in ranked] == ["high", "low"]
+
+
+@patch("services.hermes.orchestrator.get_supabase_admin_client")
+def test_rank_drive_files_neutral_5_without_analysis(mock_get_client):
+    mock_client = MagicMock()
+    mock_get_client.return_value = mock_client
+
+    # Only "low" (3) and "high" (8) have analysis. "neutral" has none -> score 5.
+    mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[
+            {"drive_file_id": "low", "gemini_description": {"aesthetic_score": 3}},
+            {"drive_file_id": "high", "gemini_description": {"aesthetic_score": 8}},
+        ]
+    )
+
+    files = [{"id": "low"}, {"id": "neutral"}, {"id": "high"}]
+    ranked = _rank_drive_files(files, focus_text="", account_id=1)
+
+    assert [f["id"] for f in ranked] == ["high", "neutral", "low"]
+
+
+def test_rank_drive_files_noop_short_list():
+    assert _rank_drive_files([], "focus", 1) == []
+    assert _rank_drive_files([{"id": "x"}], "focus", 1) == [{"id": "x"}]
+
+
+# --- Auto-inyección Tests ---
+
+@pytest.mark.asyncio
+@patch("services.hermes.orchestrator.get_system_prompt")
+@patch("services.hermes.orchestrator.run_visual_performance_skill")
+@patch("services.hermes.orchestrator.run_niche_research_for_account")
+@patch("services.hermes.orchestrator.record_agent_decision")
+@patch("services.hermes.orchestrator.append_turn")
+@patch("services.hermes.orchestrator.ToolBridge")
+@patch("services.hermes.orchestrator.get_gemini_client")
+async def test_run_session_auto_injects_niche_and_visual_perf(
+    mock_get_client, mock_tool_bridge_class, mock_append_turn, mock_record_decision,
+    mock_niche_research, mock_visual_perf, mock_get_system_prompt
+):
+    mock_bridge = MagicMock()
+    mock_bridge.discover_tools = AsyncMock(return_value=[])
+    mock_bridge.dispatch = AsyncMock(return_value={})
+    mock_tool_bridge_class.return_value = mock_bridge
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = MockResponse(text="Done")
+    mock_get_client.return_value = mock_client
+
+    mock_niche_research.return_value = {"niche": "trail", "brief": "Brief de trail running"}
+    mock_visual_perf.return_value = {"summary": "Visual perf summary"}
+    mock_get_system_prompt.return_value = "System prompt mock"
+
+    result = await run_session(account_id=10)
+
+    assert result.error is None
+    mock_get_system_prompt.assert_called_once_with(
+        10,
+        niche_brief="Brief de trail running",
+        visual_perf_summary="Visual perf summary",
+    )
+
+
+@pytest.mark.asyncio
+@patch("services.hermes.orchestrator.get_system_prompt")
+@patch("services.hermes.orchestrator.run_visual_performance_skill", side_effect=Exception("Visual error"))
+@patch("services.hermes.orchestrator.run_niche_research_for_account", side_effect=Exception("Niche error"))
+@patch("services.hermes.orchestrator.record_agent_decision")
+@patch("services.hermes.orchestrator.append_turn")
+@patch("services.hermes.orchestrator.ToolBridge")
+@patch("services.hermes.orchestrator.get_gemini_client")
+async def test_run_session_auto_inject_exception_continues_with_none(
+    mock_get_client, mock_tool_bridge_class, mock_append_turn, mock_record_decision,
+    mock_niche_research, mock_visual_perf, mock_get_system_prompt
+):
+    mock_bridge = MagicMock()
+    mock_bridge.discover_tools = AsyncMock(return_value=[])
+    mock_bridge.dispatch = AsyncMock(return_value={})
+    mock_tool_bridge_class.return_value = mock_bridge
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = MockResponse(text="Done")
+    mock_get_client.return_value = mock_client
+    mock_get_system_prompt.return_value = "System prompt fallback"
+
+    result = await run_session(account_id=20)
+
+    assert result.error is None
+    mock_get_system_prompt.assert_called_once_with(
+        20,
+        niche_brief=None,
+        visual_perf_summary=None,
+    )
+
+
+# --- Rate Limiting Fallback Test ---
+
+def test_fallback_generative_model_429_falls_back_to_flash():
+    from google.genai import errors
+
+    with patch("services.hermes.orchestrator.get_gemini_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Success response from flash"
+
+        def generate_side_effect(model, contents, config):
+            if model == "gemini-pro-latest":
+                raise errors.ClientError(code=429, response_json={}, response=MagicMock())
+            return mock_response
+
+        mock_client.models.generate_content.side_effect = generate_side_effect
+        mock_get_client.return_value = mock_client
+
+        fallback_model = _FallbackGenerativeModel(
+            system_instruction="sys",
+            tools=None,
+            model_names=["gemini-pro-latest", "gemini-flash-latest"],
+        )
+
+        resp = fallback_model.generate_content([{"role": "user", "parts": [{"text": "hi"}]}])
+
+        assert resp == mock_response
+        assert fallback_model._resolved_name == "gemini-flash-latest"
+        assert mock_client.models.generate_content.call_count == 2
+
+
+def test_is_transient_gemini_error():
+    from google.genai import errors
+    import httpx
+
+    # 429 ClientError -> True
+    e_429 = errors.ClientError(code=429, response_json={}, response=MagicMock())
+    assert _is_transient_gemini_error(e_429) is True
+
+    # 400 ClientError -> False
+    e_400 = errors.ClientError(code=400, response_json={}, response=MagicMock())
+    assert _is_transient_gemini_error(e_400) is False
+
+    # 503 ServerError -> True
+    e_503 = errors.ServerError(code=503, response_json={}, response=MagicMock())
+    assert _is_transient_gemini_error(e_503) is True
+
+    # httpx.ReadTimeout (TimeoutException) -> True
+    e_timeout = httpx.ReadTimeout("read timeout")
+    assert _is_transient_gemini_error(e_timeout) is True
+
+    # ValueError -> False
+    e_val = ValueError("unexpected value")
+    assert _is_transient_gemini_error(e_val) is False
+
+
+def test_fallback_generative_model_503_falls_back_to_flash():
+    from google.genai import errors
+
+    with patch("services.hermes.orchestrator.get_gemini_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Success response from flash"
+
+        def generate_side_effect(model, contents, config):
+            if model == "gemini-pro-latest":
+                raise errors.ServerError(code=503, response_json={}, response=MagicMock())
+            return mock_response
+
+        mock_client.models.generate_content.side_effect = generate_side_effect
+        mock_get_client.return_value = mock_client
+
+        fallback_model = _FallbackGenerativeModel(
+            system_instruction="sys",
+            tools=None,
+            model_names=["gemini-pro-latest", "gemini-flash-latest"],
+        )
+
+        resp = fallback_model.generate_content([{"role": "user", "parts": [{"text": "hi"}]}])
+
+        assert resp == mock_response
+        assert fallback_model._resolved_name == "gemini-flash-latest"
+        assert mock_client.models.generate_content.call_count == 2
+
+
+def test_fallback_generative_model_read_timeout_falls_back_to_flash():
+    import httpx
+
+    with patch("services.hermes.orchestrator.get_gemini_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = "Success response from flash"
+
+        def generate_side_effect(model, contents, config):
+            if model == "gemini-pro-latest":
+                raise httpx.ReadTimeout("deadline expired")
+            return mock_response
+
+        mock_client.models.generate_content.side_effect = generate_side_effect
+        mock_get_client.return_value = mock_client
+
+        fallback_model = _FallbackGenerativeModel(
+            system_instruction="sys",
+            tools=None,
+            model_names=["gemini-pro-latest", "gemini-flash-latest"],
+        )
+
+        resp = fallback_model.generate_content([{"role": "user", "parts": [{"text": "hi"}]}])
+
+        assert resp == mock_response
+        assert fallback_model._resolved_name == "gemini-flash-latest"
+        assert mock_client.models.generate_content.call_count == 2
+
+
+def test_fallback_generative_model_400_propagates_without_fallback():
+    from google.genai import errors
+
+    with patch("services.hermes.orchestrator.get_gemini_client") as mock_get_client:
+        mock_client = MagicMock()
+
+        mock_client.models.generate_content.side_effect = errors.ClientError(
+            code=400, response_json={}, response=MagicMock()
+        )
+        mock_get_client.return_value = mock_client
+
+        fallback_model = _FallbackGenerativeModel(
+            system_instruction="sys",
+            tools=None,
+            model_names=["gemini-pro-latest", "gemini-flash-latest"],
+        )
+
+        with pytest.raises(errors.ClientError) as exc_info:
+            fallback_model.generate_content([{"role": "user", "parts": [{"text": "hi"}]}])
+
+        assert exc_info.value.code == 400
+        assert mock_client.models.generate_content.call_count == 1
+
+
+def test_fallback_generative_model_resolved_pro_falls_back_on_later_turn():
+    from google.genai import errors
+
+    with patch("services.hermes.orchestrator.get_gemini_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_response_1 = MagicMock(text="Turn 1 from pro")
+        mock_response_2 = MagicMock(text="Turn 2 from flash")
+
+        fallback_model = _FallbackGenerativeModel(
+            system_instruction="sys",
+            tools=None,
+            model_names=["gemini-pro-latest", "gemini-flash-latest"],
+        )
+
+        # Turn 1: pro succeeds
+        mock_client.models.generate_content.return_value = mock_response_1
+        mock_get_client.return_value = mock_client
+
+        resp1 = fallback_model.generate_content([{"role": "user", "parts": [{"text": "turn 1"}]}])
+        assert resp1 == mock_response_1
+        assert fallback_model._resolved_name == "gemini-pro-latest"
+        assert mock_client.models.generate_content.call_count == 1
+
+        # Turn 2: pro throws 503 ServerError -> falls back to flash
+        def turn2_side_effect(model, contents, config):
+            if model == "gemini-pro-latest":
+                raise errors.ServerError(code=503, response_json={}, response=MagicMock())
+            return mock_response_2
+
+        mock_client.models.generate_content.side_effect = turn2_side_effect
+
+        resp2 = fallback_model.generate_content([{"role": "user", "parts": [{"text": "turn 2"}]}])
+        assert resp2 == mock_response_2
+        assert fallback_model._resolved_name == "gemini-flash-latest"
+        assert mock_client.models.generate_content.call_count == 3
+
+
+def test_fallback_generative_model_resolved_flash_does_not_retry_pro():
+    from google.genai import errors
+
+    with patch("services.hermes.orchestrator.get_gemini_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_response = MagicMock(text="Flash response")
+
+        def turn1_side_effect(model, contents, config):
+            if model == "gemini-pro-latest":
+                raise errors.ClientError(code=429, response_json={}, response=MagicMock())
+            return mock_response
+
+        mock_client.models.generate_content.side_effect = turn1_side_effect
+        mock_get_client.return_value = mock_client
+
+        fallback_model = _FallbackGenerativeModel(
+            system_instruction="sys",
+            tools=None,
+            model_names=["gemini-pro-latest", "gemini-flash-latest"],
+        )
+
+        # Turn 1: falls back to flash
+        resp1 = fallback_model.generate_content([{"role": "user", "parts": [{"text": "turn 1"}]}])
+        assert resp1 == mock_response
+        assert fallback_model._resolved_name == "gemini-flash-latest"
+        assert mock_client.models.generate_content.call_count == 2
+
+        # Turn 2: pro must NOT be called again
+        mock_client.models.generate_content.reset_mock()
+        mock_client.models.generate_content.side_effect = None
+        mock_client.models.generate_content.return_value = mock_response
+
+        resp2 = fallback_model.generate_content([{"role": "user", "parts": [{"text": "turn 2"}]}])
+        assert resp2 == mock_response
+        assert mock_client.models.generate_content.call_count == 1
+        called_model = mock_client.models.generate_content.call_args[1].get("model") or mock_client.models.generate_content.call_args[0][0]
+        assert called_model == "gemini-flash-latest"
+
+
+def test_fallback_generative_model_all_fail_raises_last_error():
+    from google.genai import errors
+
+    with patch("services.hermes.orchestrator.get_gemini_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_client.models.generate_content.side_effect = errors.ServerError(
+            code=503, response_json={}, response=MagicMock()
+        )
+        mock_get_client.return_value = mock_client
+
+        fallback_model = _FallbackGenerativeModel(
+            system_instruction="sys",
+            tools=None,
+            model_names=["gemini-pro-latest", "gemini-flash-latest"],
+        )
+
+        with pytest.raises(errors.ServerError) as exc_info:
+            fallback_model.generate_content([{"role": "user", "parts": [{"text": "hi"}]}])
+
+        assert exc_info.value.code == 503
+        assert mock_client.models.generate_content.call_count == 2
+
+
+def test_fallback_generative_model_respects_timeout_env(monkeypatch):
+    with patch("services.hermes.orchestrator.get_gemini_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_response = MagicMock(text="ok")
+        mock_client.models.generate_content.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        # Default timeout: 90s -> 90_000 ms
+        monkeypatch.delenv("HERMES_GEMINI_TIMEOUT_S", raising=False)
+        model_default = _FallbackGenerativeModel(
+            system_instruction="sys",
+            tools=None,
+            model_names=["gemini-flash-latest"],
+        )
+        model_default.generate_content([{"role": "user", "parts": [{"text": "hi"}]}])
+        call_kwargs = mock_client.models.generate_content.call_args[1]
+        config = call_kwargs.get("config")
+        assert config is not None
+        assert config.http_options is not None
+        assert config.http_options.timeout == 90_000
+
+        # Custom timeout: 45s -> 45_000 ms
+        mock_client.models.generate_content.reset_mock()
+        monkeypatch.setenv("HERMES_GEMINI_TIMEOUT_S", "45")
+        model_custom = _FallbackGenerativeModel(
+            system_instruction="sys",
+            tools=None,
+            model_names=["gemini-flash-latest"],
+        )
+        model_custom.generate_content([{"role": "user", "parts": [{"text": "hi"}]}])
+        call_kwargs = mock_client.models.generate_content.call_args[1]
+        config = call_kwargs.get("config")
+        assert config is not None
+        assert config.http_options is not None
+        assert config.http_options.timeout == 45_000

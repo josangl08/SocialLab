@@ -98,6 +98,18 @@ describe('CalendarView Component', () => {
       publication_date: null,
       is_ai_generated: true,
     },
+    {
+      id: 3,
+      user_id: 'user-123',
+      content: 'AI post already approved',
+      media_url: null,
+      post_type: 'post',
+      status: 'scheduled',
+      scheduled_at: '2026-06-30T12:00:00Z',
+      created_at: '2026-06-27T10:00:00Z',
+      publication_date: null,
+      is_ai_generated: true,
+    },
   ];
 
   beforeEach(() => {
@@ -147,6 +159,19 @@ describe('CalendarView Component', () => {
 
     const proposalEvent = screen.getByTestId('event-2');
     expect(proposalEvent.className).toContain('event-proposal');
+  });
+
+  test('AI posts keep an AI marker class once approved (scheduled)', async () => {
+    render(<CalendarView />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('event-3')).toBeInTheDocument();
+    });
+
+    const scheduledAiEvent = screen.getByTestId('event-3');
+    expect(scheduledAiEvent.className).toContain('event-status-scheduled');
+    expect(scheduledAiEvent.className).toContain('event-ai-scheduled');
+    expect(scheduledAiEvent.className).not.toContain('event-proposal');
   });
 
   test('onEventDrop calls reschedule API endpoint', async () => {

@@ -851,6 +851,54 @@ def test_get_context_graph_returns_strategy_campaign_and_version_aware_rules(moc
                 assert isinstance(r_node["data"]["version_chain"], list)
 
 
+def test_orphan_decision_ids_flags_dead_artifacts_keeps_suggestions(mock_agent_admin_supabase):
+    from routes.agent_routes import _orphan_decision_ids
+
+    def table(name):
+        m = MagicMock()
+        if name == "agent_decisions":
+            m.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[
+                {"id": 1, "decision_type": "supabase_create_post", "related_post_id": 999, "related_proposal_id": None},
+                {"id": 2, "decision_type": "supabase_create_post", "related_post_id": 500, "related_proposal_id": None},
+                {"id": 3, "decision_type": "supabase_create_proposal", "related_post_id": None, "related_proposal_id": "p-rej"},
+                {"id": 4, "decision_type": "suggest_schedule_change", "related_post_id": None, "related_proposal_id": None},
+            ])
+        elif name == "posts":
+            m.select.return_value.in_.return_value.execute.return_value = MagicMock(data=[{"id": 500}])
+        elif name == "content_proposals":
+            m.select.return_value.in_.return_value.execute.return_value = MagicMock(data=[{"id": "p-rej", "status": "rejected"}])
+        return m
+
+    mock_agent_admin_supabase.table.side_effect = table
+
+    orphans = _orphan_decision_ids(456)
+    assert 1 in orphans          # post deleted, no proposal
+    assert 3 in orphans          # proposal rejected
+    assert 2 not in orphans      # post still exists
+    assert 4 not in orphans      # suggestion, never orphan
+
+
+def test_context_graph_includes_current_month_pending_campaign(mock_agent_admin_supabase):
+    def table(name):
+        m = MagicMock()
+        if name == "instagram_accounts":
+            m.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": USER_ID, "username": "acc"}])
+        elif name == "monthly_campaigns":
+            row = {"id": "camp-cur", "title": "Campaña del mes", "description": "d",
+                   "strategy_mode": "personal_storyline", "weekly_focus": {"1": "foco"},
+                   "milestones": [], "status": "pending_approval"}
+            m.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(data=[row])
+            m.select.return_value.in_.return_value.execute.return_value = MagicMock(data=[row])
+        return m
+
+    mock_agent_admin_supabase.table.side_effect = table
+
+    response = client.get("/api/agent/context-graph?account_id=456")
+    assert response.status_code == 200
+    campaign_nodes = [n for n in response.json()["nodes"] if n["type"] == "campaign"]
+    assert any(n["data"].get("status") == "pending_approval" for n in campaign_nodes)
+
+
 
 
 

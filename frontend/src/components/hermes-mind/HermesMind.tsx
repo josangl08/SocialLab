@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './HermesMind.css';
 import { apiClient } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
@@ -43,6 +43,22 @@ export function outputMatches(d: DecisionSummary, key: string): boolean {
   return bucket === key;
 }
 
+/**
+ * Which proposal the "Propuesta" filter should default to when Hermes Mind
+ * first loads, so the Río shows the most relevant week instead of every
+ * decision the account ever produced. `proposals` arrives newest-first
+ * (created_at desc). Return '' to mean "Toda la cuenta" (no filter).
+ */
+export function pickDefaultProposalId(proposals: ContentProposal[]): string {
+  // Newest-first: the first proposal still in play (awaiting review or approved
+  // as the current week). Rejected proposals carry no context. No match → ''
+  // ("Toda la cuenta").
+  const relevant = proposals.find(
+    (p) => p.status === 'pending_approval' || p.status === 'approved',
+  );
+  return relevant?.id ?? '';
+}
+
 export const HermesMind: React.FC<HermesMindProps> = ({ accountId: accountIdProp }) => {
   const { token } = useAuth();
   const [accountId, setAccountId] = useState<number | null>(accountIdProp ?? null);
@@ -67,6 +83,7 @@ export const HermesMind: React.FC<HermesMindProps> = ({ accountId: accountIdProp
       .catch(() => {});
   }, [accountIdProp]);
 
+  const didInitProposal = useRef(false);
   useEffect(() => {
     if (accountId == null) return;
     apiClient
@@ -74,6 +91,15 @@ export const HermesMind: React.FC<HermesMindProps> = ({ accountId: accountIdProp
       .then(setProposals)
       .catch(() => setProposals([]));
   }, [accountId]);
+
+  // On first load, start the filter on the most relevant proposal instead of
+  // "Toda la cuenta" — keeps stale decisions from older sessions out of view.
+  useEffect(() => {
+    if (didInitProposal.current || proposals.length === 0) return;
+    didInitProposal.current = true;
+    const initial = pickDefaultProposalId(proposals);
+    if (initial) setProposalId(initial);
+  }, [proposals]);
 
   useEffect(() => {
     if (accountId == null) return;
@@ -239,6 +265,7 @@ export const HermesMind: React.FC<HermesMindProps> = ({ accountId: accountIdProp
       <div className="hm-workbench">
         <OrbitaPanel
           decision={selectedDecision}
+          graph={graph}
           token={token}
           onChanged={() => setRefreshKey((k) => k + 1)}
         />

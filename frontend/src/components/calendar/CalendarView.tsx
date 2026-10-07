@@ -76,6 +76,18 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
             : post.scheduled_at
             ? new Date(post.scheduled_at)
             : new Date(post.created_at);
+          // AI draft → dashed purple "proposal" style. Once approved the post
+          // becomes 'scheduled' and takes its status colour, but keeps a purple
+          // AI hint (event-ai-scheduled) so it stays distinguishable from a
+          // manually scheduled post.
+          const base = `event-${post.post_type}`;
+          let className: string;
+          if (post.is_ai_generated && post.status === 'draft') {
+            className = `${base} event-proposal`;
+          } else {
+            className = `${base} event-status-${post.status}`;
+            if (post.is_ai_generated) className += ' event-ai-scheduled';
+          }
           return {
             id: post.id,
             title: post.content.substring(0, 40),
@@ -84,9 +96,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
             allDay: false,
             type: 'post' as const,
             resource: post,
-            className: post.is_ai_generated && post.status === 'draft'
-              ? `event-${post.post_type} event-proposal`
-              : `event-${post.post_type} event-status-${post.status}`,
+            className,
           };
         });
 

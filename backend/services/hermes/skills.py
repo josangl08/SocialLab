@@ -9,6 +9,8 @@ código generado (para auditoría) y su resultado. No hay ejecución de código
 arbitrario en nuestra infraestructura.
 """
 
+import re
+import unicodedata
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -23,20 +25,6 @@ logger = logging.getLogger(__name__)
 
 VISUAL_PERFORMANCE_SKILL = "visual_performance_correlation"
 _DEFAULT_FRESHNESS_DAYS = 14
-
-NICHE_ELITE_ATHLETE = "elite_athlete"
-NICHE_TRAVEL_LIFESTYLE = "travel_lifestyle"
-
-_NICHE_KEYWORDS = {
-    NICHE_ELITE_ATHLETE: ["deport", "atlet", "fitness", "entrenamiento", "gym"],
-    NICHE_TRAVEL_LIFESTYLE: ["viaj", "travel", "lifestyle", "fotografía", "fotografia"],
-}
-
-_NICHE_LABELS = {
-    NICHE_ELITE_ATHLETE: "deportistas de élite",
-    NICHE_TRAVEL_LIFESTYLE: "lifestyle de viajes y fotografía",
-}
-
 _NICHE_INSIGHT_FRESHNESS_DAYS = 30
 
 
@@ -190,12 +178,21 @@ def run_visual_performance_skill(account_id: int, force_refresh: bool = False, f
     }
 
 
+def build_niche_key(account: Dict[str, Any]) -> str:
+    """Construye un slug único como clave de nicho a partir de sector y purpose."""
+    sector = (account.get("sector") or "").strip()
+    purpose = (account.get("purpose") or "").strip()
+    if not sector and not purpose:
+        return ""
+    combined = f"{sector}_{purpose}".strip("_")
+    normalized = unicodedata.normalize("NFKD", combined).encode("ascii", "ignore").decode("utf-8")
+    return re.sub(r"[^a-z0-9]+", "_", normalized.lower()).strip("_")
+
+
 def resolve_niche(account: Dict[str, Any]) -> List[str]:
-    """Matches an account's sector/purpose against known niche keyword sets. An
-    account can match more than one niche (e.g. account 7's sector 'Contenido
-    Visual Deportivo y Viajes' matches both elite_athlete and travel_lifestyle)."""
-    text = f"{account.get('sector') or ''} {account.get('purpose') or ''}".lower()
-    return [niche for niche, keywords in _NICHE_KEYWORDS.items() if any(kw in text for kw in keywords)]
+    """Compatibilidad retroactiva: devuelve una lista con la clave de nicho si existe."""
+    key = build_niche_key(account)
+    return [key] if key else []
 
 
 def get_niche_insight(niche: str) -> Optional[Dict[str, Any]]:
@@ -222,26 +219,27 @@ def _is_niche_insight_fresh(insight_row: Dict[str, Any]) -> bool:
     expires_at_raw = insight_row.get("expires_at")
     if not isinstance(expires_at_raw, str):
         return False
-    expires_at = datetime.fromisoformat(expires_at_raw.replace("Z", "+00:00"))
-    return datetime.now(timezone.utc) < expires_at
+    try:
+        expires_at = datetime.fromisoformat(expires_at_raw.replace("Z", "+00:00"))
+        return datetime.now(timezone.utc) < expires_at
+    except Exception:
+        return False
 
 
-def run_niche_research_skill(niche: str, force_refresh: bool = False) -> Dict[str, Any]:
-    """Researches current Instagram trends/best-practices for one niche via real
-    web search grounding. Shared across all accounts in that niche (see migration
-    028 — niche_insights has no account_id), reused until it expires unless
-    force_refresh is requested."""
-    if niche not in _NICHE_LABELS:
+def run_niche_research_skill(niche: str, label: str = "", force_refresh: bool = False) -> Dict[str, Any]:
+    """Investiga tendencias y mejores prácticas actuales en Instagram para el nicho
+    indicado mediante búsqueda web real."""
+    if not niche:
         return {"brief": "", "fresh": False, "regenerated": False}
 
     existing = get_niche_insight(niche)
     if existing and not force_refresh and _is_niche_insight_fresh(existing):
         return {"brief": existing["brief"], "fresh": True, "regenerated": False}
 
-    label = _NICHE_LABELS[niche]
+    search_label = label or niche.replace("_", " ")
     prompt = (
         f"Busca en la web información actual sobre tendencias, formatos y mejores prácticas "
-        f"de contenido en Instagram para cuentas de {label}. Resume en 2-3 frases en español, "
+        f"de contenido en Instagram para cuentas de {search_label}. Resume en 2-3 frases en español, "
         "concreto y accionable, qué tipo de contenido, formato o timing está funcionando mejor "
         "ahora mismo para este nicho."
     )
@@ -262,16 +260,18 @@ def run_niche_research_skill(niche: str, force_refresh: bool = False) -> Dict[st
 
 
 def run_niche_research_for_account(account_id: int, force_refresh: bool = False) -> Dict[str, Any]:
-    """Resolves which niche(s) this account belongs to and researches each,
-    combining their briefs. Returns an empty brief (no error) if the account
-    doesn't match any recognized niche."""
+    """Resuelve el nicho de la cuenta a partir de sector, purpose y target_audience,
+    e investiga sus tendencias. Devuelve {'niche': str, 'brief': str}."""
     supabase = get_supabase_admin_client()
-    res = supabase.table("instagram_accounts").select("sector,purpose").eq("id", account_id).execute()
+    res = supabase.table("instagram_accounts").select("sector,purpose,target_audience").eq("id", account_id).execute()
     account = res.data[0] if res.data else {}
 
-    niches = resolve_niche(account)
-    if not niches:
-        return {"niches": [], "brief": ""}
+    niche_key = build_niche_key(account)
+    if not niche_key:
+        return {"niche": "", "brief": ""}
 
-    briefs = [b for b in (run_niche_research_skill(n, force_refresh=force_refresh)["brief"] for n in niches) if b]
-    return {"niches": niches, "brief": " ".join(briefs)}
+    parts = [account.get("sector"), account.get("purpose"), account.get("target_audience")]
+    label = " ".join(str(p).strip() for p in parts if p and str(p).strip())
+
+    skill_result = run_niche_research_skill(niche_key, label=label, force_refresh=force_refresh)
+    return {"niche": niche_key, "brief": skill_result.get("brief", "")}

@@ -22,10 +22,9 @@ def hermes_run_skill(skill_name: str, account_id: int, force_refresh: bool = Fal
 
 @mcp.tool()
 def hermes_run_niche_research(account_id: int, force_refresh: bool = False) -> Dict:
-    """Investiga tendencias y mejores prácticas actuales de Instagram para el/los
-    nicho(s) de esta cuenta (deportistas de élite y/o lifestyle de viajes y
-    fotografía, detectados automáticamente por el sector/objetivo de la cuenta),
-    vía búsqueda web real. Devuelve niches=[] si la cuenta no encaja en ningún
-    nicho reconocido. Reutiliza el último resultado si sigue vigente, salvo que
-    el usuario pida explícitamente actualizarlo."""
+    """Investiga tendencias y mejores prácticas actuales de Instagram para el
+    nicho de esta cuenta (detectado automáticamente a partir de su sector, objetivo
+    y audiencia), vía búsqueda web real. Devuelve {"niche": ..., "brief": ...}.
+    Reutiliza el último resultado si sigue vigente, salvo que el usuario pida
+    explícitamente actualizarlo."""
     return run_niche_research_for_account(account_id, force_refresh=force_refresh)

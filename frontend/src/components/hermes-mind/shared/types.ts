@@ -20,6 +20,7 @@ export interface DecisionSummary {
   created_at: string;
   target_label?: string | null;
   campaign_label?: string | null;
+  campaign_id?: string | null;
   related_post_id?: number | null;
   related_proposal_id?: string | null;
   media_url?: string | null;
@@ -59,6 +60,43 @@ export interface GraphNode {
 export interface ContextGraphResponse {
   nodes: GraphNode[];
   edges: { id: string; source: string; target: string; type?: string }[];
+}
+
+/** Shape of a `type: 'strategy'` graph node's `data` (see get_context_graph). */
+export interface StrategyNodeData {
+  tone?: string | null;
+  style_guide?: string | null;
+  target_audience?: string | null;
+  hashtag_strategy?: string | null;
+  posting_frequency?: string | null;
+  best_times?: unknown;
+  content_type_mix?: unknown;
+  memory_summary?: string | null;
+}
+
+/** Shape of a `type: 'campaign'` graph node's `data`. */
+export interface CampaignNodeData {
+  title?: string | null;
+  description?: string | null;
+  strategy_mode?: string | null;
+  weekly_focus?: Record<string, string> | null;
+  milestones?: { date: string; event: string }[] | null;
+  status?: string | null;
+}
+
+/** Shape of a `type: 'rule'` graph node's `data`. */
+export interface RuleNodeData {
+  rule_type?: string | null;
+  rule_text?: string | null;
+  conflicts_with?: { id: number; rule_text: string } | null;
+}
+
+export function findNode(graph: ContextGraphResponse | null, id: string): GraphNode | null {
+  return graph?.nodes.find((n) => n.id === id) ?? null;
+}
+
+export function findNodeByType(graph: ContextGraphResponse | null, type: string): GraphNode | null {
+  return graph?.nodes.find((n) => n.type === type) ?? null;
 }
 
 export interface BrandRule {

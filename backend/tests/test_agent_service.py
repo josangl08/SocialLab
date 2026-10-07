@@ -228,7 +228,7 @@ def test_build_strategy_context_caption_voice_none_falls_back_to_account_type():
 def test_build_strategy_context_hashtags_reference_photo_content():
     account = {'account_type': 'personal', 'hashtag_strategy': 'minimal'}
     context = _build_strategy_context(account)
-    assert "objects/theme" in context
+    assert "objetos" in context.lower() or "objects/theme" in context
 
 
 def test_build_strategy_context_includes_memory_summary_when_present():

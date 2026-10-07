@@ -142,6 +142,18 @@ class VisualAnalysis(BaseModel):
     gemini_description: dict
     suggested_caption: Optional[str] = None
 
+class VisualAnalysisResult(BaseModel):
+    objects: list[str] = []
+    text_visible: str = ""
+    mood: str = ""
+    theme: str = ""
+    raw_description: str = ""
+    suggested_caption: str = ""
+    aesthetic_score: int = 5
+    composition_type: Literal["primer_plano", "detalle", "paisaje", "producto", "accion", "retrato"] = "primer_plano"
+    content_type_fit: Literal["feed_post", "carousel_slide", "story"] = "feed_post"
+    suggested_hook: str = ""
+
 class CalendarSlot(BaseModel):
     day: str
     post_id: Optional[int] = None

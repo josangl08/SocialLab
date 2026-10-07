@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 from database.supabase_client import get_supabase_admin_client
 from services.hermes.memory import get_active_brand_rules
+from services.hermes.playbooks import load_playbook
 
 _SPANISH_WEEKDAYS = [
     "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"
@@ -30,28 +31,29 @@ def _build_strategy_context(account: dict) -> str:
     ref_raw = account.get('reference_accounts') or []
     reference_accounts = ', '.join(str(r) for r in ref_raw if r) if isinstance(ref_raw, list) else str(ref_raw).strip()
 
+    hashtag_playbook = load_playbook("hashtag-layering")
     if voice_mode == 'professional':
+        hooks_playbook = load_playbook("hooks")
         voice = (
             f"Voz de marca de tono {tone}, semiformal, emojis mínimos (0-1). "
-            f"Empieza con el beneficio principal o propuesta de valor. "
+            f"Empieza con el beneficio principal o propuesta de valor, abriendo con un gancho:\n{hooks_playbook}\n"
             f"CTA de conversión al final ('Contáctanos', 'Reserva ahora', 'Link en bio'). "
-            f"Usa {hashtag_range} hashtags industry-specific o branded, y entre ellos incluye "
-            f"1-2 que reflejen literalmente lo que aparece en la foto (objects/theme del análisis "
-            f"visual de esa imagen), no solo términos genéricos del sector. "
+            f"{hashtag_playbook}\n"
+            f"Ajusta el total al rango {hashtag_range} hashtags. "
             f"Guía de estilo: {style_guide or 'profesional y directo'}."
         )
     else:
         voice = (
             f"Voz en primera persona, tono {tone}. El caption debe ser CORTO por defecto — "
             f"una frase, unas pocas palabras, o incluso solo emojis sin texto (una opción "
-            f"válida y a menudo la mejor). Nada de fórmula fija: no fuerces un CTA ni una "
+            f"válida y a menudo la mejor). Cuando el caption pase de una frase, considera abrir con un gancho "
+            f"como opción para conectar con la imagen. Nada de fórmula fija: no fuerces un CTA ni una "
             f"pregunta al final en cada post — a veces encaja invitar a comentar u opinar, "
             f"a veces no; decide según lo que pide la imagen, priorizando brevedad y "
             f"naturalidad sobre estructura. "
             f"Audiencia: {target_audience or 'comunidad general'}. "
-            f"Usa {hashtag_range} hashtags de nicho + community + trending, y entre ellos incluye "
-            f"1-2 que reflejen literalmente lo que aparece en la foto (objects/theme del análisis "
-            f"visual de esa imagen), no solo términos genéricos de nicho. "
+            f"{hashtag_playbook}\n"
+            f"Ajusta el total al rango {hashtag_range} hashtags. "
             f"Guía de estilo: {style_guide or 'cercano, casual y breve — como hablarías con un amigo'}."
         )
 
@@ -123,7 +125,11 @@ def _build_brand_rules_context(account_id: int) -> str:
     )
 
 
-def get_system_prompt(account_id: int) -> str:
+def get_system_prompt(
+    account_id: int,
+    niche_brief: Optional[str] = None,
+    visual_perf_summary: Optional[str] = None,
+) -> str:
     """Construye el system prompt de Hermes para una cuenta: persona + instrucciones
     de la sesión + perfil de cuenta como contexto."""
     supabase = get_supabase_admin_client()
@@ -131,6 +137,15 @@ def get_system_prompt(account_id: int) -> str:
     account = res.data[0] if res.data else {}
 
     strategy_context = _build_strategy_context(account)
+
+    captions_context = ""
+    extra_context_parts = []
+    if niche_brief:
+        extra_context_parts.append(f"Tendencias del nicho:\n{niche_brief}")
+    if visual_perf_summary:
+        extra_context_parts.append(f"Rendimiento de contenido visual histórico:\n{visual_perf_summary}")
+    if extra_context_parts:
+        captions_context = "\n\nContexto de captions e inteligencia de la cuenta:\n" + "\n\n".join(extra_context_parts)
 
     task_instructions = (
         "Eres Hermes, el motor de planificación de contenido de Instagram. Tu objetivo en esta "
@@ -141,9 +156,10 @@ def get_system_prompt(account_id: int) -> str:
         "1. Llama a supabase_get_next_planning_week para obtener el week_start (lunes) de la "
         "próxima semana sin cubrir — ya viene calculado de forma determinística; úsalo tal "
         "cual, no lo recalcules ni elijas otra semana por tu cuenta.\n"
-        "2. Llama a supabase_get_campaign con esa semana (week_start) — si has_campaign es true "
-        "y context_text no está vacío, respeta ese enfoque narrativo o comercial en los captions "
-        "y menciona explícitamente los milestones_in_range que traiga.\n"
+        "2. Llama a supabase_get_campaign con esa semana (week_start) e include_pending=True — "
+        "así tienes en cuenta la campaña del mes aunque siga pendiente de aprobación. Si "
+        "has_campaign es true y context_text no está vacío, respeta ese enfoque narrativo o "
+        "comercial en los captions y menciona explícitamente los milestones_in_range que traiga.\n"
         "3. Llama a drive_list_files para ver las imágenes disponibles. Si no hay ninguna, "
         "termina la sesión sin crear nada — no es un error, es un resultado válido.\n"
         "4. Llama a supabase_list_visual_analyses para no re-analizar imágenes ya procesadas. "
@@ -181,7 +197,7 @@ def get_system_prompt(account_id: int) -> str:
         "llamadas a tools) para señalar que la sesión terminó."
     )
 
-    return f"{task_instructions}\n\n{strategy_context}{_build_brand_rules_context(account_id)}".strip()
+    return f"{task_instructions}\n\n{strategy_context}{captions_context}{_build_brand_rules_context(account_id)}".strip()
 
 
 def _resolve_edit_post_id(context: dict) -> Any:
@@ -285,8 +301,9 @@ def get_monthly_strategy_prompt(account_id: int, target_month: str) -> str:
         "limitado de turnos de razonamiento — sé directo, no explores por curiosidad.\n\n"
         "Flujo esperado:\n"
         "1. Llama a supabase_get_account para refrescar el perfil de la cuenta y a "
-        "supabase_get_campaign (con week_start = el primer lunes de este mes objetivo) para "
-        "ver si ya hay contexto de un campaña previa que debas continuar o evitar repetir.\n"
+        "supabase_get_campaign (con week_start = el primer lunes de este mes objetivo e "
+        "include_pending=True) para ver si ya hay contexto de una campaña previa —aunque esté "
+        "pendiente de aprobación— que debas continuar o evitar repetir.\n"
         "2. Decide strategy_mode: usa 'commercial_campaign' para cuentas profesionales/de "
         "negocio con un objetivo de conversión claro este mes, o 'personal_storyline' para "
         "cuentas personales/creador que van a hilar una narrativa en primera persona. El "
@@ -301,8 +318,10 @@ def get_monthly_strategy_prompt(account_id: int, target_month: str) -> str:
         "\"texto breve\"}. Prefiere 0-2 milestones reales antes que rellenar con genéricos "
         "inventados; un mes sin ningún hito claro es un resultado válido.\n"
         "5. Redacta weekly_focus como un objeto con claves \"1\", \"2\", \"3\" y \"4\" "
-        "(una por semana del mes), cada una con una frase breve de en qué se centra esa "
-        "semana dentro del hilo o campaña del mes — evita repetir literalmente el title.\n"
+        f"(una por semana del mes), usando como guía adaptable la matriz de contenidos:\n"
+        f"{load_playbook('content-matrix')}\n"
+        "Cada semana con una frase breve de en qué se centra esa semana dentro del hilo o campaña. "
+        "Si strategy_mode es 'personal_storyline', enfocar como un arco narrativo mensual continuo en lugar de un embudo comercial.\n"
         "6. Llama a supabase_create_monthly_campaign con account_id, "
         f"month_date='{target_month}', strategy_mode, title, description, milestones y "
         "weekly_focus. Si created es false, la campaña ya existía (pendiente o aprobada) — "

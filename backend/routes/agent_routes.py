@@ -914,6 +914,44 @@ def _apply_proposal_filter(query, proposal_id: Optional[str], post_ids):
     return query.or_(",".join(ors))
 
 
+_ARTIFACT_DECISION_TYPES = ("supabase_create_post", "supabase_create_proposal")
+
+
+def _orphan_decision_ids(account_id: int) -> list[int]:
+    """IDs of 'artifact' decisions (created a post or a proposal) whose artifact is
+    gone: the post no longer exists AND the proposal is null or rejected. These pile
+    up in Hermes Mind after a proposal is rejected (its draft posts are deleted,
+    `related_post_id` becomes NULL via ON DELETE SET NULL). Suggestions are never
+    orphaned."""
+    rows = admin_supabase.table('agent_decisions')\
+        .select('id, decision_type, related_post_id, related_proposal_id')\
+        .eq('account_id', account_id).execute().data or []
+    candidates = [r for r in rows if r.get('decision_type') in _ARTIFACT_DECISION_TYPES]
+    if not candidates:
+        return []
+
+    post_ids = [r['related_post_id'] for r in candidates if r.get('related_post_id')]
+    live_post_ids: set = set()
+    if post_ids:
+        live = admin_supabase.table('posts').select('id').in_('id', post_ids).execute().data or []
+        live_post_ids = {p['id'] for p in live}
+
+    prop_ids = [r['related_proposal_id'] for r in candidates if r.get('related_proposal_id')]
+    prop_status: dict = {}
+    if prop_ids:
+        pr = admin_supabase.table('content_proposals').select('id, status').in_('id', prop_ids).execute().data or []
+        prop_status = {p['id']: p.get('status') for p in pr}
+
+    orphans: list[int] = []
+    for r in candidates:
+        has_live_post = r.get('related_post_id') in live_post_ids
+        pid = r.get('related_proposal_id')
+        proposal_ok = pid is not None and prop_status.get(pid) not in (None, 'rejected')
+        if not has_live_post and not proposal_ok:
+            orphans.append(r['id'])
+    return orphans
+
+
 @router.get("/decisions")
 async def list_decisions(
     account_id: int,
@@ -934,6 +972,9 @@ async def list_decisions(
         )\
         .eq('account_id', account_id)
     query = _apply_proposal_filter(query, scoped_proposal_id, scoped_post_ids)
+    orphan_ids = _orphan_decision_ids(account_id)
+    if orphan_ids:
+        query = query.not_.in_('id', orphan_ids)
     res = query\
         .order('created_at', desc=True)\
         .range(offset, offset + per_page - 1)\
@@ -1132,6 +1173,9 @@ async def get_context_graph(
         .select('id, decision_type, related_post_id, campaign_id, applied_rule_ids, created_at')\
         .eq('account_id', account_id)
     decisions_query = _apply_proposal_filter(decisions_query, scoped_proposal_id, scoped_post_ids)
+    orphan_ids = _orphan_decision_ids(account_id)
+    if orphan_ids:
+        decisions_query = decisions_query.not_.in_('id', orphan_ids)
     decisions_res = decisions_query\
         .order('created_at', desc=True)\
         .limit(30)\
@@ -1176,10 +1220,23 @@ async def get_context_graph(
 
     # --- Campaign nodes: one per DISTINCT campaign_id among the decisions shown ---
     campaign_ids = list({d["campaign_id"] for d in decisions if d.get("campaign_id")})
+
+    # Always surface the current month's campaign as strategy context, even when no
+    # decision links it yet (e.g. it's still pending_approval) — otherwise Hermes
+    # Mind can't say which campaign is in play.
+    from datetime import date
+    current_month = date.today().replace(day=1).isoformat()
+    cur_res = admin_supabase.table('monthly_campaigns')\
+        .select('id, title, description, strategy_mode, weekly_focus, milestones, status')\
+        .eq('account_id', account_id).eq('month_date', current_month).execute()
+    current_campaign = cur_res.data[0] if cur_res.data else None
+    if current_campaign and current_campaign['id'] not in campaign_ids:
+        campaign_ids.append(current_campaign['id'])
+
     campaigns_by_id = {}
     if campaign_ids:
         camp_res = admin_supabase.table('monthly_campaigns')\
-            .select('id, title, description, strategy_mode, weekly_focus, milestones')\
+            .select('id, title, description, strategy_mode, weekly_focus, milestones, status')\
             .in_('id', campaign_ids).execute()
         campaigns_by_id = {c["id"]: c for c in (camp_res.data or [])}
 
@@ -1196,6 +1253,7 @@ async def get_context_graph(
                 "strategy_mode": c.get("strategy_mode"),
                 "weekly_focus": c.get("weekly_focus"),
                 "milestones": c.get("milestones") or [],
+                "status": c.get("status"),
             },
         })
         edges.append({
@@ -1282,4 +1340,31 @@ async def accept_suggestion(decision_id: int, current_user: User = Depends(get_c
     }).eq('id', decision_id).execute()
 
     return {"accepted": True, "config_column": config_column, "applied_value": suggested_value}
+
+
+class VisualBackfillRequest(BaseModel):
+    batch_size: int = 10
+
+
+@router.post("/visual-analyses/backfill")
+async def backfill_visual_analyses(
+    account_id: int,
+    request: Optional[VisualBackfillRequest] = None,
+    current_user: User = Depends(get_current_user),
+):
+    """Completa en lotes las filas de visual_analyses de la cuenta que aún no tienen
+    aesthetic_score (re-analiza la imagen con Gemini Vision y fusiona solo los campos
+    nuevos). Idempotente: re-ejecutar continúa donde lo dejó."""
+    _verify_account_owner(account_id, str(current_user.id))
+    batch_size = request.batch_size if request else 10
+    from services.hermes.visual_backfill import backfill_visual_scores
+    return await backfill_visual_scores(account_id, batch_size=batch_size)
+
+
+@router.get("/capabilities")
+def get_agent_capabilities(current_user: User = Depends(get_current_user)):
+    """Catálogo estático de las capacidades de Hermes (playbooks, skills runtime y
+    cálculos deterministas) con su perfil de coste. Para Hermes Mind."""
+    from services.hermes.capabilities import HERMES_CAPABILITIES
+    return HERMES_CAPABILITIES
 

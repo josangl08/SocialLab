@@ -190,6 +190,30 @@ def test_record_agent_decision_happy_path():
         assert isinstance(res, dict)
 
 
+def test_record_agent_decision_dedupes_labels_keeps_all_ids():
+    """Two active rules of the same rule_type (a conflict pair) must not produce a
+    duplicated label, but both ids stay so the conflict detail is available."""
+    with patch("services.hermes.memory.get_supabase_admin_client") as mock_get_client, \
+            patch("services.hermes.memory.get_active_brand_rules") as mock_rules, \
+            patch("services.hermes.memory._generate_decision_rationale", return_value=(0.5, "ok")):
+        mock_rules.return_value = [
+            {"id": 3, "rule_type": "tone"},
+            {"id": 4, "rule_type": "format"},
+            {"id": 5, "rule_type": "format"},
+        ]
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{"id": 1}])
+
+        from services.hermes.memory import record_agent_decision
+        record_agent_decision(account_id=1, session_id=uuid4(), decision_type="supabase_create_post")
+
+        inserted = mock_client.table.return_value.insert.call_args[0][0]
+        assert inserted["applied_rule_ids"] == [3, 4, 5]
+        assert inserted["applied_rule_labels"].count("Format") == 1
+        assert "Tone" in inserted["applied_rule_labels"]
+
+
 def test_extract_rule_from_correction_dedup_vs_new_rule():
     account_id = 123
     correction_row = {

@@ -252,6 +252,13 @@
   box-shadow: 0 0 10px rgba(192, 132, 252, 0.1) !important;
 }
 
+/* AI post already approved/scheduled — keeps the status colour (background) but
+   a dashed purple edge marks it as AI-generated. */
+.sl-calendar-wrap .rbc-event.event-ai-scheduled {
+  border-left: 2px dashed #c084fc !important;
+  box-shadow: 0 0 10px rgba(192, 132, 252, 0.12) !important;
+}
+
 /* "Show more" link */
 .sl-calendar-wrap .rbc-show-more {
   color: #c084fc;

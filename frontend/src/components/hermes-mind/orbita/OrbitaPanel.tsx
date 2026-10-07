@@ -8,6 +8,13 @@ import {
   type DecisionDetail,
   type AuditTrail,
   type SourceKind,
+  type BrandRule,
+  type ContextGraphResponse,
+  type StrategyNodeData,
+  type CampaignNodeData,
+  type RuleNodeData,
+  findNode,
+  findNodeByType,
   verbFor,
   isSuggestion,
   postImageSrc,
@@ -15,6 +22,7 @@ import {
 
 interface OrbitaPanelProps {
   decision: DecisionSummary | null;
+  graph: ContextGraphResponse | null;
   token: string | null;
   onChanged: () => void;
 }
@@ -25,6 +33,7 @@ interface ArcSource {
   label: string;
   conflict: boolean;
   ruleId?: number;
+  ruleType?: string;
 }
 
 const KIND_COLOR: Record<SourceKind, string> = {
@@ -50,7 +59,7 @@ const HUMANIZE: Record<string, string> = {
 
 const STAGE_H = 198;
 
-export const OrbitaPanel: React.FC<OrbitaPanelProps> = ({ decision, token, onChanged }) => {
+export const OrbitaPanel: React.FC<OrbitaPanelProps> = ({ decision, graph, token, onChanged }) => {
   const [detail, setDetail] = useState<DecisionDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [audit, setAudit] = useState<AuditTrail | null>(null);
@@ -94,13 +103,23 @@ export const OrbitaPanel: React.FC<OrbitaPanelProps> = ({ decision, token, onCha
     if (decision.campaign_label) {
       list.push({ key: 'campaign', kind: 'campaign', label: decision.campaign_label, conflict: false });
     }
+    // One chip per distinct rule_type. When a type has more than one active rule
+    // (a conflict pair, e.g. two "format" rules) they'd otherwise render as
+    // duplicate chips — group them and surface both texts in the detail panel.
+    const byType = new Map<string, BrandRule[]>();
     for (const r of detail?.applied_rules ?? []) {
+      const group = byType.get(r.rule_type) ?? [];
+      group.push(r);
+      byType.set(r.rule_type, group);
+    }
+    for (const [ruleType, group] of byType) {
       list.push({
-        key: `rule-${r.id}`,
+        key: `rule-${ruleType}`,
         kind: 'rule',
-        label: HUMANIZE[r.rule_type] ?? r.rule_type,
-        conflict: !!r.conflicts_with_id,
-        ruleId: r.id,
+        label: HUMANIZE[ruleType] ?? ruleType,
+        conflict: group.some((r) => !!r.conflicts_with_id) || group.length > 1,
+        ruleId: group[0].id,
+        ruleType,
       });
     }
     return list;
@@ -192,12 +211,34 @@ export const OrbitaPanel: React.FC<OrbitaPanelProps> = ({ decision, token, onCha
     );
   }
 
-  const openRule = openSource?.startsWith('rule-')
-    ? detail?.applied_rules.find((r) => `rule-${r.id}` === openSource)
-    : null;
+  const openRuleGroup = openSource?.startsWith('rule-')
+    ? (detail?.applied_rules ?? []).filter((r) => `rule-${r.rule_type}` === openSource)
+    : [];
+  const openRule = openRuleGroup[0] ?? null;
   const openCorrection = openRule?.source_correction_id
     ? audit?.source_corrections.find((c) => c.id === openRule.source_correction_id)
     : null;
+  const hasConflict = openRuleGroup.some((r) => !!r.conflicts_with_id) || openRuleGroup.length > 1;
+
+  // The text of the rule(s) in tension: prefer what the graph resolved
+  // (conflicts_with.rule_text on the rule node), fall back to the other rule
+  // texts in the same group.
+  const conflictTexts = Array.from(
+    new Set(
+      openRuleGroup.flatMap((r) => {
+        const node = findNode(graph, `rule-${r.id}`);
+        const fromGraph = (node?.data as RuleNodeData | undefined)?.conflicts_with?.rule_text;
+        if (fromGraph) return [fromGraph];
+        return openRuleGroup.filter((o) => o.id !== r.id).map((o) => o.rule_text);
+      }),
+    ),
+  );
+
+  const strategyData = (findNodeByType(graph, 'strategy')?.data as StrategyNodeData | undefined) ?? null;
+  const campaignNode =
+    (decision.campaign_id ? findNode(graph, `campaign-${decision.campaign_id}`) : null) ??
+    findNodeByType(graph, 'campaign');
+  const campaignData = (campaignNode?.data as CampaignNodeData | undefined) ?? null;
 
   return (
     <section className="hm-panel orbita hm-col">
@@ -247,30 +288,107 @@ export const OrbitaPanel: React.FC<OrbitaPanelProps> = ({ decision, token, onCha
         </div>
 
         {openSource && (
-          <div className={`arc-detail${openRule?.conflicts_with_id ? ' is-conflict' : ''}`}>
-            {openRule ? (
+          <div className={`arc-detail${hasConflict && openRuleGroup.length > 0 ? ' is-conflict' : ''}`}>
+            {openRuleGroup.length > 0 ? (
               <>
-                <span className="arc-lead">Regla aprendida — {openRule.rule_text}</span>
-                <br />
+                <span className="arc-lead">
+                  {openRuleGroup.length > 1 ? 'Reglas aprendidas' : 'Regla aprendida'}
+                </span>
+                <ul className="arc-list">
+                  {openRuleGroup.map((r) => (
+                    <li key={r.id}>{r.rule_text}</li>
+                  ))}
+                </ul>
                 {openCorrection ? (
-                  <>
-                    Nació de tu corrección: “{openCorrection.content?.user_message ?? ''}”
-                  </>
+                  <>Nació de tu corrección: “{openCorrection.content?.user_message ?? ''}”</>
                 ) : (
                   'Sin corrección de origen registrada.'
                 )}
-                {openRule.conflicts_with_id ? (
+                {hasConflict ? (
                   <>
                     <br />
-                    <br />⚠ En conflicto con otra regla activa del mismo tipo — Hermes las muestra en
-                    tensión, no elige ganadora.
+                    <br />⚠{' '}
+                    {conflictTexts.length > 0
+                      ? `En tensión con: ${conflictTexts.map((t) => `“${t}”`).join('; ')}. Hermes las muestra en tensión, no elige ganadora.`
+                      : 'En conflicto con otra regla activa del mismo tipo — Hermes las muestra en tensión, no elige ganadora.'}
                   </>
                 ) : null}
               </>
+            ) : openSource === 'strategy' ? (
+              <>
+                <span className="arc-lead">Estrategia de la cuenta</span>
+                {strategyData ? (
+                  <dl className="arc-dl">
+                    {strategyData.tone ? (
+                      <>
+                        <dt>Tono</dt>
+                        <dd>{strategyData.tone}</dd>
+                      </>
+                    ) : null}
+                    {strategyData.target_audience ? (
+                      <>
+                        <dt>Audiencia</dt>
+                        <dd>{strategyData.target_audience}</dd>
+                      </>
+                    ) : null}
+                    {strategyData.style_guide ? (
+                      <>
+                        <dt>Guía de estilo</dt>
+                        <dd>{strategyData.style_guide}</dd>
+                      </>
+                    ) : null}
+                    {strategyData.posting_frequency ? (
+                      <>
+                        <dt>Frecuencia</dt>
+                        <dd>{strategyData.posting_frequency}</dd>
+                      </>
+                    ) : null}
+                    {strategyData.hashtag_strategy ? (
+                      <>
+                        <dt>Hashtags</dt>
+                        <dd>{strategyData.hashtag_strategy}</dd>
+                      </>
+                    ) : null}
+                  </dl>
+                ) : (
+                  <> — contexto que Hermes recibe en cada sesión.</>
+                )}
+              </>
             ) : (
               <>
-                <span className="arc-lead">{openSource === 'strategy' ? 'Estrategia' : 'Campaña'}</span> —
-                contexto que Hermes recibe en cada sesión.
+                <span className="arc-lead">
+                  {campaignData?.title ?? decision.campaign_label ?? 'Campaña del mes'}
+                  {campaignData?.status && campaignData.status !== 'approved' ? (
+                    <span className="arc-badge">pendiente</span>
+                  ) : null}
+                </span>
+                {campaignData ? (
+                  <>
+                    {campaignData.description ? <p className="arc-p">{campaignData.description}</p> : null}
+                    {campaignData.weekly_focus ? (
+                      <ol className="arc-weeks">
+                        {['1', '2', '3', '4'].map((w) =>
+                          campaignData.weekly_focus?.[w] ? (
+                            <li key={w}>
+                              <b>Semana {w}:</b> {campaignData.weekly_focus[w]}
+                            </li>
+                          ) : null,
+                        )}
+                      </ol>
+                    ) : null}
+                    {campaignData.milestones && campaignData.milestones.length > 0 ? (
+                      <ul className="arc-list">
+                        {campaignData.milestones.map((m) => (
+                          <li key={m.date}>
+                            {m.date} — {m.event}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </>
+                ) : (
+                  <> — contexto que Hermes recibe en cada sesión.</>
+                )}
               </>
             )}
           </div>

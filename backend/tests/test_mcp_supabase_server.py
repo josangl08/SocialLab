@@ -73,10 +73,14 @@ def test_supabase_create_post():
     with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client:
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
-        
+
         mock_response = MagicMock()
         mock_response.data = [{"id": 1, "content": "New Post"}]
         mock_client.table.return_value.insert.return_value.execute.return_value = mock_response
+        # instagram_accounts.select("user_id").eq(...).execute()
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{"user_id": "user-abc"}]
+        )
 
         result = supabase_create_post(
             instagram_account_id=123,
@@ -88,9 +92,11 @@ def test_supabase_create_post():
         )
 
         assert result == {"id": 1, "content": "New Post"}
-        mock_client.table.assert_called_once_with("posts")
+        mock_client.table.assert_any_call("instagram_accounts")
+        mock_client.table.assert_any_call("posts")
         mock_client.table.return_value.insert.assert_called_once_with({
             "instagram_account_id": 123,
+            "user_id": "user-abc",
             "content": "New Post",
             "media_url": "http://example.com/img.jpg",
             "scheduled_at": "2026-07-30T10:00:00Z",
@@ -99,6 +105,23 @@ def test_supabase_create_post():
             "status": "draft",
             "is_ai_generated": True
         })
+
+
+def test_supabase_create_post_user_id_none_when_account_missing():
+    with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        mock_client.table.return_value.insert.return_value.execute.return_value = MagicMock(
+            data=[{"id": 1, "content": "New Post"}]
+        )
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+
+        result = supabase_create_post(instagram_account_id=999, caption="New Post")
+
+        assert result == {"id": 1, "content": "New Post"}
+        inserted = mock_client.table.return_value.insert.call_args[0][0]
+        assert inserted["user_id"] is None
 
 def test_supabase_create_proposal():
     with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client:
@@ -228,6 +251,38 @@ def test_supabase_get_campaign_with_milestone_in_range():
         assert "Aniversario de la marca" in result["context_text"]
         assert len(result["milestones_in_range"]) == 1
         assert result["milestones_in_range"][0]["event"] == "Aniversario de la marca"
+
+def test_supabase_get_campaign_pending_hidden_by_default():
+    with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{
+                "id": 5, "title": "Borrador", "status": "pending_approval",
+                "strategy_mode": "personal_storyline",
+                "weekly_focus": {"3": "Foco de la semana"}, "milestones": []
+            }]
+        )
+        result = supabase_get_campaign(instagram_account_id=123, week_start="2026-07-20")
+        assert result["has_campaign"] is False
+
+
+def test_supabase_get_campaign_include_pending_returns_pending_campaign():
+    with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{
+                "id": 5, "title": "Borrador", "status": "pending_approval",
+                "strategy_mode": "personal_storyline",
+                "weekly_focus": {"3": "Foco de la semana"}, "milestones": []
+            }]
+        )
+        result = supabase_get_campaign(instagram_account_id=123, week_start="2026-07-20", include_pending=True)
+        assert result["has_campaign"] is True
+        assert result["campaign_id"] == 5
+        assert "Foco de la semana" in result["context_text"]
+
 
 def test_supabase_get_planned_weeks():
     with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client:

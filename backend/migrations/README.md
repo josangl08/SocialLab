@@ -11,6 +11,7 @@ Las migraciones deben ejecutarse en orden cronológico:
 5. `005_add_scheduled_publish_time.sql` - Programación de publicaciones
 6. `006_add_missing_ids_and_schema.sql` - **Schema completo** (templates, ai_strategy, etc.)
 20. `020_db_indices_faltantes.sql` - Índices faltantes en content_proposals, visual_analyses, y agent_logs
+32. `032_backfill_hermes_posts_user_id.sql` - Rellena posts.user_id NULL (posts de Hermes creados sin user_id)
 
 ## Cómo Ejecutar
 

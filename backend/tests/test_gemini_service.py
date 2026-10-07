@@ -140,3 +140,75 @@ async def test_analyze_image_vision_success(mock_get_client):
     prompt = contents[1]
     assert "Analiza detalladamente" in prompt
     assert strategy in prompt
+
+
+def test_visual_analysis_result_schema_defaults():
+    from models.schemas import VisualAnalysisResult
+    # Default instantiation
+    res = VisualAnalysisResult()
+    assert res.objects == []
+    assert res.text_visible == ""
+    assert res.mood == ""
+    assert res.theme == ""
+    assert res.raw_description == ""
+    assert res.suggested_caption == ""
+    assert res.aesthetic_score == 5
+    assert res.composition_type == "primer_plano"
+    assert res.content_type_fit == "feed_post"
+    assert res.suggested_hook == ""
+
+
+@pytest.mark.asyncio
+@patch("services.gemini_service.get_gemini_client")
+async def test_analyze_image_vision_parses_all_new_fields(mock_get_client):
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.text = '''{
+        "objects": ["montaña", "zapatillas"],
+        "text_visible": "Summit 2026",
+        "mood": "inspiring",
+        "theme": "trail running",
+        "raw_description": "Corredor en la cima al amanecer.",
+        "suggested_caption": "El esfuerzo siempre vale la pena.",
+        "aesthetic_score": 9,
+        "composition_type": "paisaje",
+        "content_type_fit": "feed_post",
+        "suggested_hook": "El 90% de los corredores nunca llegan a ver este amanecer."
+    }'''
+    mock_client.models.generate_content.return_value = mock_response
+    mock_get_client.return_value = mock_client
+
+    result = await analyze_image_vision(b"bytes", "image/jpeg")
+
+    assert result["aesthetic_score"] == 9
+    assert result["composition_type"] == "paisaje"
+    assert result["content_type_fit"] == "feed_post"
+    assert result["suggested_hook"] == "El 90% de los corredores nunca llegan a ver este amanecer."
+    assert result["theme"] == "trail running"
+    assert result["objects"] == ["montaña", "zapatillas"]
+
+
+@pytest.mark.asyncio
+@patch("services.gemini_service.get_gemini_client")
+async def test_analyze_image_vision_tolerant_defaults_when_omitted(mock_get_client):
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    # Omite los 4 campos nuevos y enums
+    mock_response.text = '''{
+        "objects": ["taza de café"],
+        "text_visible": "",
+        "mood": "calm",
+        "theme": "cafe",
+        "raw_description": "Una taza humeante.",
+        "suggested_caption": "Buenos días."
+    }'''
+    mock_client.models.generate_content.return_value = mock_response
+    mock_get_client.return_value = mock_client
+
+    result = await analyze_image_vision(b"bytes", "image/jpeg")
+
+    assert result["aesthetic_score"] == 5
+    assert result["composition_type"] == "primer_plano"
+    assert result["content_type_fit"] == "feed_post"
+    assert result["suggested_hook"] == ""
+    assert result["theme"] == "cafe"

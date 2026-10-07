@@ -60,8 +60,17 @@ def supabase_create_post(
 ) -> Dict[str, Any]:
     """Create a new post draft in the posts table."""
     supabase = get_supabase_admin_client()
+    # Resolve the owning user_id from the account: this tool runs with the
+    # service-role client (bypasses RLS), but /api/posts reads with the user's
+    # client (RLS: user_id = auth.uid()), so a post without user_id is invisible
+    # in the calendar even though it exists.
+    acc_res = supabase.table("instagram_accounts").select("user_id").eq("id", instagram_account_id).execute()
+    user_id: Optional[str] = acc_res.data[0].get("user_id") if acc_res.data else None
+    if user_id is None:
+        logger.warning("supabase_create_post: no user_id for instagram_account_id=%s", instagram_account_id)
     post_data = {
         "instagram_account_id": instagram_account_id,
+        "user_id": user_id,
         "content": caption,
         "media_url": media_url,
         "scheduled_at": scheduled_publish_time,

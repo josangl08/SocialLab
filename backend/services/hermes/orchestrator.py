@@ -3,9 +3,11 @@ import re
 import uuid
 import inspect
 import logging
+import time
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Callable
 from pydantic import BaseModel
+import httpx
 from google.genai import types, errors
 from database.supabase_client import get_supabase_admin_client
 from services.hermes.tool_bridge import ToolBridge
@@ -24,16 +26,28 @@ from mcp.supabase_server import mcp as supabase_mcp
 from mcp.vision_server import mcp as vision_mcp
 from mcp.analytics_server import mcp as analytics_mcp
 from mcp.skills_server import mcp as skills_mcp
+from services.hermes.skills import run_niche_research_for_account, run_visual_performance_skill
 
 logger = logging.getLogger(__name__)
 
 
+def _is_transient_gemini_error(e: BaseException) -> bool:
+    """Classifies whether an exception from Gemini API is transient (quota exceeded 429,
+    server error 5xx, or network/read timeout) and eligible for model fallback.
+    Any other error (400, 403, ...) would fail the same way on every model."""
+    if isinstance(e, (errors.ServerError, httpx.TimeoutException)):
+        return True
+    return isinstance(e, errors.ClientError) and e.code == 429
+
+
 class _FallbackGenerativeModel:
     """Wraps client.models.generate_content, retrying with the next name in
-    PREFERRED_GEMINI_MODELS on a 429 (quota exceeded) ClientError — e.g. when
-    the preferred (pro) model has no free-tier quota on a given project but the
-    fallback (flash) one does. Once a model name succeeds, sticks with it for the
-    rest of the turn loop instead of re-trying the higher-tier model every turn."""
+    PREFERRED_GEMINI_MODELS on a transient error (429 quota, any 5xx, or a timeout)
+    — e.g. when the preferred (pro) model has no quota or Google's server is
+    unavailable but the fallback (flash) one answers. Each call is bounded by
+    HERMES_GEMINI_TIMEOUT_S (default 90 s). Once a model name succeeds, later turns
+    start from it and only move further down the list — never back up to a
+    higher-tier model already discarded."""
 
     def __init__(self, system_instruction: str, tools: Any, model_names: Optional[List[str]] = None):
         self._system_instruction = system_instruction
@@ -42,9 +56,11 @@ class _FallbackGenerativeModel:
         self._tools = [types.Tool(function_declarations=tools)] if tools else None
         self._model_names = model_names or PREFERRED_GEMINI_MODELS
         self._resolved_name: Optional[str] = None
+        self._timeout_ms = int(float(os.environ.get("HERMES_GEMINI_TIMEOUT_S", "90")) * 1000)
 
     def generate_content(self, history):
-        candidates = [self._resolved_name] if self._resolved_name else self._model_names
+        start = self._model_names.index(self._resolved_name) if self._resolved_name else 0
+        candidates = self._model_names[start:]
         last_error: Optional[Exception] = None
         client = get_gemini_client()
         config = types.GenerateContentConfig(
@@ -53,17 +69,28 @@ class _FallbackGenerativeModel:
             # Keep manual control of the turn loop (tool dispatch via ToolBridge) —
             # the SDK's automatic function calling would short-circuit that.
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            http_options=types.HttpOptions(timeout=self._timeout_ms),
         )
-        for name in candidates:
+        for i, name in enumerate(candidates):
+            t0 = time.monotonic()
             try:
                 response = client.models.generate_content(model=name, contents=history, config=config)
-                self._resolved_name = name
-                return response
-            except errors.ClientError as e:
+            except Exception as e:
+                if not _is_transient_gemini_error(e):
+                    raise
                 last_error = e
-                if e.code == 429:
-                    continue
-                raise
+                next_name = candidates[i + 1] if i + 1 < len(candidates) else None
+                logger.warning(
+                    "hermes_gemini_fallback model=%s cause=%s latency_ms=%d next=%s",
+                    name, type(e).__name__, int((time.monotonic() - t0) * 1000), next_name,
+                )
+                continue
+            logger.info(
+                "hermes_gemini_ok model=%s latency_ms=%d",
+                name, int((time.monotonic() - t0) * 1000),
+            )
+            self._resolved_name = name
+            return response
         raise last_error
 
 # Tool names whose dispatch results get recorded as agent_decisions (design.md
@@ -112,7 +139,8 @@ async def _dispatch_turn(
     bridge: ToolBridge,
     account_id: int,
     on_progress: Optional[Callable] = None,
-    campaign_focus: str = ""
+    campaign_focus: str = "",
+    exclude_used_media: bool = False,
 ) -> tuple:
     """Parses a Gemini response into function_calls/text, dispatches each function call
     through the ToolBridge, and builds the response Part list for the next turn's
@@ -149,10 +177,14 @@ async def _dispatch_turn(
             result = {"error": str(e)}
             ok = False
 
-        # Fase 6: cuando hay una campaña activa con foco definido, reordena el listado
-        # de Drive por relevancia antes de que Gemini elija imágenes con él.
-        if tool_name == "drive_list_files" and campaign_focus and isinstance(result, list):
-            result = _rank_drive_files_by_focus(result, campaign_focus, account_id)
+        # Deduplicación y ranking de archivos de Drive
+        if tool_name == "drive_list_files" and isinstance(result, list):
+            if exclude_used_media:
+                count_from_drive = len(result)
+                result = _filter_unavailable_drive_files(result, account_id)
+                if not result:
+                    _log_empty_drive_result(count_from_drive, account_id)
+            result = _rank_drive_files(result, campaign_focus, account_id)
 
         dispatched.append((tool_name, tool_args, result))
 
@@ -291,38 +323,108 @@ async def _maybe_refresh_memory_summary(account_id: int) -> None:
     }).eq("id", account_id).execute()
 
 
-def _rank_drive_files_by_focus(files: List[Any], focus_text: str, account_id: int) -> List[Any]:
-    """Fase 6: reordena (estable) un resultado de drive_list_files por solapamiento de
-    palabras clave entre el foco semanal de la campaña y el análisis visual ya
-    generado de cada imagen (visual_analyses.gemini_description: theme / raw_description
-    / mood). Las imágenes sin análisis o con solape 0 mantienen su orden de llegada,
-    detrás de las que sí encajan. Nunca lanza — si algo falla, devuelve `files` igual."""
+def _drive_file_id(f: Any) -> Optional[str]:
+    """Extrae el id de Drive de un dict de archivo."""
+    if not isinstance(f, dict):
+        return None
+    return f.get("id") or f.get("file_id") or f.get("drive_file_id")
+
+
+def _filter_unavailable_drive_files(files: List[Any], account_id: int) -> List[Any]:
+    """Filtra imágenes de Drive ya comprometidas en posts (draft/scheduled/published)
+    o en slots de propuestas (pending_approval/approved). Nunca lanza excepción."""
     try:
-        if not focus_text or not isinstance(files, list) or len(files) < 2:
+        if not isinstance(files, list):
+            return files
+        supabase = get_supabase_admin_client()
+
+        # Posts comprometidos
+        post_rows = supabase.table("posts")\
+            .select("drive_file_id")\
+            .eq("instagram_account_id", account_id)\
+            .in_("status", ["draft", "scheduled", "published"])\
+            .not_.is_("drive_file_id", "null")\
+            .execute().data or []
+        used_ids = {r["drive_file_id"] for r in post_rows if r.get("drive_file_id")}
+
+        # Propuestas activas (pending/approved)
+        prop_rows = supabase.table("content_proposals")\
+            .select("slots")\
+            .eq("account_id", str(account_id))\
+            .in_("status", ["pending_approval", "approved"])\
+            .execute().data or []
+        for prop in prop_rows:
+            slots = prop.get("slots") or []
+            for slot in slots:
+                if isinstance(slot, dict) and slot.get("image_id"):
+                    used_ids.add(slot["image_id"])
+
+        return [f for f in files if _drive_file_id(f) not in used_ids]
+    except Exception as e:
+        logger.warning(f"Error filtering unavailable drive files for account {account_id}: {e}")
+        return files
+
+
+def _log_empty_drive_result(count_from_drive: int, account_id: int) -> None:
+    """Se llama cuando, en una sesión de planificación, la lista de Drive queda vacía
+    tras el filtro de deduplicación. Distingue dos causas para que el operador pueda
+    diagnosticar por qué Hermes no propuso nada esta semana:
+      - no había imágenes en la carpeta de Drive
+      - había imágenes, pero todas ya están comprometidas en posts o propuestas activas
+    No cambia el flujo: el modelo termina limpio con una lista vacía en cualquier caso."""
+    if count_from_drive == 0:
+        logger.info("hermes_drive_empty=no_images_in_drive account_id=%s", account_id)
+    else:
+        logger.info(
+            "hermes_drive_empty=all_images_already_used account_id=%s filtered_out=%s",
+            account_id,
+            count_from_drive,
+        )
+
+
+def _rank_drive_files(files: List[Any], focus_text: Optional[str], account_id: int) -> List[Any]:
+    """Reordena una lista de archivos de Drive combinando el solapamiento léxico con el foco
+    de campaña y el aesthetic_score (1-10) del análisis visual. Orden estable. Nunca lanza."""
+    try:
+        if not isinstance(files, list) or len(files) < 2:
             return files
         supabase = get_supabase_admin_client()
         rows = supabase.table("visual_analyses")\
             .select("drive_file_id, gemini_description")\
             .eq("account_id", account_id)\
             .execute().data or []
-        blob_by_file: Dict[str, str] = {}
+
+        info_by_file: Dict[str, Dict[str, Any]] = {}
         for row in rows:
             desc = row.get("gemini_description") or {}
-            blob_by_file[row.get("drive_file_id")] = " ".join(
+            blob = " ".join(
                 str(desc.get(k, "")) for k in ("theme", "raw_description", "mood")
             ).lower()
-        focus_tokens = set(re.findall(r"\w{4,}", focus_text.lower()))
-        if not focus_tokens:
-            return files
+            aesthetic = desc.get("aesthetic_score", 5)
+            try:
+                aesthetic_score = int(aesthetic)
+            except (ValueError, TypeError):
+                aesthetic_score = 5
+            info_by_file[row.get("drive_file_id")] = {
+                "blob": blob,
+                "aesthetic_score": aesthetic_score,
+            }
+
+        focus_tokens = set(re.findall(r"\w{4,}", focus_text.lower())) if focus_text else set()
 
         def _score(f: Any) -> int:
-            file_id = f.get("id") or f.get("file_id") or f.get("drive_file_id") if isinstance(f, dict) else None
-            blob = blob_by_file.get(file_id, "")
-            return sum(1 for t in focus_tokens if t in blob) if blob else 0
+            file_id = _drive_file_id(f)
+            info = info_by_file.get(file_id, {"blob": "", "aesthetic_score": 5})
+            blob = info.get("blob", "")
+            overlap = sum(1 for t in focus_tokens if t in blob) if blob and focus_tokens else 0
+            return (overlap * 2) + info.get("aesthetic_score", 5)
 
         return [f for _, f in sorted(enumerate(files), key=lambda pair: (-_score(pair[1]), pair[0]))]
     except Exception:
         return files
+
+
+_rank_drive_files_by_focus = _rank_drive_files
 
 
 def _schedule_disagreement(configured_best_times: List[Any], empirical: Dict[str, Any]) -> Optional[str]:
@@ -460,8 +562,29 @@ async def run_session(account_id: int) -> HermesSessionResult:
     # so this same session benefits from the latest corrections immediately.
     await _maybe_refresh_memory_summary(account_id)
 
+    # Auto-inyección de inteligencia previa (nicho y rendimiento visual)
+    niche_brief = None
+    try:
+        niche_res = run_niche_research_for_account(account_id)
+        if isinstance(niche_res, dict):
+            niche_brief = niche_res.get("brief")
+    except Exception as e:
+        logger.warning(f"Error auto-inyectando investigación de nicho para cuenta {account_id}: {e}")
+
+    visual_perf_summary = None
+    try:
+        visual_res = run_visual_performance_skill(account_id)
+        if isinstance(visual_res, dict):
+            visual_perf_summary = visual_res.get("summary")
+    except Exception as e:
+        logger.warning(f"Error auto-inyectando rendimiento visual para cuenta {account_id}: {e}")
+
     # 2. Get system prompt (prompts.py)
-    system_prompt = get_system_prompt(account_id)
+    system_prompt = get_system_prompt(
+        account_id,
+        niche_brief=niche_brief,
+        visual_perf_summary=visual_perf_summary,
+    )
     
     # 3. Save system prompt to memory
     append_turn(account_id, session_id, "system", content=system_prompt)
@@ -502,7 +625,9 @@ async def run_session(account_id: int) -> HermesSessionResult:
             return HermesSessionResult(error=f"gemini_error: {str(e)}")
             
         function_calls, model_parts, tool_responses, dispatched = await _dispatch_turn(
-            response, bridge, account_id, campaign_focus=session_campaign_focus
+            response, bridge, account_id,
+            campaign_focus=session_campaign_focus,
+            exclude_used_media=True,
         )
 
         append_turn(
