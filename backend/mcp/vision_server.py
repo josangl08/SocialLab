@@ -1,9 +1,9 @@
 from typing import Optional, Dict, Any
 import base64
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from services.gemini_service import analyze_image_vision
 
-mcp = FastMCP("Vision Server")
+mcp = MCPServer("Vision Server")
 
 @mcp.tool()
 async def vision_analyze_image(

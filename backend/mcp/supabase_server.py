@@ -1,13 +1,13 @@
 import logging
 from datetime import datetime, timedelta, date
 from typing import Optional, List, Dict, Any
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import CalendarSlot
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP("Supabase Database Server")
+mcp = MCPServer("Supabase Database Server")
 
 @mcp.tool()
 def supabase_get_posts(instagram_account_id: int, limit: int = 10) -> List[Dict[str, Any]]:

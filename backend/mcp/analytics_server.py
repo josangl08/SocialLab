@@ -1,9 +1,9 @@
 from typing import Dict, List
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from database.supabase_client import get_supabase_admin_client
 from services.analytics.analytics_service import AnalyticsService
 
-mcp = FastMCP("Analytics Server")
+mcp = MCPServer("Analytics Server")
 
 @mcp.tool()
 def analytics_get_empirical_scheduling_data(account_id: int, days: int = 90) -> Dict:

@@ -1,12 +1,12 @@
 from typing import Dict
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from services.hermes.skills import (
     run_visual_performance_skill,
     run_niche_research_for_account,
     VISUAL_PERFORMANCE_SKILL,
 )
 
-mcp = FastMCP("Hermes Skills Server")
+mcp = MCPServer("Hermes Skills Server")
 
 @mcp.tool()
 def hermes_run_skill(skill_name: str, account_id: int, force_refresh: bool = False) -> Dict:

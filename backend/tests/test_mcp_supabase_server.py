@@ -375,9 +375,9 @@ async def test_supabase_get_posts_via_mcp():
 
         response = await mcp.call_tool("supabase_get_posts", {"instagram_account_id": 123})
         
-        assert len(response) == 1
-        assert response[0].type == "text"
-        assert "1" in response[0].text
+        assert len(response.content) == 1
+        assert response.content[0].type == "text"
+        assert "1" in response.content[0].text
 
 
 def test_supabase_update_post_schedule():
@@ -436,9 +436,9 @@ async def test_supabase_update_post_schedule_via_mcp():
             "scheduled_at": "2026-07-30T15:00:00Z"
         })
         
-        assert len(response) == 1
-        assert response[0].type == "text"
-        assert "10" in response[0].text
+        assert len(response.content) == 1
+        assert response.content[0].type == "text"
+        assert "10" in response.content[0].text
 
 
 @pytest.mark.asyncio
@@ -457,7 +457,7 @@ async def test_supabase_update_post_image_via_mcp():
             "drive_file_id": "drive_abc"
         })
         
-        assert len(response) == 1
-        assert response[0].type == "text"
-        assert "10" in response[0].text
+        assert len(response.content) == 1
+        assert response.content[0].type == "text"
+        assert "10" in response.content[0].text
 

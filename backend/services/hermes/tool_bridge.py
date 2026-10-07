@@ -3,14 +3,30 @@ from typing import List, Dict, Any, Optional
 from google.genai import types
 
 
-def _unwrap_mcp_result(result: Any) -> Any:
-    """FastMCP's call_tool() always wraps the tool's real return value in a list
-    of TextContent (JSON-encoded text), even for in-process calls — a dict becomes
-    one TextContent, a list becomes one TextContent per element. Left unwrapped,
-    this raw MCP wire format leaks into Gemini's function response and blows up
-    with "Object of type TextContent is not JSON serializable". Reconstruct the
-    original Python value the tool actually returned.
+def _tool_schema(tool: Any, attr: str) -> Dict[str, Any]:
+    schema = getattr(tool, attr, None)
+    return schema if isinstance(schema, dict) else {}
+
+
+def _unwrap_mcp_result(result: Any, output_schema: Optional[Dict[str, Any]] = None) -> Any:
+    """MCPServer.call_tool() returns a CallToolResult (MCP wire format), even for
+    in-process calls. Left unwrapped, it leaks into Gemini's function response and
+    blows up with "Object of type TextContent is not JSON serializable". Reconstruct
+    the original Python value the tool actually returned.
+
+    structured_content is preferred: it is the only form that distinguishes a
+    one-element list from a dict, and None from []. MCP wraps non-object return
+    types as {"result": ...}, detectable from the tool's output_schema.
     """
+    structured = getattr(result, "structured_content", None)
+    if structured is not None:
+        if set((output_schema or {}).get("properties", {})) == {"result"}:
+            return structured.get("result")
+        return structured
+
+    if hasattr(result, "content"):
+        result = result.content
+
     if not isinstance(result, list):
         return result
 
@@ -89,8 +105,8 @@ class ToolBridge:
                     continue
                 self.tools_map[tool.name] = (server, tool)
 
-                # inputSchema is a dict representing the JSON Schema
-                schema_dict = getattr(tool, "inputSchema", {})
+                # input_schema is a dict representing the JSON Schema
+                schema_dict = _tool_schema(tool, "input_schema")
                 defs = schema_dict.get("$defs", {})
 
                 properties = schema_dict.get("properties", {})
@@ -126,8 +142,7 @@ class ToolBridge:
         actual_args = dict(arguments)
         
         # Check if the original input schema had account_id or instagram_account_id
-        schema_dict = getattr(tool, "inputSchema", {})
-        properties = schema_dict.get("properties", {})
+        properties = _tool_schema(tool, "input_schema").get("properties", {})
         
         if "account_id" in properties:
             actual_args["account_id"] = account_id
@@ -135,4 +150,4 @@ class ToolBridge:
             actual_args["instagram_account_id"] = account_id
             
         result = await server.call_tool(name, actual_args)
-        return _unwrap_mcp_result(result)
+        return _unwrap_mcp_result(result, _tool_schema(tool, "output_schema"))

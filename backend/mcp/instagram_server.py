@@ -1,8 +1,8 @@
 from typing import Optional, List, Dict
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from services.publisher.instagram_publisher import InstagramPublisher
 
-mcp = FastMCP("Instagram Publisher Server")
+mcp = MCPServer("Instagram Publisher Server")
 
 @mcp.tool()
 def instagram_publish_post(

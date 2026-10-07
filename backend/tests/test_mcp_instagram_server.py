@@ -61,6 +61,6 @@ async def test_instagram_publish_post_via_mcp():
             "instagram_account_id": 99
         })
         
-        assert len(response) == 1
-        assert response[0].type == "text"
-        assert "123" in response[0].text
+        assert len(response.content) == 1
+        assert response.content[0].type == "text"
+        assert "123" in response.content[0].text

@@ -63,9 +63,9 @@ async def test_analytics_get_empirical_scheduling_data_via_mcp():
 
         response = await mcp.call_tool("analytics_get_empirical_scheduling_data", {"account_id": 123})
 
-        assert len(response) == 1
-        assert response[0].type == "text"
-        assert "has_data" in response[0].text
+        assert len(response.content) == 1
+        assert response.content[0].type == "text"
+        assert "has_data" in response.content[0].text
 
 
 def test_analytics_get_visual_performance_data_returns_raw_rows():

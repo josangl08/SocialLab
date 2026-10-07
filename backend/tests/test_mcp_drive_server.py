@@ -36,6 +36,6 @@ async def test_drive_list_files_via_mcp():
 
         response = await mcp.call_tool("drive_list_files", {"user_id": "user_123"})
         
-        assert len(response) == 1
-        assert response[0].type == "text"
-        assert "file.jpg" in response[0].text
+        assert len(response.content) == 1
+        assert response.content[0].type == "text"
+        assert "file.jpg" in response.content[0].text

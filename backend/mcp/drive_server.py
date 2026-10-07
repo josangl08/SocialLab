@@ -1,8 +1,8 @@
 from typing import Optional, List, Dict
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from services.google_drive_connector import get_drive_connector
 
-mcp = FastMCP("Google Drive Server")
+mcp = MCPServer("Google Drive Server")
 
 @mcp.tool()
 def drive_list_files(
