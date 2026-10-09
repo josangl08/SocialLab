@@ -1,0 +1,310 @@
+{
+  "dealbreakers": [
+    "stop scrolling",
+    "hola a todos",
+    "no vas a creer",
+    "espera",
+    "atención",
+    "atencion",
+    "hey chicos",
+    "muy buenas",
+    "mira esto",
+    "no te pierdas esto"
+  ],
+  "formulas": [
+    {
+      "id": 1,
+      "name": "Pregunta contraria / provocadora",
+      "template": "¿Y si todo lo que te dijeron sobre [creencia común] fuera mentira?",
+      "patterns": [
+        "^¿?[yY] si (todo|lo que|te dijera)",
+        "^¿?[pP]or qué sigues creyendo que",
+        "^¿?[sS]eguro que necesitas"
+      ],
+      "best_for": ["commercial_campaign", "personal_storyline"]
+    },
+    {
+      "id": 2,
+      "name": "Afirmación audaz / polarizante",
+      "template": "La mayoría de la gente hace [X] completamente mal.",
+      "patterns": [
+        "^(la mayoría|el 90%|el 99%|casi todos) (hace|cree|falla|está)",
+        "^[dD]eja de perder el tiempo en",
+        "^[eE]l gran error de",
+        "^[nN]adie habla de esto"
+      ],
+      "best_for": ["commercial_campaign"]
+    },
+    {
+      "id": 3,
+      "name": "Pérdida cuantificada",
+      "template": "Perdí [Cifra/Tiempo] por [Error/Causa] que nadie me avisó.",
+      "patterns": [
+        "^[pP]erdí (\\d+|[0-9]+|€|\\$)",
+        "^[mM]e costó (\\d+|[0-9]+|€|\\$)",
+        "^[cC]ómo perdí",
+        "^[eE]l error que me costó"
+      ],
+      "best_for": ["commercial_campaign"]
+    },
+    {
+      "id": 4,
+      "name": "Ganancia cuantificada / Resultado específico",
+      "template": "Cómo conseguí [Resultado medible] en [Tiempo récord] sin [Obstáculo].",
+      "patterns": [
+        "^[cC]ómo (conseguí|logré|generé|alcancé) (\\d+|[0-9]+)",
+        "^(de 0 a|de 0 a \\d+)",
+        "^(\\d+|[0-9]+) (euros|dólares|clientes|seguidores|leads) en"
+      ],
+      "best_for": ["commercial_campaign"]
+    },
+    {
+      "id": 5,
+      "name": "Micro-historia cotidiana",
+      "template": "Eran las [Hora/Momento], [Situación] y estuve a punto de [Acción].",
+      "patterns": [
+        "^[eE]ran las \\d+",
+        "^[hH]ace (un año|dos años|unos meses|días)",
+        "^[tT]odo empezó cuando",
+        "^[eE]l día que"
+      ],
+      "best_for": ["personal_storyline"]
+    },
+    {
+      "id": 6,
+      "name": "Dato impactante / Estadística",
+      "template": "El [Porcentaje]% de [Audiencia] comete este fallo sin saberlo.",
+      "patterns": [
+        "^[eE]l (\\d+|[0-9]+)% de",
+        "^\\d+ de cada \\d+",
+        "^[sS]olo el (\\d+|[0-9]+)%"
+      ],
+      "best_for": ["commercial_campaign"]
+    },
+    {
+      "id": 7,
+      "name": "Error común / Lo que estás haciendo mal",
+      "template": "3 errores que te impiden [Logro] (y cómo arreglarlos).",
+      "patterns": [
+        "^\\d+ errores que",
+        "^[eE]l mayor error al",
+        "^[sS]i estás cometiendo este error",
+        "^[dD]eja de cometer"
+      ],
+      "best_for": ["commercial_campaign", "personal_storyline"]
+    },
+    {
+      "id": 8,
+      "name": "Secreto de la industria / Lo que nadie te cuenta",
+      "template": "Lo que nadie en [Industria/Sector] quiere que sepas sobre [Tema].",
+      "patterns": [
+        "^[lL]o que nadie te cuenta",
+        "^[lL]o que las marcas no dicen",
+        "^[eE]l secreto de",
+        "^[lL]o que aprendí detrás de"
+      ],
+      "best_for": ["commercial_campaign"]
+    },
+    {
+      "id": 9,
+      "name": "Antes vs. Después",
+      "template": "De [Estado inicial vulnerable] a [Estado deseado alcanzado] en [Tiempo].",
+      "patterns": [
+        "^[dD]e .+ a .+ en",
+        "^[aA]ntes vs [dD]espués",
+        "^[aA]sí cambió mi",
+        "^[pP]asé de"
+      ],
+      "best_for": ["personal_storyline", "commercial_campaign"]
+    },
+    {
+      "id": 10,
+      "name": "La verdad incómoda",
+      "template": "Una verdad incómoda sobre [Tema]: [Afirmación cruda].",
+      "patterns": [
+        "^[uU]na verdad incómoda",
+        "^[nN]o te va a gustar leer esto",
+        "^[lL]a dolorosa verdad",
+        "^[hH]ablemos de lo que nadie quiere"
+      ],
+      "best_for": ["personal_storyline", "commercial_campaign"]
+    },
+    {
+      "id": 11,
+      "name": "Si tuviera que empezar de cero",
+      "template": "Si tuviera que empezar desde cero hoy, haría solo estas [N] cosas.",
+      "patterns": [
+        "^[sS]i tuviera que empezar",
+        "^[sS]i volviera a empezar",
+        "^[sS]i empezara de cero"
+      ],
+      "best_for": ["commercial_campaign", "personal_storyline"]
+    },
+    {
+      "id": 12,
+      "name": "Cómo logré [X] sin [Y]",
+      "template": "Cómo logré [Meta deseada] sin [Obstáculo temido / Método tradicional].",
+      "patterns": [
+        "^[cC]ómo .+ sin (invertir|gastar|publicar|usar|morir|matarme)",
+        "^[lL]ogré .+ sin"
+      ],
+      "best_for": ["commercial_campaign"]
+    },
+    {
+      "id": 13,
+      "name": "Deja de hacer [Error]",
+      "template": "Deja de hacer [Hábito común] si quieres [Resultado].",
+      "patterns": [
+        "^[dD]eja de (hacer|usar|publicar|creer|comprar|intentar)",
+        "^[pP]ara de hacer"
+      ],
+      "best_for": ["commercial_campaign"]
+    },
+    {
+      "id": 14,
+      "name": "Framework simple / Regla de los pasos",
+      "template": "La regla de los [N] pasos para dominar [Habilidad/Tema].",
+      "patterns": [
+        "^[lL]a regla de( los)? \\d+",
+        "^[eE]l método de \\d+ pasos",
+        "^[eE]l framework que uso"
+      ],
+      "best_for": ["commercial_campaign"]
+    },
+    {
+      "id": 15,
+      "name": "Mi mayor lección",
+      "template": "La lección más cara que aprendí tras [N años / experiencia].",
+      "patterns": [
+        "^[lL]a mayor lección",
+        "^[lL]o más importante que aprendí",
+        "^[uU]na lección que tardé"
+      ],
+      "best_for": ["personal_storyline"]
+    },
+    {
+      "id": 16,
+      "name": "Por qué el 99% falla",
+      "template": "Por qué el 99% de [Personas] fracasa al intentar [Meta].",
+      "patterns": [
+        "^[pP]or qué el (90%|95%|99%|la mayoría) (fracasa|falla|no lo consigue)",
+        "^[pP]or qué casi nadie logra"
+      ],
+      "best_for": ["commercial_campaign"]
+    },
+    {
+      "id": 17,
+      "name": "El atajo / Truco poco conocido",
+      "template": "El pequeño truco en [Herramienta/Proceso] que casi nadie utiliza.",
+      "patterns": [
+        "^[eE]l truco (poco conocido|secreto|que nadie usa)",
+        "^[eE]l hack que cambió",
+        "^[uU]n pequeño truco"
+      ],
+      "best_for": ["commercial_campaign"]
+    },
+    {
+      "id": 18,
+      "name": "Confesión / Vulnerabilidad personal",
+      "template": "Tengo que admitir algo: [Confesión honesta sobre fracaso o duda].",
+      "patterns": [
+        "^[tT]engo que admitir",
+        "^[uU]na confesión honesta",
+        "^[nN]unca había contado esto",
+        "^[fF]racasé estrepitosamente"
+      ],
+      "best_for": ["personal_storyline"]
+    },
+    {
+      "id": 19,
+      "name": "Visual Hook / Detalle inadvertido",
+      "template": "Mira detenidamente el detalle en [Lugar/Momento]: no es casualidad.",
+      "patterns": [
+        "^[mM]ira (detenidamente|atentamente|bien)",
+        "^[fF]íjate en",
+        "^[nN]o mires solo",
+        "^[eE]l detalle que nadie ve"
+      ],
+      "best_for": ["personal_storyline", "commercial_campaign"]
+    },
+    {
+      "id": 20,
+      "name": "Solución a un dolor específico",
+      "template": "Si te cuesta [Problema frecuente], guarda esto antes de seguir.",
+      "patterns": [
+        "^[sS]i te cuesta",
+        "^[sS]i estás cansado de",
+        "^[sS]i sufres con",
+        "^[sS]i no consigues"
+      ],
+      "best_for": ["commercial_campaign"]
+    },
+    {
+      "id": 21,
+      "name": "Desafío / Experimento",
+      "template": "Probé [Método poco común] durante [N días] y esto fue lo que pasó.",
+      "patterns": [
+        "^[pP]robé .+ durante \\d+ días",
+        "^[hH]ice un experimento",
+        "^[qQ]ué pasó cuando probé"
+      ],
+      "best_for": ["personal_storyline", "commercial_campaign"]
+    },
+    {
+      "id": 22,
+      "name": "Comparación inesperada / Analogía",
+      "template": "[Tema A] es exactamente como [Tema B], y aquí te explico por qué.",
+      "patterns": [
+        "^.+ es exactamente como",
+        "^¿?[qQ]ué tienen en común",
+        "^[lL]a analogía perfecta"
+      ],
+      "best_for": ["personal_storyline", "commercial_campaign"]
+    },
+    {
+      "id": 23,
+      "name": "La única herramienta necesaria",
+      "template": "La única [Herramienta/Hábito] que realmente necesitas para [Resultado].",
+      "patterns": [
+        "^[lL]a única herramienta",
+        "^[eE]l único hábito",
+        "^[sS]olo necesitas una cosa"
+      ],
+      "best_for": ["commercial_campaign"]
+    },
+    {
+      "id": 24,
+      "name": "Predicción / Futuro del nicho",
+      "template": "En los próximos [N meses/años], [Sector] cambiará para siempre.",
+      "patterns": [
+        "^[eE]n los próximos (meses|años)",
+        "^[eE]l futuro de",
+        "^[pP]redicción para",
+        "^[aA]sí va a cambiar"
+      ],
+      "best_for": ["commercial_campaign"]
+    },
+    {
+      "id": 25,
+      "name": "Desmitificando un mito",
+      "template": "El gran mito de que necesitas [Cosa innecesaria] para [Meta].",
+      "patterns": [
+        "^[eE]l mito de( que)?",
+        "^[dD]esmintiendo el mayor mito",
+        "^[nN]o necesitas .+ para"
+      ],
+      "best_for": ["commercial_campaign", "personal_storyline"]
+    },
+    {
+      "id": 26,
+      "name": "Guía paso a paso definitiva",
+      "template": "Guía completa para [Meta específica] en [N sencillos pasos].",
+      "patterns": [
+        "^[gG]uía (definitiva|completa|paso a paso)",
+        "^[cC]ómo dominar .+ en \\d+ pasos",
+        "^[pP]aso a paso para"
+      ],
+      "best_for": ["commercial_campaign"]
+    }
+  ]
+}

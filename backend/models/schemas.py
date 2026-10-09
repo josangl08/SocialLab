@@ -237,4 +237,140 @@ class DriveToken(BaseModel):
     connected_at: Optional[datetime] = None
 
 
+# --- Modelos de Motor de Calidad de Contenido (Content Quality Engine) ---
+
+class LintRequest(BaseModel):
+    caption: str
+    keywords: Optional[list[str]] = None
+    format: Optional[Literal["post", "reel", "carousel"]] = "post"
+
+
+class SlopHit(BaseModel):
+    term: str
+    index: int
+    suggestion: str
+
+
+class SlopReport(BaseModel):
+    score: int = 0
+    hits: list[SlopHit] = []
+    invisible_chars: int = 0
+    em_dash_count: int = 0
+
+
+class HookReport(BaseModel):
+    formula_id: Optional[int] = None
+    formula_name: Optional[str] = None
+    score: int = 0
+    dealbreakers: list[str] = []
+
+
+class QualityWarning(BaseModel):
+    code: str
+    message: str
+
+
+class QualityReport(BaseModel):
+    visible_text: str
+    visible_length: int
+    truncated: bool
+    hashtag_count: int
+    hashtag_limit: int = 5
+    hashtags_over_limit: list[str] = []
+    keywords_missing_in_visible: list[str] = []
+    slop: SlopReport = Field(default_factory=SlopReport)
+    hook: HookReport = Field(default_factory=HookReport)
+    warnings: list[QualityWarning] = []
+
+
+class HumanizeRequest(BaseModel):
+    text: str
+    language: Optional[Literal["es", "en"]] = "es"
+    extra_banned: Optional[list[str]] = None
+
+
+class HumanizeChange(BaseModel):
+    from_text: str = Field(..., alias="from")
+    to: str
+    rule: str
+
+    class Config:
+        populate_by_name = True
+
+
+class HumanizeResponse(BaseModel):
+    text: str
+    changes: list[HumanizeChange] = []
+
+
+class HookScoreRequest(BaseModel):
+    hook: str
+    strategy_mode: Optional[Literal["commercial_campaign", "personal_storyline"]] = None
+
+
+class HookAlternative(BaseModel):
+    formula_id: int
+    name: str
+    template: str
+
+
+class HookFormula(BaseModel):
+    id: int
+    name: str
+    template: str
+    best_for: list[str] = []
+
+
+class HookScoreResponse(BaseModel):
+    formula_id: Optional[int] = None
+    formula_name: Optional[str] = None
+    score: int = 0
+    dealbreakers: list[str] = []
+    alternatives: list[HookAlternative] = []
+
+
+class BeatItemInput(BaseModel):
+    label: str
+    text: str
+
+
+class BeatsRequest(BaseModel):
+    beats: list[BeatItemInput]
+    wpm: Optional[int] = Field(165, gt=0, le=400)
+
+
+class BeatItemOutput(BaseModel):
+    label: str
+    text: Optional[str] = None
+    start_s: float
+    end_s: float
+    duration_s: float
+    alert: Optional[Literal["OVER_4S"]] = None
+
+
+class BeatsResponse(BaseModel):
+    beats: list[BeatItemOutput] = []
+    total_s: float = 0.0
+    loops_to_hook: bool = False
+
+
+class ProfileAuditItem(BaseModel):
+    id: str
+    label: str
+    passed: bool
+    weight: int
+    tip: str
+
+
+class ProfileAuditRequest(BaseModel):
+    account_id: int
+
+
+class ProfileAuditResponse(BaseModel):
+    score: int
+    items: list[ProfileAuditItem] = []
+    bio_rewrite: Optional[str] = None
+
+
+
 

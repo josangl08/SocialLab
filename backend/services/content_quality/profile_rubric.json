@@ -1,0 +1,76 @@
+{
+  "rubric": [
+    {
+      "id": "username_clarity",
+      "label": "Nombre de usuario limpio y memorable",
+      "weight": 8,
+      "tip": "Evita números aleatorios o caracteres especiales excesivos en tu @username."
+    },
+    {
+      "id": "display_name_seo",
+      "label": "Nombre de perfil optimizado para SEO con palabras clave",
+      "weight": 10,
+      "tip": "Incluye tu nicho, profesión o valor diferencial en el campo 'Nombre' para aparecer en búsquedas."
+    },
+    {
+      "id": "profile_photo",
+      "label": "Foto de perfil nítida y reconocible",
+      "weight": 8,
+      "tip": "Usa un retrato de alto contraste centrado o un logotipo legible en tamaño pequeño."
+    },
+    {
+      "id": "bio_value_prop",
+      "label": "Propuesta de valor clara (a quién ayudas y cómo)",
+      "weight": 12,
+      "tip": "Resume en una línea qué beneficio obtiene quien te sigue."
+    },
+    {
+      "id": "bio_authority",
+      "label": "Prueba social o autoridad en la biografía",
+      "weight": 8,
+      "tip": "Menciona resultados cuantificables, años de experiencia, libros o clientes destacados."
+    },
+    {
+      "id": "bio_readability",
+      "label": "Estructura legible con saltos de línea y viñetas",
+      "weight": 8,
+      "tip": "Divide la bio en 3 o 4 líneas cortas fáciles de escanear en móvil."
+    },
+    {
+      "id": "bio_cta",
+      "label": "Llamada a la acción (CTA) orientada al enlace",
+      "weight": 10,
+      "tip": "Indica claramente qué obtendrán al hacer clic en el enlace (recurso gratis, cita, compra)."
+    },
+    {
+      "id": "link_present",
+      "label": "Enlace activo en la biografía",
+      "weight": 10,
+      "tip": "Configura un enlace directo a tu oferta principal o un árbol de enlaces optimizado."
+    },
+    {
+      "id": "link_clarity",
+      "label": "Dominio y destino claros en el enlace",
+      "weight": 6,
+      "tip": "Utiliza un dominio propio o personalizado que transmita seguridad."
+    },
+    {
+      "id": "category_set",
+      "label": "Categoría o sector visible en la cuenta",
+      "weight": 6,
+      "tip": "Activa la etiqueta de categoría profesional o comercial en la configuración de la cuenta."
+    },
+    {
+      "id": "highlights_curated",
+      "label": "Historias destacadas organizadas con portadas coherentes",
+      "weight": 8,
+      "tip": "Crea historias destacadas de Inicio, Servicios, Testimonios y Recursos con portadas uniformes."
+    },
+    {
+      "id": "contact_options",
+      "label": "Botones o información de contacto disponibles",
+      "weight": 6,
+      "tip": "Habilita los botones de contacto (correo, teléfono o mensaje) en el perfil comercial."
+    }
+  ]
+}

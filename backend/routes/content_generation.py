@@ -5,13 +5,25 @@ Integra: PROJECT 1 exports + Template Selector + Image Composer + Caption Genera
 """
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
-from typing import List, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
 import logging
 
 from auth.dependencies import get_current_user, get_user_supabase_client
-from models.schemas import User
+from models.schemas import (
+    User,
+    LintRequest,
+    QualityReport,
+    HumanizeRequest,
+    HumanizeResponse,
+    HookScoreRequest,
+    HookScoreResponse,
+    HookFormula,
+    BeatsRequest,
+    BeatsResponse,
+)
+from services.content_quality import lint_caption, humanize, score_hook, get_hook_formulas, time_beats
 from database.supabase_client import get_supabase_client
 from supabase import Client
 from services.google_drive_connector import get_drive_connector
@@ -401,6 +413,53 @@ async def get_generation_history(
     except Exception as e:
         logger.error(f"❌ Error obteniendo historial: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# Motor de calidad determinista (sin Gemini, sin DB)
+@router.post("/lint", response_model=QualityReport)
+async def lint_content(
+    request: LintRequest,
+    current_user: User = Depends(get_current_user)
+) -> dict:
+    """Informe de calidad de un caption: corte móvil, hashtags, slop y gancho."""
+    return lint_caption(request.caption, keywords=request.keywords, format=request.format or "post")
+
+
+@router.post("/humanize", response_model=HumanizeResponse)
+async def humanize_content(
+    request: HumanizeRequest,
+    current_user: User = Depends(get_current_user)
+) -> dict:
+    """Devuelve el texto limpio de léxico sintético, invisibles y em dashes repetidos."""
+    text, changes = humanize(request.text, language=request.language or "es", extra_banned=request.extra_banned)
+    return {"text": text, "changes": changes}
+
+
+@router.post("/score-hook", response_model=HookScoreResponse)
+async def score_hook_content(
+    request: HookScoreRequest,
+    current_user: User = Depends(get_current_user)
+) -> dict:
+    """Identifica la fórmula del gancho y lo puntúa de 0 a 100."""
+    return score_hook(request.hook, strategy_mode=request.strategy_mode)
+
+
+@router.post("/beats", response_model=BeatsResponse)
+async def time_beats_content(
+    request: BeatsRequest,
+    current_user: User = Depends(get_current_user)
+) -> dict:
+    """Timecodes de cada beat de un guion de Reel a la velocidad de locución indicada."""
+    return time_beats([b.model_dump() for b in request.beats], wpm=request.wpm or 165)
+
+
+@router.get("/hook-formulas", response_model=List[HookFormula])
+async def list_hook_formulas(
+    strategy_mode: Optional[Literal["commercial_campaign", "personal_storyline"]] = None,
+    current_user: User = Depends(get_current_user)
+) -> list:
+    """Catálogo de las 26 fórmulas; las recomendadas para `strategy_mode` primero."""
+    return get_hook_formulas(strategy_mode)
 
 
 # Helper functions
