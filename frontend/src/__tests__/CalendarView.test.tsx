@@ -197,7 +197,7 @@ describe('CalendarView Component', () => {
     });
   });
 
-  test('onSelectSlot navigates to CreatePost with correct date query parameter', async () => {
+  test('onSelectSlot navigates to Content Studio with correct date query parameter', async () => {
     render(<CalendarView />);
 
     await waitFor(() => {
@@ -209,7 +209,7 @@ describe('CalendarView Component', () => {
     fireEvent.click(slotBtn);
 
     expect(mockNavigate).toHaveBeenCalledWith(
-      '/create-post?date=2026-06-30T15:00:00.000Z'
+      `/generate?date=${encodeURIComponent('2026-06-30T15:00:00.000Z')}`
     );
   });
 });

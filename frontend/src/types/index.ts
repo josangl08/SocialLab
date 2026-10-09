@@ -11,6 +11,10 @@ export interface Post {
   is_ai_generated?: boolean | null;
   drive_file_id?: string | null;
   instagram_account_id?: number | null;
+  content_format?: 'post' | 'reel' | 'carousel' | 'story' | null;
+  content_structure?: any;
+  quality_report?: QualityReport | null;
+  matrix_role?: string | null;
 }
 
 export interface InstagramAccount {
@@ -36,6 +40,8 @@ export interface InstagramAccount {
   content_pillars?: string[];
   hashtag_strategy?: string;
   last_agent_sync?: string | null;
+  humanizer_enabled?: boolean;
+  banned_phrases?: string[];
 }
 
 export interface CalendarSlot {
@@ -66,3 +72,135 @@ export interface AgentLog {
   error: string | null;
   duration_ms: number | null;
 }
+
+// --- Content Studio & Content Quality Types ---
+
+export type StrategyMode = 'commercial_campaign' | 'personal_storyline';
+export type ContentFormat = 'post' | 'reel' | 'carousel' | 'story';
+
+export interface LintRequest {
+  caption: string;
+  keywords?: string[];
+  format?: 'post' | 'reel' | 'carousel';
+}
+
+export interface SlopHit {
+  term: string;
+  index: number;
+  suggestion: string;
+}
+
+export interface SlopReport {
+  score: number;
+  hits: SlopHit[];
+  invisible_chars: number;
+  em_dash_count: number;
+}
+
+export interface HookReport {
+  formula_id?: number | null;
+  formula_name?: string | null;
+  score: number;
+  dealbreakers: string[];
+}
+
+export interface QualityWarning {
+  code: string;
+  message: string;
+}
+
+export interface QualityReport {
+  visible_text: string;
+  visible_length: number;
+  truncated: boolean;
+  hashtag_count: number;
+  hashtag_limit: number;
+  hashtags_over_limit: string[];
+  keywords_missing_in_visible: string[];
+  slop: SlopReport;
+  hook: HookReport;
+  warnings: QualityWarning[];
+}
+
+export interface HumanizeRequest {
+  text: string;
+  language?: 'es' | 'en';
+  extra_banned?: string[];
+}
+
+export interface HumanizeChange {
+  from: string;
+  to: string;
+  rule: string;
+}
+
+export interface HumanizeResponse {
+  text: string;
+  changes: HumanizeChange[];
+}
+
+export interface HookScoreRequest {
+  hook: string;
+  strategy_mode?: StrategyMode;
+}
+
+export interface HookAlternative {
+  formula_id: number;
+  name: string;
+  template: string;
+}
+
+export interface HookFormula {
+  id: number;
+  name: string;
+  template: string;
+  best_for: string[];
+}
+
+export interface HookScoreResponse {
+  formula_id?: number | null;
+  formula_name?: string | null;
+  score: number;
+  dealbreakers: string[];
+  alternatives: HookAlternative[];
+}
+
+export interface BeatItemInput {
+  label: string;
+  text: string;
+}
+
+export interface BeatsRequest {
+  beats: BeatItemInput[];
+  wpm?: number;
+}
+
+export interface BeatItemOutput {
+  label: string;
+  text?: string;
+  start_s: number;
+  end_s: number;
+  duration_s: number;
+  alert?: 'OVER_4S' | null;
+}
+
+export interface BeatsResponse {
+  beats: BeatItemOutput[];
+  total_s: number;
+  loops_to_hook: boolean;
+}
+
+export interface ProfileAuditItem {
+  id: string;
+  label: string;
+  passed: boolean;
+  weight: number;
+  tip: string;
+}
+
+export interface ProfileAuditResponse {
+  score: number;
+  items: ProfileAuditItem[];
+  bio_rewrite?: string | null;
+}
+

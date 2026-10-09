@@ -55,6 +55,8 @@ def test_get_instagram_accounts(mock_admin_supabase):
     assert response.json()[0]["username"] == "test_user_1"
     assert response.json()[0]["telegram_chat_id"] == "11111"
     assert response.json()[0]["drive_folder_id"] == "folder-111"
+    selected_columns = mock_admin_supabase.table.return_value.select.call_args[0][0]
+    assert "sector" in selected_columns
 
 def test_update_account_config_success(mock_admin_supabase):
     mock_select = MagicMock()

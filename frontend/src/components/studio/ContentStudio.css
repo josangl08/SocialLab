@@ -1,0 +1,13 @@
+.content-studio {
+  min-height: calc(100vh - 4rem);
+  color: #f0f2f8;
+}
+
+.account-picker select {
+  min-width: 180px;
+}
+
+.strategy-toggle-wrap button {
+  border-radius: 20px;
+  padding: 0.25rem 0.75rem;
+}

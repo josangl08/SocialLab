@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import CalendarView from '../calendar/CalendarView';
 import PostList from '../posts/PostList';
-import CreatePost from '../posts/CreatePost';
 import EditPostForm from '../posts/EditPostForm';
 import WeeklyProposalPanel from './WeeklyProposalPanel';
 import { MonthlyFocusBanner } from './MonthlyFocusBanner';
@@ -13,9 +12,9 @@ import './PlannerPage.css';
 
 const PlannerPage: React.FC = () => {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [view, setView]               = useState<'calendar' | 'list'>('calendar');
   const [showDrawer, setShowDrawer]   = useState(false);
-  const [drawerDate, setDrawerDate]   = useState('');
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [calendarSignal, setCalendarSignal] = useState(0);
   const [aiTriggering, setAiTriggering] = useState(false);
@@ -75,11 +74,9 @@ const PlannerPage: React.FC = () => {
     }
   }, [token, aiTriggering, isAgentRunning, primaryAccountId]);
 
-  const openDrawer = useCallback((date?: string) => {
-    setEditingPost(null);
-    setDrawerDate(date ?? '');
-    setShowDrawer(true);
-  }, []);
+  const openNewPost = useCallback((date?: string) => {
+    navigate(`/generate${date ? `?date=${encodeURIComponent(date)}` : ''}`);
+  }, [navigate]);
 
   const openEditDrawer = useCallback((post: Post) => {
     setEditingPost(post);
@@ -192,7 +189,7 @@ const PlannerPage: React.FC = () => {
             <i className={`bi ${(aiTriggering || isAgentRunning) ? 'bi-hourglass-split' : 'bi-stars'}`}></i>
             {aiTriggering ? 'Starting...' : isAgentRunning ? 'In progress...' : 'Generate AI Plan'}
           </button>
-          <button className="planner-new-btn" onClick={() => openDrawer()}>
+          <button className="planner-new-btn" onClick={() => openNewPost()}>
             <i className="bi bi-plus-lg"></i>
             New Post
           </button>
@@ -233,7 +230,7 @@ const PlannerPage: React.FC = () => {
             <>
               <MonthlyFocusBanner accountId={primaryAccountId} currentDate={plannerViewDate} />
               <CalendarView
-                onNewPost={openDrawer}
+                onNewPost={openNewPost}
                 onEdit={openEditDrawer}
                 refreshSignal={calendarSignal}
                 onFocusProposalPost={handleFocusProposalPost}
@@ -255,34 +252,25 @@ const PlannerPage: React.FC = () => {
         }
       </div>
 
-      {/* ── Create / Edit drawer ─────────────── */}
-      {showDrawer && (
+      {/* ── Edit drawer ─────────────── */}
+      {showDrawer && editingPost && (
         <div className="planner-drawer-backdrop" onClick={closeDrawer}>
           <div className="planner-drawer" onClick={e => e.stopPropagation()}>
             <div className="planner-drawer-header">
               <span className="planner-drawer-title">
-                <i className={`bi ${editingPost ? 'bi-pencil-square' : 'bi-plus-circle'}`}></i>
-                {editingPost ? 'Edit post' : 'New Post'}
+                <i className="bi bi-pencil-square"></i>
+                Edit post
               </span>
               <button className="planner-drawer-close" onClick={closeDrawer} aria-label="Close">
                 <i className="bi bi-x-lg"></i>
               </button>
             </div>
             <div className="planner-drawer-body">
-              {editingPost ? (
-                <EditPostForm
-                  post={editingPost}
-                  onSave={() => { closeDrawer(); setCalendarSignal(k => k + 1); }}
-                  onCancel={closeDrawer}
-                />
-              ) : (
-                <CreatePost
-                  key={drawerDate}
-                  initialDate={drawerDate || undefined}
-                  onPostCreated={closeDrawer}
-                  onCancel={closeDrawer}
-                />
-              )}
+              <EditPostForm
+                post={editingPost}
+                onSave={() => { closeDrawer(); setCalendarSignal(k => k + 1); }}
+                onCancel={closeDrawer}
+              />
             </div>
           </div>
         </div>

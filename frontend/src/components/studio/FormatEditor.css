@@ -1,0 +1,46 @@
+.format-editor {
+  background: var(--sl-surface, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--sl-border, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+  padding: 1.25rem;
+}
+
+.format-radios {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.format-radio-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--sl-border, rgba(255, 255, 255, 0.08));
+  color: #f0f2f8;
+  border-radius: 8px;
+  padding: 0.4rem 0.875rem;
+  font-size: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  transition: all 0.2s ease;
+}
+
+.format-radio-btn:hover {
+  background: rgba(139, 92, 246, 0.1);
+  border-color: rgba(139, 92, 246, 0.3);
+}
+
+.format-radio-btn.active {
+  background: var(--sl-purple, #8b5cf6);
+  border-color: var(--sl-purple, #8b5cf6);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.media-preview-container {
+  max-width: 240px;
+}
+
+.media-preview-img {
+  width: 100%;
+  max-height: 200px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}

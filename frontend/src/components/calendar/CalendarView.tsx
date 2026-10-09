@@ -149,7 +149,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
   const handleSelectSlot = useCallback(({ start }: { start: Date | string }) => {
     const isoDate = new Date(start).toISOString();
     if (onNewPost) onNewPost(isoDate);
-    else navigate(`/create-post?date=${isoDate}`);
+    else navigate(`/generate?date=${encodeURIComponent(isoDate)}`);
   }, [navigate, onNewPost]);
 
   const handleSelectEvent = useCallback((event: any) => {

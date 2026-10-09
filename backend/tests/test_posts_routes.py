@@ -100,7 +100,7 @@ def test_create_post_with_media_file(mock_supabase, mock_admin_supabase):
     mock_execute.execute.return_value = MagicMock(data=[mock_post])
     mock_supabase.table.return_value.insert.return_value = mock_execute
 
-    mock_supabase.storage.from_.return_value.get_public_url.return_value = mock_post["media_url"]
+    mock_admin_supabase.storage.from_.return_value.get_public_url.return_value = mock_post["media_url"]
 
     response = client.post(
         "/api/posts",
@@ -118,7 +118,7 @@ def test_create_post_with_media_file(mock_supabase, mock_admin_supabase):
     assert response.json()["media_url"] == mock_post["media_url"]
 
     # Assert the raw bytes were passed through to storage upload (media_file.file.read() path)
-    upload_call = mock_supabase.storage.from_.return_value.upload.call_args
+    upload_call = mock_admin_supabase.storage.from_.return_value.upload.call_args
     assert upload_call.args[1] == b"fake binary data"
 
 
@@ -162,6 +162,147 @@ def test_create_post_schedules_telegram_notification(mock_supabase, mock_admin_s
     # BackgroundTasks runs the queued task before TestClient returns the response,
     # so by this point send_approval_message must have fired with (post_id, chat_id, post).
     mock_service_instance.send_approval_message.assert_awaited_once_with(1, "chat-42", mock_post)
+
+
+def test_create_post_draft_notify_telegram_false_no_card(mock_supabase, mock_admin_supabase):
+    mock_post = {
+        "id": 1,
+        "user_id": USER_ID,
+        "content": "Draft without telegram",
+        "media_url": None,
+        "post_type": "post",
+        "status": "draft",
+        "scheduled_at": None,
+        "instagram_account_id": 123,
+        "created_at": "2026-06-27T12:00:00"
+    }
+
+    mock_execute = MagicMock()
+    mock_execute.execute.return_value = MagicMock(data=[mock_post])
+    mock_supabase.table.return_value.insert.return_value = mock_execute
+
+    mock_account_exec = MagicMock()
+    mock_account_exec.execute.return_value = MagicMock(data=[{"telegram_chat_id": "chat-42"}])
+    mock_admin_supabase.table.return_value.select.return_value.eq.return_value = mock_account_exec
+
+    with patch("services.telegram_service.TelegramService") as MockTelegramService:
+        mock_service_instance = MockTelegramService.return_value
+        mock_service_instance.send_approval_message = AsyncMock(return_value=None)
+
+        response = client.post(
+            "/api/posts",
+            data={
+                "content": "Draft without telegram",
+                "post_type": "post",
+                "status": "draft",
+                "instagram_account_id": 123,
+                "notify_telegram": False
+            }
+        )
+
+    assert response.status_code == 200
+    mock_service_instance.send_approval_message.assert_not_called()
+
+
+def test_create_post_scheduled_notify_telegram_false_creates_job(mock_supabase, mock_admin_supabase):
+    from datetime import datetime, timezone, timedelta
+    future_date = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    mock_post = {
+        "id": 2,
+        "user_id": USER_ID,
+        "content": "Scheduled without telegram",
+        "media_url": None,
+        "post_type": "post",
+        "status": "scheduled",
+        "scheduled_at": future_date,
+        "instagram_account_id": 123,
+        "created_at": "2026-06-27T12:00:00"
+    }
+
+    mock_execute = MagicMock()
+    mock_execute.execute.return_value = MagicMock(data=[mock_post])
+    mock_supabase.table.return_value.insert.return_value = mock_execute
+
+    mock_account_exec = MagicMock()
+    mock_account_exec.execute.return_value = MagicMock(data=[{"telegram_chat_id": "chat-42"}])
+    mock_admin_supabase.table.return_value.select.return_value.eq.return_value = mock_account_exec
+
+    with patch("services.telegram_service.TelegramService") as MockTelegramService, \
+         patch("services.scheduler.post_scheduler.PostScheduler") as MockPostScheduler:
+        mock_telegram_instance = MockTelegramService.return_value
+        mock_telegram_instance.send_approval_message = AsyncMock(return_value=None)
+        mock_scheduler_instance = MockPostScheduler.return_value
+
+        response = client.post(
+            "/api/posts",
+            data={
+                "content": "Scheduled without telegram",
+                "post_type": "post",
+                "status": "scheduled",
+                "scheduled_at": future_date,
+                "instagram_account_id": 123,
+                "notify_telegram": False
+            },
+            files={"media_file": ("foto.png", b"img", "image/png")}
+        )
+
+    assert response.status_code == 200
+    mock_telegram_instance.send_approval_message.assert_not_called()
+    mock_scheduler_instance.schedule_post.assert_called_once()
+
+
+def test_create_post_scheduled_notify_telegram_false_missing_or_past_date_422(mock_supabase, mock_admin_supabase):
+    from datetime import datetime, timezone, timedelta
+    mock_account_exec = MagicMock()
+    mock_account_exec.execute.return_value = MagicMock(data=[{"id": 123}])
+    mock_admin_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value = mock_account_exec
+
+    # Missing scheduled_at
+    res1 = client.post(
+        "/api/posts",
+        data={
+            "content": "Scheduled missing date",
+            "post_type": "post",
+            "status": "scheduled",
+            "instagram_account_id": 123,
+            "notify_telegram": False
+        }
+    )
+    assert res1.status_code == 422
+
+    # Past scheduled_at
+    past_date = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    res2 = client.post(
+        "/api/posts",
+        data={
+            "content": "Scheduled past date",
+            "post_type": "post",
+            "status": "scheduled",
+            "scheduled_at": past_date,
+            "instagram_account_id": 123,
+            "notify_telegram": False
+        }
+    )
+    assert res2.status_code == 422
+
+
+def test_create_post_scheduled_notify_telegram_false_without_media_422(mock_supabase, mock_admin_supabase):
+    from datetime import datetime, timezone, timedelta
+    future_date = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+
+    response = client.post(
+        "/api/posts",
+        data={
+            "content": "Scheduled without media",
+            "post_type": "post",
+            "status": "scheduled",
+            "scheduled_at": future_date,
+            "notify_telegram": False
+        }
+    )
+
+    assert response.status_code == 422
+    mock_supabase.table.return_value.insert.assert_not_called()
 
 
 def test_list_posts(mock_supabase):
@@ -227,7 +368,7 @@ def test_update_post(mock_supabase, mock_admin_supabase):
     assert response.json()["content"] == "Updated content"
 
 
-def test_delete_post(mock_supabase):
+def test_delete_post(mock_supabase, mock_admin_supabase):
     mock_select_execute = MagicMock()
     mock_select_execute.execute.return_value = MagicMock(data=[{"id": 1, "media_url": "https://mock.storage.test/drafts/test.png"}])
 
@@ -236,11 +377,11 @@ def test_delete_post(mock_supabase):
 
     mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value = mock_select_execute
     mock_supabase.table.return_value.delete.return_value.eq.return_value = mock_delete_execute
-    mock_supabase.storage.from_().remove = MagicMock(return_value=None)
 
     response = client.delete("/api/posts/1")
 
     assert response.status_code == 204
+    mock_admin_supabase.storage.from_.return_value.remove.assert_called_once()
 
 
 def test_create_post_with_foreign_instagram_account_forbidden(mock_supabase, mock_admin_supabase):
@@ -268,7 +409,7 @@ def test_create_post_with_foreign_instagram_account_forbidden(mock_supabase, moc
     # Assert that insert was never called on supabase table posts
     mock_supabase.table.assert_not_called()
     # Assert that storage upload was never called
-    mock_supabase.storage.from_.assert_not_called()
+    mock_admin_supabase.storage.from_.assert_not_called()
 
 
 def test_update_post_with_foreign_instagram_account_forbidden(mock_supabase, mock_admin_supabase):
@@ -301,9 +442,9 @@ def test_update_post_with_foreign_instagram_account_forbidden(mock_supabase, moc
     # Assert that update was never called
     mock_supabase.table.return_value.update.assert_not_called()
     # Assert that existing media was not removed
-    mock_supabase.storage.from_.return_value.remove.assert_not_called()
+    mock_admin_supabase.storage.from_.return_value.remove.assert_not_called()
     # Assert that new media was not uploaded
-    mock_supabase.storage.from_.return_value.upload.assert_not_called()
+    mock_admin_supabase.storage.from_.return_value.upload.assert_not_called()
 
 
 # ==============================================================================

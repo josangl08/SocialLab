@@ -12,6 +12,7 @@ Las migraciones deben ejecutarse en orden cronológico:
 6. `006_add_missing_ids_and_schema.sql` - **Schema completo** (templates, ai_strategy, etc.)
 20. `020_db_indices_faltantes.sql` - Índices faltantes en content_proposals, visual_analyses, y agent_logs
 32. `032_backfill_hermes_posts_user_id.sql` - Rellena posts.user_id NULL (posts de Hermes creados sin user_id)
+33. `033_content_studio.sql` - Columnas content_format, content_structure, quality_report, matrix_role en posts y humanizer_enabled, banned_phrases en instagram_accounts
 
 ## Cómo Ejecutar
 

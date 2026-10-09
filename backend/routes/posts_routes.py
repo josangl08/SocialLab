@@ -41,9 +41,29 @@ def create_post(
     scheduled_at: Optional[datetime] = Form(None),
     media_file: Optional[UploadFile] = File(None),
     instagram_account_id: Optional[int] = Form(None),
+    notify_telegram: bool = Form(True),
     current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
+    if not notify_telegram and status == 'scheduled':
+        if not scheduled_at:
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Se requiere scheduled_at futuro para programar la publicación."
+            )
+        now = datetime.now(timezone.utc)
+        sched_dt = scheduled_at if scheduled_at.tzinfo is not None else scheduled_at.replace(tzinfo=timezone.utc)
+        if sched_dt <= now:
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="La fecha scheduled_at debe ser en el futuro."
+            )
+        if not media_file:
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Se requiere una imagen o vídeo para programar la publicación."
+            )
+
     if instagram_account_id is not None:
         account_check = admin_supabase.table('instagram_accounts')\
             .select('id').eq('id', instagram_account_id).eq('user_id', current_user.id).execute()
@@ -58,8 +78,8 @@ def create_post(
             folder = folder_map.get(status, 'drafts')
             unique_filename = f"{folder}/{uuid.uuid4()}.{file_extension}"
             file_content = media_file.file.read()
-            supabase.storage.from_("posts").upload(unique_filename, file_content, {"content-type": media_file.content_type})
-            media_url = supabase.storage.from_("posts").get_public_url(unique_filename)
+            admin_supabase.storage.from_("posts").upload(unique_filename, file_content, {"content-type": media_file.content_type})
+            media_url = admin_supabase.storage.from_("posts").get_public_url(unique_filename)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error al procesar archivo multimedia: {str(e)}")
 
@@ -76,7 +96,13 @@ def create_post(
 
         if response.data:
             post = response.data[0]
-            if instagram_account_id:
+            if not notify_telegram and status == 'scheduled' and scheduled_at:
+                from services.scheduler.post_scheduler import PostScheduler
+                try:
+                    PostScheduler().schedule_post(post['id'], scheduled_at)
+                except Exception as e:
+                    logger.warning(f"No se pudo crear APScheduler job para post {post['id']}: {e}")
+            elif notify_telegram and instagram_account_id:
                 account_res = admin_supabase.table('instagram_accounts')\
                     .select('telegram_chat_id').eq('id', instagram_account_id).execute()
                 if account_res.data and account_res.data[0].get('telegram_chat_id'):
@@ -139,14 +165,14 @@ def update_post(
         try:
             if existing_media_url:
                 old_file_path = existing_media_url.split('/posts/')[-1] if '/posts/' in existing_media_url else existing_media_url.split('/')[-1]
-                supabase.storage.from_("posts").remove([old_file_path])
+                admin_supabase.storage.from_("posts").remove([old_file_path])
             file_extension = media_file.filename.split(".")[-1]
             folder_map = {'draft': 'drafts', 'scheduled': 'scheduled', 'published': 'published'}
             folder = folder_map.get(status, 'drafts')
             unique_filename = f"{folder}/{uuid.uuid4()}.{file_extension}"
             file_content = media_file.file.read()
-            supabase.storage.from_("posts").upload(unique_filename, file_content, {"content-type": media_file.content_type})
-            media_url = supabase.storage.from_("posts").get_public_url(unique_filename)
+            admin_supabase.storage.from_("posts").upload(unique_filename, file_content, {"content-type": media_file.content_type})
+            media_url = admin_supabase.storage.from_("posts").get_public_url(unique_filename)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error al procesar archivo multimedia: {str(e)}")
 
@@ -189,7 +215,7 @@ def delete_post(
     try:
         if existing_media_url:
             file_path = existing_media_url.split('/posts/')[-1] if '/posts/' in existing_media_url else existing_media_url.split('/')[-1]
-            supabase.storage.from_("posts").remove([file_path])
+            admin_supabase.storage.from_("posts").remove([file_path])
         supabase.table('posts').delete().eq('id', post_id).execute()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al eliminar la publicación: {str(e)}")

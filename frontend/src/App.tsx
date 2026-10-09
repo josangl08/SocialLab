@@ -1,9 +1,8 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Login from './components/auth/Login';
 import Register from './components/auth/Register';
 import Dashboard from './components/dashboard/Dashboard';
-import CreatePost from './components/posts/CreatePost';
 import PostGenerator from './components/posts/PostGenerator';
 import PlannerPage from './components/planner/PlannerPage';
 import Analytics from './components/analytics/Analytics';
@@ -21,6 +20,11 @@ interface ProtectedRouteProps {
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   const { isAuthenticated } = useAuth();
   return isAuthenticated ? <MainLayout>{children}</MainLayout> : <Navigate to="/login" replace />;
+};
+
+export const RedirectWithQuery: React.FC<{ to: string }> = ({ to }) => {
+  const location = useLocation();
+  return <Navigate to={`${to}${location.search}`} replace />;
 };
 
 function App() {
@@ -42,11 +46,7 @@ function App() {
           />
           <Route
             path="/create-post"
-            element={
-              <ProtectedRoute>
-                <CreatePost onPostCreated={() => { /* Lógica para refrescar la lista de posts si es necesario */ }} />
-              </ProtectedRoute>
-            }
+            element={<RedirectWithQuery to="/generate" />}
           />
           <Route
             path="/planner"

@@ -17,7 +17,7 @@ const Sidebar: React.FC = () => {
   const menuItems = [
     { path: '/dashboard', label: 'Dashboard', icon: 'bi-speedometer2' },
     { path: '/planner', label: 'Planner', icon: 'bi-calendar-event' },
-    { path: '/generate', label: 'AI Generator', icon: 'bi-stars' },
+    { path: '/generate', label: 'Content Studio', icon: 'bi-palette2' },
     { path: '/analytics', label: 'Analytics', icon: 'bi-bar-chart-line' },
     { path: '/hermes-mind', label: 'Hermes Mind', icon: 'bi-cpu' },
     { path: '/settings', label: 'Settings', icon: 'bi-gear' },

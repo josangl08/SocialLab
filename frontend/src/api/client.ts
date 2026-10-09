@@ -42,10 +42,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json();
 }
 
-function jsonRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+function jsonRequest<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  options: { signal?: AbortSignal } = {}
+): Promise<T> {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   return request<T>(path, {
+    ...options,
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -54,10 +60,14 @@ function jsonRequest<T>(method: string, path: string, body?: unknown): Promise<T
 
 export const apiClient = {
   get: <T>(path: string, options?: { signal?: AbortSignal }) => request<T>(path, options),
-  post: <T>(path: string, body?: unknown) => jsonRequest<T>('POST', path, body),
-  put: <T>(path: string, body?: unknown) => jsonRequest<T>('PUT', path, body),
-  patch: <T>(path: string, body?: unknown) => jsonRequest<T>('PATCH', path, body),
-  delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  post: <T>(path: string, body?: unknown, options?: { signal?: AbortSignal }) =>
+    jsonRequest<T>('POST', path, body, options),
+  put: <T>(path: string, body?: unknown, options?: { signal?: AbortSignal }) =>
+    jsonRequest<T>('PUT', path, body, options),
+  patch: <T>(path: string, body?: unknown, options?: { signal?: AbortSignal }) =>
+    jsonRequest<T>('PATCH', path, body, options),
+  delete: <T>(path: string, options?: { signal?: AbortSignal }) =>
+    request<T>(path, { ...options, method: 'DELETE' }),
   postForm: <T>(path: string, formData: FormData) =>
     request<T>(path, { method: 'POST', body: formData }),
   putForm: <T>(path: string, formData: FormData) =>

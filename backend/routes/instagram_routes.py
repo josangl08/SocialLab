@@ -573,7 +573,7 @@ def get_instagram_accounts(current_user: User = Depends(get_current_user)):
     """
     try:
         response = admin_supabase.table('instagram_accounts')\
-            .select('id, instagram_business_account_id, username, account_name, followers_count, profile_picture_url, expires_at, is_active, telegram_chat_id, drive_folder_id, token_invalid')\
+            .select('id, instagram_business_account_id, username, account_name, followers_count, profile_picture_url, expires_at, is_active, telegram_chat_id, drive_folder_id, token_invalid, sector')\
             .eq('user_id', current_user.id)\
             .execute()
         return response.data

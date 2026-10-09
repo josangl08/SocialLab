@@ -1,0 +1,35 @@
+.source-selector {
+  display: flex;
+  flex-direction: column;
+}
+
+.source-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.source-tab-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--sl-border, rgba(255, 255, 255, 0.08));
+  color: #f0f2f8;
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  transition: all 0.2s ease;
+}
+
+.source-tab-btn:hover {
+  background: rgba(139, 92, 246, 0.1);
+  border-color: rgba(139, 92, 246, 0.3);
+}
+
+.source-tab-btn.active {
+  background: var(--sl-purple, #8b5cf6);
+  border-color: var(--sl-purple, #8b5cf6);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.35);
+}

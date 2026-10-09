@@ -1,0 +1,40 @@
+.sports-export-selector {
+  background: var(--sl-surface, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--sl-border, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.sports-exports-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.sports-export-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sports-export-card:hover {
+  border-color: var(--sl-purple, #8b5cf6);
+  background: rgba(139, 92, 246, 0.06);
+  transform: translateY(-2px);
+}
+
+.sports-stats-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+}
+
+.sports-stat-item {
+  display: flex;
+  justify-content: space-between;
+}
