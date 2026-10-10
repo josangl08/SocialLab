@@ -1,0 +1,23 @@
+.repurpose-pieces {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.repurpose-piece {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--sl-border);
+  border-radius: 8px;
+  background: var(--sl-surface);
+}
+
+.repurpose-piece-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+}

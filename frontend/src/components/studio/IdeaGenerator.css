@@ -1,0 +1,13 @@
+.idea-generator-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.idea-generator-row input {
+  flex: 1 1 220px;
+}
+
+.idea-generator-slides {
+  width: auto;
+}

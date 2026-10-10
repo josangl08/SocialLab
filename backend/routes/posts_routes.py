@@ -1,3 +1,4 @@
+import json
 import uuid
 import logging
 from datetime import datetime, timezone
@@ -18,6 +19,30 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/posts", tags=["posts"])
 
 admin_supabase = get_supabase_admin_client()
+
+
+CONTENT_FORMATS = ('post', 'reel', 'carousel', 'story')
+
+
+def _structure_fields(content_format: Optional[str], content_structure: Optional[str]) -> dict:
+    """Valida `content_format` y `content_structure` (JSON con slides | beats | frames) del formulario.
+    Solo devuelve los campos enviados, para no borrar la estructura de un post al editar otros campos."""
+    fields: dict = {}
+    if content_format is not None:
+        if content_format not in CONTENT_FORMATS:
+            raise HTTPException(status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail=f"content_format debe ser uno de {', '.join(CONTENT_FORMATS)}.")
+        fields['content_format'] = content_format
+    if content_structure is not None:
+        try:
+            parsed = json.loads(content_structure)
+        except json.JSONDecodeError:
+            parsed = None
+        if not isinstance(parsed, dict):
+            raise HTTPException(status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail="content_structure debe ser un objeto JSON.")
+        fields['content_structure'] = parsed
+    return fields
 
 
 class PublishPostRequest(BaseModel):
@@ -42,9 +67,12 @@ def create_post(
     media_file: Optional[UploadFile] = File(None),
     instagram_account_id: Optional[int] = Form(None),
     notify_telegram: bool = Form(True),
+    content_format: Optional[str] = Form(None),
+    content_structure: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
+    structure_fields = _structure_fields(content_format, content_structure)
     if not notify_telegram and status == 'scheduled':
         if not scheduled_at:
             raise HTTPException(
@@ -91,7 +119,8 @@ def create_post(
             'post_type': post_type,
             'status': status,
             'scheduled_at': scheduled_at.isoformat() if scheduled_at else None,
-            'instagram_account_id': instagram_account_id
+            'instagram_account_id': instagram_account_id,
+            **structure_fields,
         }).execute()
 
         if response.data:
@@ -145,9 +174,12 @@ def update_post(
     scheduled_at: Optional[datetime] = Form(None),
     media_file: Optional[UploadFile] = File(None),
     instagram_account_id: Optional[int] = Form(None),
+    content_format: Optional[str] = Form(None),
+    content_structure: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
+    structure_fields = _structure_fields(content_format, content_structure)
     response = supabase.table('posts').select('id, media_url').eq('id', post_id).eq('user_id', current_user.id).execute()
     if not response.data:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Publicación no encontrada")
@@ -183,7 +215,8 @@ def update_post(
             'post_type': post_type,
             'status': status,
             'scheduled_at': scheduled_at.isoformat() if scheduled_at else None,
-            'instagram_account_id': instagram_account_id
+            'instagram_account_id': instagram_account_id,
+            **structure_fields,
         }
         response = supabase.table('posts').update(update_data).eq('id', post_id).execute()
         if response.data:

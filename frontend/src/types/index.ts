@@ -12,7 +12,7 @@ export interface Post {
   drive_file_id?: string | null;
   instagram_account_id?: number | null;
   content_format?: 'post' | 'reel' | 'carousel' | 'story' | null;
-  content_structure?: any;
+  content_structure?: ContentStructure | null;
   quality_report?: QualityReport | null;
   matrix_role?: string | null;
 }
@@ -202,5 +202,96 @@ export interface ProfileAuditResponse {
   score: number;
   items: ProfileAuditItem[];
   bio_rewrite?: string | null;
+}
+
+// --- Generadores de Formato (Fase C) ---
+
+export interface ReelHookCandidate {
+  text: string;
+  score: number;
+  formula_id?: number | null;
+  formula_name?: string | null;
+}
+
+export interface ReelOut {
+  hooks: ReelHookCandidate[];
+  beats: BeatsResponse;
+  on_screen_text: string[];
+  caption: string;
+  report: QualityReport;
+}
+
+// posts.content_structure: slides (carrusel) | hooks + beats + texto en pantalla (Reel)
+export interface ContentStructure {
+  slides?: CarouselSlide[];
+  hooks?: ReelHookCandidate[];
+  beats?: BeatsResponse;
+  on_screen_text?: string[];
+}
+
+export type CarouselSlideRole = 'cover' | 'stake' | 'idea' | 'recap' | 'cta';
+
+export interface CarouselSlide {
+  index: number;
+  role: CarouselSlideRole;
+  text: string;
+  word_count: number;
+}
+
+export interface CarouselOut {
+  slides: CarouselSlide[];
+  caption: string;
+  report: QualityReport;
+  warnings?: string[];
+}
+
+export type StoryStickerType = 'poll' | 'question' | 'link' | 'dm_cta' | 'none';
+
+export interface StoryFrame {
+  index: number;
+  role: string;
+  text: string;
+  sticker: StoryStickerType;
+  sticker_payload?: Record<string, unknown> | null;
+}
+
+export interface StoryOut {
+  frames: StoryFrame[];
+  caption?: string | null;
+  report?: QualityReport | null;
+}
+
+export interface RepurposeOut {
+  reels: ReelOut[];
+  carousels: CarouselOut[];
+}
+
+export interface ReelRequest {
+  account_id: number;
+  topic: string;
+  strategy_mode?: StrategyMode;
+  language?: 'es' | 'en';
+}
+
+export interface CarouselRequest {
+  account_id: number;
+  topic: string;
+  slides?: number;
+  strategy_mode?: StrategyMode;
+  language?: 'es' | 'en';
+}
+
+export interface StoryRequest {
+  account_id: number;
+  topic?: string;
+  strategy_mode?: StrategyMode;
+  language?: 'es' | 'en';
+}
+
+export interface RepurposeRequest {
+  account_id: number;
+  transcript: string;
+  strategy_mode?: StrategyMode;
+  language?: 'es' | 'en';
 }
 

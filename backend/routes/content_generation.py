@@ -6,8 +6,9 @@ Integra: PROJECT 1 exports + Template Selector + Image Composer + Caption Genera
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from typing import List, Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from datetime import datetime
+import json
 import logging
 
 from auth.dependencies import get_current_user, get_user_supabase_client
@@ -22,7 +23,16 @@ from models.schemas import (
     HookFormula,
     BeatsRequest,
     BeatsResponse,
+    ReelRequest,
+    ReelOut,
+    CarouselRequest,
+    CarouselOut,
+    StoryRequest,
+    StoryOut,
+    RepurposeRequest,
+    RepurposeOut,
 )
+from services import content_formats
 from services.content_quality import lint_caption, humanize, score_hook, get_hook_formulas, time_beats
 from database.supabase_client import get_supabase_client
 from supabase import Client
@@ -460,6 +470,86 @@ async def list_hook_formulas(
 ) -> list:
     """Catálogo de las 26 fórmulas; las recomendadas para `strategy_mode` primero."""
     return get_hook_formulas(strategy_mode)
+
+
+# Generadores de formato (Gemini + caché 1 h, salida humanizada + QualityReport)
+def _verify_account_access(account_id: int, supabase: Client) -> None:
+    """La cuenta debe ser visible para el usuario (RLS del cliente de usuario)."""
+    res = supabase.table('instagram_accounts').select('id').eq('id', account_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Cuenta de Instagram no encontrada")
+
+
+async def _run_generator(coro):
+    try:
+        return await coro
+    except ValidationError as e:
+        # Hereda de ValueError: la salida de Gemini no encaja con los modelos de salida
+        logger.error(f"Respuesta de Gemini no encaja con el schema: {e}")
+        raise HTTPException(status_code=502, detail="La IA devolvió una respuesta no válida. Inténtalo de nuevo.")
+    except ValueError as e:
+        # json.JSONDecodeError hereda de ValueError: respuesta de Gemini no parseable
+        if isinstance(e, json.JSONDecodeError):
+            logger.error(f"Respuesta de Gemini no es JSON válido: {e}")
+            raise HTTPException(status_code=502, detail="La IA devolvió una respuesta no válida. Inténtalo de nuevo.")
+        raise HTTPException(status_code=422, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generando formato: {e}")
+        raise HTTPException(status_code=502, detail="No se pudo generar el contenido con la IA.")
+
+
+@router.post("/formats/reel", response_model=ReelOut)
+async def generate_reel_format(
+    request: ReelRequest,
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
+) -> ReelOut:
+    """Guion de Reel: 3 ganchos puntuados, beats temporizados y texto en pantalla."""
+    _verify_account_access(request.account_id, supabase)
+    return await _run_generator(content_formats.generate_reel(
+        request.account_id, request.topic, request.strategy_mode, request.language or "es"
+    ))
+
+
+@router.post("/formats/carousel", response_model=CarouselOut)
+async def generate_carousel_format(
+    request: CarouselRequest,
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
+) -> CarouselOut:
+    """Carrusel de 6–10 diapositivas (cover, stake, ideas, recap, CTA)."""
+    _verify_account_access(request.account_id, supabase)
+    return await _run_generator(content_formats.generate_carousel(
+        request.account_id, request.topic, request.slides, request.strategy_mode, request.language or "es"
+    ))
+
+
+@router.post("/formats/story", response_model=StoryOut)
+async def generate_story_format(
+    request: StoryRequest,
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
+) -> StoryOut:
+    """Secuencia de 3–4 Stories con sticker interactivo."""
+    _verify_account_access(request.account_id, supabase)
+    return await _run_generator(content_formats.generate_story(
+        request.account_id, request.topic, request.strategy_mode, request.language or "es"
+    ))
+
+
+@router.post("/formats/repurpose", response_model=RepurposeOut)
+async def generate_repurpose_format(
+    request: RepurposeRequest,
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
+) -> RepurposeOut:
+    """Una transcripción → 3 Reels + 2 carruseles en una sola llamada a la IA."""
+    _verify_account_access(request.account_id, supabase)
+    return await _run_generator(content_formats.generate_repurpose(
+        request.account_id, request.transcript, request.strategy_mode, request.language or "es"
+    ))
 
 
 # Helper functions

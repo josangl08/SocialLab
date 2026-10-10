@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { apiClient, ApiError } from '../../api/client';
-import type { Post, InstagramAccount } from '../../types';
+import type { Post, InstagramAccount, CarouselSlide } from '../../types';
+import CarouselEditor from '../studio/CarouselEditor';
+import BeatSheet from '../studio/BeatSheet';
 import './CreatePost.css';
 
 interface EditPostFormProps {
@@ -34,6 +36,8 @@ const EditPostForm: React.FC<EditPostFormProps> = ({ post, onSave, onCancel }) =
     post.instagram_account_id ? String(post.instagram_account_id) : ''
   );
   const [instagramAccounts, setInstagramAccounts] = useState<InstagramAccount[]>([]);
+  const [slides, setSlides] = useState<CarouselSlide[] | null>(post.content_structure?.slides ?? null);
+  const reelBeats = post.content_structure?.beats;
   const [loading, setLoading]   = useState(false);
   const [message, setMessage]   = useState('');
   const [isError, setIsError]   = useState(false);
@@ -74,6 +78,11 @@ const EditPostForm: React.FC<EditPostFormProps> = ({ post, onSave, onCancel }) =
     if (scheduledAt) formData.append('scheduled_at', new Date(scheduledAt).toISOString());
     if (mediaFile) formData.append('media_file', mediaFile);
     if (selectedAccountId) formData.append('instagram_account_id', selectedAccountId);
+    // Solo se reenvía la estructura si sigue siendo un carrusel; si no, se conserva la guardada
+    if (postType === 'carousel' && slides) {
+      formData.append('content_format', 'carousel');
+      formData.append('content_structure', JSON.stringify({ ...post.content_structure, slides }));
+    }
 
     try {
       await apiClient.putForm(`/api/posts/${post.id}`, formData);
@@ -148,6 +157,19 @@ const EditPostForm: React.FC<EditPostFormProps> = ({ post, onSave, onCancel }) =
             disabled={loading}
           />
         </div>
+
+        {/* ── Estructura guardada desde el Studio ─────────── */}
+        {postType === 'carousel' && slides && (
+          <div className="cp-field">
+            <p className="cp-section-label">Diapositivas</p>
+            <CarouselEditor slides={slides} onSlidesChange={setSlides} readOnly={loading} />
+          </div>
+        )}
+        {postType === 'reel' && reelBeats && reelBeats.beats.length > 0 && (
+          <div className="cp-field">
+            <BeatSheet beats={reelBeats.beats} totalSeconds={reelBeats.total_s} loopsToHook={reelBeats.loops_to_hook} />
+          </div>
+        )}
 
         {/* ── Post type ─────────────────────────────────── */}
         <div className="cp-field">

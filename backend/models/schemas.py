@@ -35,6 +35,8 @@ class Post(PostBase):
     publication_date: Optional[datetime] = None
     is_ai_generated: Optional[bool] = None
     drive_file_id: Optional[str] = None
+    content_format: Optional[str] = None
+    content_structure: Optional[dict] = None
 
 # --- Modelos de Inteligencia Artificial ---
 class InstagramAccountConfigUpdate(BaseModel):
@@ -370,6 +372,85 @@ class ProfileAuditResponse(BaseModel):
     score: int
     items: list[ProfileAuditItem] = []
     bio_rewrite: Optional[str] = None
+
+
+# --- Modelos de Generadores de Formato (Fase C) ---
+
+class ReelHookCandidate(BaseModel):
+    text: str
+    score: int = 0
+    formula_id: Optional[int] = None
+    formula_name: Optional[str] = None
+
+
+class ReelOut(BaseModel):
+    hooks: list[ReelHookCandidate] = []
+    beats: BeatsResponse = Field(default_factory=BeatsResponse)
+    on_screen_text: list[str] = []
+    caption: str
+    report: QualityReport
+
+
+class CarouselSlide(BaseModel):
+    index: int
+    role: Literal["cover", "stake", "idea", "recap", "cta"]
+    text: str
+    word_count: int = 0
+
+
+class CarouselOut(BaseModel):
+    slides: list[CarouselSlide] = []
+    caption: str
+    report: QualityReport
+    warnings: list[str] = []
+
+
+class StoryFrame(BaseModel):
+    index: int
+    role: str
+    text: str
+    sticker: Literal["poll", "question", "link", "dm_cta", "none"] = "none"
+    sticker_payload: Optional[dict] = None
+
+
+class StoryOut(BaseModel):
+    frames: list[StoryFrame] = []
+    caption: Optional[str] = None
+    report: Optional[QualityReport] = None
+
+
+class RepurposeOut(BaseModel):
+    reels: list[ReelOut] = []
+    carousels: list[CarouselOut] = []
+
+
+class ReelRequest(BaseModel):
+    account_id: int
+    topic: str
+    strategy_mode: Optional[Literal["commercial_campaign", "personal_storyline"]] = None
+    language: Optional[Literal["es", "en"]] = "es"
+
+
+class CarouselRequest(BaseModel):
+    account_id: int
+    topic: str
+    slides: int = Field(default=7, ge=6, le=10)
+    strategy_mode: Optional[Literal["commercial_campaign", "personal_storyline"]] = None
+    language: Optional[Literal["es", "en"]] = "es"
+
+
+class StoryRequest(BaseModel):
+    account_id: int
+    topic: Optional[str] = None
+    strategy_mode: Optional[Literal["commercial_campaign", "personal_storyline"]] = None
+    language: Optional[Literal["es", "en"]] = "es"
+
+
+class RepurposeRequest(BaseModel):
+    account_id: int
+    transcript: str = Field(..., max_length=30000)
+    strategy_mode: Optional[Literal["commercial_campaign", "personal_storyline"]] = None
+    language: Optional[Literal["es", "en"]] = "es"
 
 
 

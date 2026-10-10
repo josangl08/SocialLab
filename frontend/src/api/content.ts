@@ -10,6 +10,14 @@ import type {
   BeatsRequest,
   BeatsResponse,
   StrategyMode,
+  ReelRequest,
+  ReelOut,
+  CarouselRequest,
+  CarouselOut,
+  StoryRequest,
+  StoryOut,
+  RepurposeRequest,
+  RepurposeOut,
 } from '../types';
 
 export const contentApi = {
@@ -49,5 +57,33 @@ export const contentApi = {
       ? `/content/hook-formulas?strategy_mode=${encodeURIComponent(strategyMode)}`
       : '/content/hook-formulas';
     return apiClient.get<HookFormula[]>(url, options);
+  },
+
+  generateReel: (
+    data: ReelRequest,
+    options?: { signal?: AbortSignal }
+  ): Promise<ReelOut> => {
+    return apiClient.post<ReelOut>('/content/formats/reel', data, options);
+  },
+
+  generateCarousel: (
+    data: CarouselRequest,
+    options?: { signal?: AbortSignal }
+  ): Promise<CarouselOut> => {
+    return apiClient.post<CarouselOut>('/content/formats/carousel', data, options);
+  },
+
+  generateStory: (
+    data: StoryRequest,
+    options?: { signal?: AbortSignal }
+  ): Promise<StoryOut> => {
+    return apiClient.post<StoryOut>('/content/formats/story', data, options);
+  },
+
+  generateRepurpose: (
+    data: RepurposeRequest,
+    options?: { signal?: AbortSignal }
+  ): Promise<RepurposeOut> => {
+    return apiClient.post<RepurposeOut>('/content/formats/repurpose', data, options);
   },
 };

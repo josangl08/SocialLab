@@ -2,13 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { apiClient, ApiError } from '../../api/client';
-import type { InstagramAccount, ContentFormat, StrategyMode } from '../../types';
+import type { InstagramAccount, ContentFormat, StrategyMode, ReelOut, CarouselSlide, ContentStructure } from '../../types';
 import { getFirstOfDayOfMonth } from '../../features/agent/AgentStrategyDrawer';
 import type { MonthlyCampaign } from '../../features/agent/AgentStrategyDrawer';
 import SourceSelector, { type ContentSource } from './SourceSelector';
 import SportsExportSelector, { type SportsExportResult } from './SportsExportSelector';
 import FormatEditor, { type SavePostPayload } from './FormatEditor';
 import QualityInspector from './QualityInspector';
+import RepurposePanel, { type RepurposePiece } from './RepurposePanel';
+import CarouselEditor from './CarouselEditor';
+import IdeaGenerator from './IdeaGenerator';
 import './ContentStudio.css';
 
 export interface ContentStudioProps {
@@ -32,6 +35,9 @@ export const ContentStudio: React.FC<ContentStudioProps> = ({ onPostGenerated })
   const [caption, setCaption] = useState<string>('');
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  // Estructura de la pieza generada abierta en el editor
+  const [reel, setReel] = useState<ReelOut | null>(null);
+  const [slides, setSlides] = useState<CarouselSlide[] | null>(null);
 
   // Fecha precargada de query ?date=
   const [scheduledAt, setScheduledAt] = useState<string>(() => {
@@ -102,6 +108,27 @@ export const ContentStudio: React.FC<ContentStudioProps> = ({ onPostGenerated })
     });
   };
 
+  const handleOpenPiece = (piece: RepurposePiece) => {
+    if (piece.kind === 'reel') {
+      setFormat('reel');
+      setCaption(piece.reel.caption);
+      setReel(piece.reel);
+      setSlides(null);
+    } else {
+      setFormat('carousel');
+      setCaption(piece.carousel.caption);
+      setSlides(piece.carousel.slides);
+      setReel(null);
+    }
+  };
+
+  // Elegir otro gancho sustituye la primera línea del caption
+  const handleChooseHook = (hookText: string) => {
+    const lines = caption.split('\n');
+    lines[0] = hookText;
+    setCaption(lines.join('\n'));
+  };
+
   const handleSavePost = async (payload: SavePostPayload) => {
     setLoading(true);
     setFeedback(null);
@@ -112,6 +139,16 @@ export const ContentStudio: React.FC<ContentStudioProps> = ({ onPostGenerated })
       formData.append('post_type', format);
       formData.append('status', payload.status);
       formData.append('notify_telegram', String(payload.notifyTelegram));
+      formData.append('content_format', format);
+      const structure: ContentStructure | null =
+        format === 'carousel' && slides
+          ? { slides }
+          : format === 'reel' && reel
+          ? { hooks: reel.hooks, beats: reel.beats, on_screen_text: reel.on_screen_text }
+          : null;
+      if (structure) {
+        formData.append('content_structure', JSON.stringify(structure));
+      }
 
       if (payload.scheduledAt) {
         formData.append('scheduled_at', payload.scheduledAt);
@@ -253,13 +290,44 @@ export const ContentStudio: React.FC<ContentStudioProps> = ({ onPostGenerated })
           )}
 
           {source === 'repurpose' && (
-            <div className="alert alert-secondary p-3 mb-4 rounded border-secondary">
-              <h6 className="text-light m-0">
-                <i className="bi bi-recycle me-2 text-primary"></i>Reciclar contenido
-              </h6>
-              <p className="text-secondary small mt-1 mb-2">
-                Pega una transcripción o texto largo en el caption para adaptarlo al formato seleccionado.
-              </p>
+            <RepurposePanel
+              accountId={selectedAccountId ? Number(selectedAccountId) : null}
+              strategyMode={strategyMode}
+              onOpenPiece={handleOpenPiece}
+            />
+          )}
+
+          {source === 'idea' && format !== 'post' && (
+            <IdeaGenerator
+              accountId={selectedAccountId ? Number(selectedAccountId) : null}
+              format={format}
+              strategyMode={strategyMode}
+              onGenerated={handleOpenPiece}
+            />
+          )}
+
+          {format === 'reel' && reel && reel.hooks.length > 0 && (
+            <div className="studio-hook-candidates mb-3" role="group" aria-label="Ganchos candidatos">
+              <label className="form-label text-secondary small d-block">
+                <i className="bi bi-lightning-charge me-1 text-warning"></i>Ganchos candidatos
+              </label>
+              {reel.hooks.map((hook, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  className={`studio-hook-btn ${caption.split('\n')[0] === hook.text ? 'active' : ''}`}
+                  onClick={() => handleChooseHook(hook.text)}
+                >
+                  <span className="badge bg-secondary me-2">{hook.score}</span>
+                  {hook.text}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {format === 'carousel' && slides && (
+            <div className="mb-3">
+              <CarouselEditor slides={slides} onSlidesChange={setSlides} />
             </div>
           )}
 
@@ -285,6 +353,9 @@ export const ContentStudio: React.FC<ContentStudioProps> = ({ onPostGenerated })
           <QualityInspector
             caption={caption}
             format={format}
+            beats={reel?.beats.beats}
+            beatsTotalSeconds={reel?.beats.total_s}
+            beatsLoopsToHook={reel?.beats.loops_to_hook}
           />
         </div>
       </div>

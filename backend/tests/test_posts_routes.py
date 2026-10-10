@@ -548,3 +548,80 @@ def test_reject_proposal_success(mock_agent_supabase, mock_agent_admin_supabase)
 
     assert response.status_code == 200
     assert response.json() == {"updated": True}
+
+
+# ==============================================================================
+# content_format / content_structure (slides | beats del Studio)
+# ==============================================================================
+
+_SLIDES = {"slides": [{"index": 1, "role": "cover", "text": "Portada", "word_count": 1}]}
+
+
+def _mock_insert(mock_supabase, row):
+    mock_execute = MagicMock()
+    mock_execute.execute.return_value = MagicMock(data=[row])
+    mock_supabase.table.return_value.insert.return_value = mock_execute
+    return mock_supabase.table.return_value.insert
+
+
+def test_create_post_persists_content_structure(mock_supabase, mock_admin_supabase):
+    import json as _json
+    row = {"id": 1, "user_id": USER_ID, "content": "C", "post_type": "carousel", "status": "draft",
+           "created_at": "2026-06-27T12:00:00", "content_format": "carousel", "content_structure": _SLIDES}
+    insert = _mock_insert(mock_supabase, row)
+
+    response = client.post("/api/posts", data={
+        "content": "C", "post_type": "carousel", "status": "draft", "notify_telegram": False,
+        "content_format": "carousel", "content_structure": _json.dumps(_SLIDES),
+    })
+
+    assert response.status_code == 200
+    inserted = insert.call_args[0][0]
+    assert inserted["content_format"] == "carousel"
+    assert inserted["content_structure"] == _SLIDES
+    assert response.json()["content_structure"] == _SLIDES
+
+
+def test_create_post_without_structure_does_not_send_columns(mock_supabase, mock_admin_supabase):
+    row = {"id": 1, "user_id": USER_ID, "content": "C", "post_type": "post", "status": "draft",
+           "created_at": "2026-06-27T12:00:00"}
+    insert = _mock_insert(mock_supabase, row)
+
+    response = client.post("/api/posts", data={"content": "C", "post_type": "post", "status": "draft",
+                                               "notify_telegram": False})
+
+    assert response.status_code == 200
+    inserted = insert.call_args[0][0]
+    assert "content_format" not in inserted and "content_structure" not in inserted
+
+
+@pytest.mark.parametrize("field,value", [
+    ("content_structure", "no es json"),
+    ("content_structure", "[1, 2]"),
+    ("content_format", "tiktok"),
+])
+def test_create_post_invalid_structure_422(mock_supabase, mock_admin_supabase, field, value):
+    response = client.post("/api/posts", data={"content": "C", "post_type": "post", "status": "draft",
+                                               "notify_telegram": False, field: value})
+    assert response.status_code == 422
+    mock_supabase.table.return_value.insert.assert_not_called()
+
+
+def test_update_post_persists_structure_only_when_sent(mock_supabase, mock_admin_supabase):
+    import json as _json
+    row = {"id": 1, "user_id": USER_ID, "content": "C", "post_type": "carousel", "status": "draft",
+           "created_at": "2026-06-27T12:00:00"}
+    mock_select_execute = MagicMock()
+    mock_select_execute.execute.return_value = MagicMock(data=[{"id": 1, "media_url": None}])
+    mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value = mock_select_execute
+    mock_update_execute = MagicMock()
+    mock_update_execute.execute.return_value = MagicMock(data=[row])
+    mock_supabase.table.return_value.update.return_value.eq.return_value = mock_update_execute
+    update = mock_supabase.table.return_value.update
+
+    client.put("/api/posts/1", data={"content": "C", "post_type": "carousel", "status": "draft",
+                                     "content_structure": _json.dumps(_SLIDES)})
+    assert update.call_args[0][0]["content_structure"] == _SLIDES
+
+    client.put("/api/posts/1", data={"content": "C", "post_type": "carousel", "status": "draft"})
+    assert "content_structure" not in update.call_args[0][0]

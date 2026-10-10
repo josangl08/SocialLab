@@ -83,9 +83,10 @@ async def clean_and_parse_json(raw_text: str) -> dict:
         text = re.sub(r'```(?:json)?\n?', '', text).strip().rstrip('`').strip()
     return json.loads(text)
 
-def _sync_generate_content(prompt: str, model_name: str) -> str:
+def _sync_generate_content(prompt: str, model_name: str, json_mode: bool = False) -> str:
     client = get_gemini_client()
-    response = client.models.generate_content(model=model_name, contents=prompt)
+    kwargs = {"config": types.GenerateContentConfig(response_mime_type="application/json")} if json_mode else {}
+    response = client.models.generate_content(model=model_name, contents=prompt, **kwargs)
     if not response or not response.text:
         raise Exception(f"El modelo {model_name} no pudo generar una respuesta válida.")
     return response.text.strip()
@@ -93,9 +94,11 @@ def _sync_generate_content(prompt: str, model_name: str) -> str:
 async def generate_gemini_content(
     prompt: str,
     model_names: Optional[List[str]] = None,
+    json_mode: bool = False,
 ) -> str:
     """
     Configura genai, intenta cada modelo en orden ante cuota agotada (429), retorna response.text.strip().
+    `json_mode` fuerza `response_mime_type="application/json"`.
     Re-lanza la última excepción si todos los modelos fallan.
     """
     models = model_names or PREFERRED_GEMINI_MODELS
@@ -104,7 +107,7 @@ async def generate_gemini_content(
     for model_name in models:
         try:
             logger.info(f"Intentando generar contenido con Gemini usando modelo: {model_name}")
-            text = await asyncio.to_thread(_sync_generate_content, prompt, model_name)
+            text = await asyncio.to_thread(_sync_generate_content, prompt, model_name, json_mode)
             return text
         except Exception as e:
             last_exception = e

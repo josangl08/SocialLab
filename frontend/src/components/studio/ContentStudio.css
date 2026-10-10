@@ -11,3 +11,24 @@
   border-radius: 20px;
   padding: 0.25rem 0.75rem;
 }
+
+.studio-hook-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.studio-hook-btn {
+  text-align: left;
+  background: var(--sl-surface);
+  border: 1px solid var(--sl-border);
+  color: inherit;
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+.studio-hook-btn.active {
+  border-color: var(--sl-purple);
+  background: var(--sl-purple-bg);
+}

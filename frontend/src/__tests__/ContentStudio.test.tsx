@@ -34,6 +34,9 @@ vi.mock('../api/content', () => ({
   contentApi: {
     lintCaption: vi.fn(),
     getHookFormulas: vi.fn(),
+    generateRepurpose: vi.fn(),
+    generateReel: vi.fn(),
+    generateCarousel: vi.fn(),
   },
 }));
 
@@ -363,4 +366,180 @@ describe('ContentStudio Component', () => {
       expect(dateInput.value).toBe(testDate);
     });
   });
+
+  // --- Fase C: origen Reciclar ---
+
+  const quality = {
+    visible_text: '', visible_length: 0, truncated: false, hashtag_count: 0, hashtag_limit: 5,
+    hashtags_over_limit: [], keywords_missing_in_visible: [],
+    slop: { score: 0, hits: [], invisible_chars: 0, em_dash_count: 0 },
+    hook: { formula_id: null, formula_name: null, score: 0, dealbreakers: [] }, warnings: [],
+  };
+  const reelPiece = (n: number) => ({
+    hooks: [
+      { text: `Gancho A${n}`, score: 70, formula_id: 1 },
+      { text: `Gancho B${n}`, score: 55, formula_id: 2 },
+    ],
+    beats: { beats: [{ label: 'Gancho', start_s: 0, end_s: 2, duration_s: 2, alert: null }], total_s: 2, loops_to_hook: false },
+    on_screen_text: [],
+    caption: `Gancho A${n}\nCuerpo del reel ${n}`,
+    report: quality,
+  });
+  const carouselPiece = (n: number) => ({
+    slides: [
+      { index: 1, role: 'cover', text: `Portada ${n}`, word_count: 2 },
+      { index: 2, role: 'stake', text: 'Por qué importa', word_count: 3 },
+    ],
+    caption: `Caption carrusel ${n}`,
+    report: quality,
+  });
+
+  const openRepurpose = async () => {
+    render(
+      <MemoryRouter>
+        <ContentStudio />
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(screen.getByLabelText(/Cuenta de Instagram/i)).toHaveValue('1'));
+    fireEvent.click(screen.getByRole('button', { name: /Reciclar contenido/i }));
+  };
+
+  test('reciclar muestra 5 piezas y abre un carrusel en el editor', async () => {
+    (contentApi.generateRepurpose as any).mockResolvedValue({
+      reels: [reelPiece(1), reelPiece(2), reelPiece(3)],
+      carousels: [carouselPiece(1), carouselPiece(2)],
+    });
+    await openRepurpose();
+
+    fireEvent.change(screen.getByLabelText(/Transcripción o texto largo/i), { target: { value: 'Transcripción del podcast' } });
+    fireEvent.click(screen.getByRole('button', { name: /Generar 5 piezas/i }));
+
+    const list = await screen.findByRole('list', { name: /Piezas recicladas/i });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(5);
+    expect(contentApi.generateRepurpose).toHaveBeenCalledWith(
+      expect.objectContaining({ account_id: 1, transcript: 'Transcripción del podcast' })
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Abrir Carrusel 2/i }));
+    expect(screen.getByTestId('carousel-editor')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Portada 2')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Texto del Caption/i)).toHaveValue('Caption carrusel 2');
+  });
+
+  test('abrir un reel reciclado permite alternar el gancho', async () => {
+    (contentApi.generateRepurpose as any).mockResolvedValue({
+      reels: [reelPiece(1), reelPiece(2), reelPiece(3)],
+      carousels: [carouselPiece(1), carouselPiece(2)],
+    });
+    await openRepurpose();
+
+    fireEvent.change(screen.getByLabelText(/Transcripción o texto largo/i), { target: { value: 'Texto' } });
+    fireEvent.click(screen.getByRole('button', { name: /Generar 5 piezas/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Abrir Reel 1/i }));
+
+    const caption = screen.getByLabelText(/Texto del Caption/i);
+    expect(caption).toHaveValue('Gancho A1\nCuerpo del reel 1');
+
+    fireEvent.click(screen.getByRole('button', { name: /Gancho B1/i }));
+    expect(caption).toHaveValue('Gancho B1\nCuerpo del reel 1');
+  });
+
+  test('reciclar bloquea textos de más de 30 000 caracteres', async () => {
+    await openRepurpose();
+    fireEvent.change(screen.getByLabelText(/Transcripción o texto largo/i), { target: { value: 'x'.repeat(30001) } });
+
+    expect(screen.getByText(/Acorta el texto/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Generar 5 piezas/i })).toBeDisabled();
+  });
+
+  // --- Generar desde idea libre ---
+
+  const renderStudio = async () => {
+    render(
+      <MemoryRouter>
+        <ContentStudio />
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(screen.getByLabelText(/Cuenta de Instagram/i)).toHaveValue('1'));
+  };
+
+  test('idea libre: sin generador en formato Post', async () => {
+    await renderStudio();
+    expect(screen.queryByRole('button', { name: /Generar con IA/i })).not.toBeInTheDocument();
+  });
+
+  test('idea libre: genera un Reel con la estrategia activa y lo abre con sus ganchos', async () => {
+    (contentApi.generateReel as any).mockResolvedValue(reelPiece(9));
+    await renderStudio();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Reel$/i }));
+    fireEvent.change(screen.getByLabelText(/Tema del Reel/i), { target: { value: 'Rutina de mañana' } });
+    fireEvent.click(screen.getByRole('button', { name: /Generar con IA/i }));
+
+    await waitFor(() => expect(screen.getByLabelText(/Texto del Caption/i)).toHaveValue('Gancho A9\nCuerpo del reel 9'));
+    expect(contentApi.generateReel).toHaveBeenCalledWith(
+      expect.objectContaining({ account_id: 1, topic: 'Rutina de mañana', strategy_mode: 'personal_storyline' })
+    );
+    expect(screen.getByRole('group', { name: /Ganchos candidatos/i })).toBeInTheDocument();
+  });
+
+  test('idea libre: genera un carrusel con el nº de diapositivas elegido', async () => {
+    (contentApi.generateCarousel as any).mockResolvedValue(carouselPiece(4));
+    await renderStudio();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Carrusel$/i }));
+    fireEvent.change(screen.getByLabelText(/Tema del carrusel/i), { target: { value: 'Errores al empezar' } });
+    fireEvent.change(screen.getByLabelText(/Número de diapositivas/i), { target: { value: '9' } });
+    fireEvent.click(screen.getByRole('button', { name: /Generar con IA/i }));
+
+    expect(await screen.findByTestId('carousel-editor')).toBeInTheDocument();
+    expect(contentApi.generateCarousel).toHaveBeenCalledWith(expect.objectContaining({ slides: 9, topic: 'Errores al empezar' }));
+  });
+
+  // --- Persistencia de la estructura ---
+
+  const savedForm = () => (apiClient.postForm as any).mock.calls[0][1] as FormData;
+
+  test('guardar un carrusel generado envía las diapositivas editadas', async () => {
+    (contentApi.generateCarousel as any).mockResolvedValue(carouselPiece(1));
+    await renderStudio();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Carrusel$/i }));
+    fireEvent.change(screen.getByLabelText(/Tema del carrusel/i), { target: { value: 'Tema' } });
+    fireEvent.click(screen.getByRole('button', { name: /Generar con IA/i }));
+    fireEvent.change(await screen.findByDisplayValue('Portada 1'), { target: { value: 'Portada editada' } });
+    fireEvent.click(screen.getByRole('button', { name: /Guardar borrador/i }));
+
+    await waitFor(() => expect(apiClient.postForm).toHaveBeenCalled());
+    expect(savedForm().get('content_format')).toBe('carousel');
+    const structure = JSON.parse(savedForm().get('content_structure') as string);
+    expect(structure.slides[0].text).toBe('Portada editada');
+  });
+
+  test('guardar un reel generado envía ganchos y beats', async () => {
+    (contentApi.generateReel as any).mockResolvedValue(reelPiece(1));
+    await renderStudio();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Reel$/i }));
+    fireEvent.change(screen.getByLabelText(/Tema del Reel/i), { target: { value: 'Tema' } });
+    fireEvent.click(screen.getByRole('button', { name: /Generar con IA/i }));
+    await screen.findByRole('group', { name: /Ganchos candidatos/i });
+    fireEvent.click(screen.getByRole('button', { name: /Guardar borrador/i }));
+
+    await waitFor(() => expect(apiClient.postForm).toHaveBeenCalled());
+    const structure = JSON.parse(savedForm().get('content_structure') as string);
+    expect(structure.hooks).toHaveLength(2);
+    expect(structure.beats.total_s).toBe(2);
+  });
+
+  test('un post escrito a mano no envía estructura', async () => {
+    await renderStudio();
+    fireEvent.change(screen.getByLabelText(/Texto del Caption/i), { target: { value: 'Hola' } });
+    fireEvent.click(screen.getByRole('button', { name: /Guardar borrador/i }));
+
+    await waitFor(() => expect(apiClient.postForm).toHaveBeenCalled());
+    expect(savedForm().get('content_format')).toBe('post');
+    expect(savedForm().has('content_structure')).toBe(false);
+  });
+
 });

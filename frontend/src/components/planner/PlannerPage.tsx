@@ -4,6 +4,7 @@ import CalendarView from '../calendar/CalendarView';
 import PostList from '../posts/PostList';
 import EditPostForm from '../posts/EditPostForm';
 import WeeklyProposalPanel from './WeeklyProposalPanel';
+import StorySequence from '../studio/StorySequence';
 import { MonthlyFocusBanner } from './MonthlyFocusBanner';
 import { useAuth } from '../../context/AuthContext';
 import { apiClient, ApiError } from '../../api/client';
@@ -13,7 +14,7 @@ import './PlannerPage.css';
 const PlannerPage: React.FC = () => {
   const { token } = useAuth();
   const navigate = useNavigate();
-  const [view, setView]               = useState<'calendar' | 'list'>('calendar');
+  const [view, setView]               = useState<'calendar' | 'list' | 'stories'>('calendar');
   const [showDrawer, setShowDrawer]   = useState(false);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [calendarSignal, setCalendarSignal] = useState(0);
@@ -167,6 +168,13 @@ const PlannerPage: React.FC = () => {
             <i className="bi bi-grid-3x3"></i>
             Posts
           </button>
+          <button
+            className={`planner-tab${view === 'stories' ? ' active' : ''}`}
+            onClick={() => setView('stories')}
+          >
+            <i className="bi bi-phone"></i>
+            Stories del día
+          </button>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           {isAgentRunning && (
@@ -248,7 +256,9 @@ const PlannerPage: React.FC = () => {
               </div>
             </>
           )
-          : <PostList />
+          : view === 'list'
+            ? <PostList />
+            : <StorySequence accountId={primaryAccountId} />
         }
       </div>
 
