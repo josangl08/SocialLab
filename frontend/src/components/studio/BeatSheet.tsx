@@ -1,5 +1,6 @@
 import React from 'react';
 import type { BeatItemOutput } from '../../types';
+import './BeatSheet.css';
 
 export interface BeatSheetProps {
   beats: BeatItemOutput[];
@@ -52,10 +53,10 @@ export const BeatSheet: React.FC<BeatSheetProps> = ({
               const isOver4 = beat.alert === 'OVER_4S' || beat.duration_s > 4;
               return (
                 <tr key={idx} className="border-bottom border-dark">
-                  <td className="text-secondary font-monospace" style={{ whiteSpace: 'nowrap' }}>
+                  <td className="beat-sheet-time text-secondary font-monospace">
                     {beat.start_s.toFixed(1)}s - {beat.end_s.toFixed(1)}s
                   </td>
-                  <td className="font-monospace" style={{ whiteSpace: 'nowrap' }}>
+                  <td className="beat-sheet-time font-monospace">
                     {beat.duration_s.toFixed(1)}s
                   </td>
                   <td>

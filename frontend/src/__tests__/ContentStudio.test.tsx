@@ -542,4 +542,76 @@ describe('ContentStudio Component', () => {
     expect(savedForm().has('content_structure')).toBe(false);
   });
 
+  // --- Estrategia aplicada ---
+
+  const mockCampaign = (campaign: object | null) => {
+    (apiClient.get as any).mockImplementation((url: string) => {
+      if (url.includes('/instagram/accounts')) return Promise.resolve(mockAccounts);
+      if (url.includes('/api/agent/campaign')) return Promise.resolve(campaign);
+      return Promise.resolve([]);
+    });
+  };
+
+  test('sin campaña activa arranca con la estrategia personal', async () => {
+    mockCampaign(null);
+    await renderStudio();
+
+    expect(await screen.findByRole('button', { name: /Historia personal/i })).toBeInTheDocument();
+    expect(apiClient.get).toHaveBeenCalledWith(expect.stringContaining('/api/agent/campaign?account_id=1'));
+  });
+
+  test('cambiar la estrategia afecta a la generación y no modifica la campaña', async () => {
+    mockCampaign({ account_id: 1, strategy_mode: 'commercial_campaign' });
+    (contentApi.generateReel as any).mockResolvedValue(reelPiece(1));
+    await renderStudio();
+
+    fireEvent.click(await screen.findByRole('button', { name: /Campaña comercial/i }));
+    expect(screen.getByRole('button', { name: /Historia personal/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Reel$/i }));
+    fireEvent.change(screen.getByLabelText(/Tema del Reel/i), { target: { value: 'Tema' } });
+    fireEvent.click(screen.getByRole('button', { name: /Generar con IA/i }));
+
+    await waitFor(() =>
+      expect(contentApi.generateReel).toHaveBeenCalledWith(expect.objectContaining({ strategy_mode: 'personal_storyline' }))
+    );
+    expect(apiClient.post).not.toHaveBeenCalled();
+  });
+
+  // --- Acciones de salida ---
+
+  test('no programa sin fecha ni con fecha pasada', async () => {
+    await renderStudio();
+
+    fireEvent.click(screen.getByRole('button', { name: /Programar/i }));
+    expect(await screen.findByText(/selecciona una fecha y hora futura/i)).toBeInTheDocument();
+
+    const pastDate = new Date();
+    pastDate.setDate(pastDate.getDate() - 1);
+    fireEvent.change(screen.getByLabelText(/Fecha y hora programada/i), {
+      target: { value: pastDate.toISOString().slice(0, 16) },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Programar/i }));
+
+    expect(await screen.findByText(/debe ser en el futuro/i)).toBeInTheDocument();
+    expect(apiClient.postForm).not.toHaveBeenCalled();
+  });
+
+  test('permite guardar aunque haya avisos de calidad', async () => {
+    (contentApi.lintCaption as any).mockResolvedValue({
+      visible_text: '', visible_length: 0, truncated: false, hashtag_count: 6, hashtag_limit: 5,
+      hashtags_over_limit: ['#f'], keywords_missing_in_visible: [],
+      slop: { score: 0, hits: [], invisible_chars: 0, em_dash_count: 0 },
+      hook: { formula_id: null, formula_name: null, score: 0, dealbreakers: [] },
+      warnings: [{ code: 'HASHTAGS_OVER_LIMIT', message: 'Más de 5 hashtags' }],
+    });
+    await renderStudio();
+
+    fireEvent.change(screen.getByLabelText(/Texto del Caption/i), { target: { value: 'Hola #a #b #c #d #e #f' } });
+    expect(await screen.findByText(/Más de 5 hashtags/i, {}, { timeout: 2000 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Guardar borrador/i }));
+
+    await waitFor(() => expect(apiClient.postForm).toHaveBeenCalled());
+    expect(savedForm().get('content')).toBe('Hola #a #b #c #d #e #f');
+  });
 });
