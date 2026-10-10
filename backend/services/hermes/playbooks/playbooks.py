@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Dict, List
 
 PLAYBOOKS: Dict[str, str] = {
-    "hooks": "6 arquetipos de gancho de primera línea para maximizar retención",
+    "hooks": "26 fórmulas de gancho de primera línea agrupadas por strategy_mode",
     "hashtag-layering": "Estrategia de hashtags en 3 capas (específica, nicho, comunidad)",
-    "content-matrix": "Matriz de contenidos con progresión de embudo adaptable de 4 fases",
+    "content-matrix": "Progresión mensual de 4 fases y matrices semanales por strategy_mode",
 }
 
 _DIR = Path(__file__).parent

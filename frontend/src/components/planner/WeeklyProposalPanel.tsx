@@ -27,6 +27,23 @@ const POST_TYPE_LABELS: Record<string, string> = {
   post: 'Post',
 };
 
+const MATRIX_ROLE_LABELS: Record<string, string> = {
+  proof: 'Proof',
+  teach: 'Teach',
+  opinion: 'Opinion',
+  offer: 'Offer',
+  story: 'Story',
+  learning: 'Learning',
+  reflection: 'Reflection',
+};
+
+function slotBadgeLabel(slot: CalendarSlot): string {
+  const ptype = slot.post_type ?? 'post';
+  const typeLabel = POST_TYPE_LABELS[ptype] ?? ptype;
+  const role = slot.matrix_role;
+  return role ? `${MATRIX_ROLE_LABELS[role] ?? role} · ${typeLabel}` : typeLabel;
+}
+
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const WEEKDAY_LABELS: Record<string, string> = {
   Monday: 'Mon', Tuesday: 'Tue', Wednesday: 'Wed',
@@ -190,6 +207,26 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
       }));
     } finally {
       setSlotLoading(key, false);
+    }
+  }, []);
+
+  const handleHookSelect = useCallback(async (proposalId: string, slotIndex: number, hook: string) => {
+    const key = `${proposalId}-${slotIndex}`;
+    setSlotLoading(key + '-hook', true);
+    try {
+      const data = await apiClient.patch<{ caption: string }>(
+        `/api/agent/proposals/${proposalId}/slots/${slotIndex}/hook`,
+        { hook }
+      );
+      setSlotCaptions(prev => ({ ...prev, [key]: data.caption }));
+      setProposals(prev => prev.map(p => {
+        if (p.id !== proposalId) return p;
+        return { ...p, slots: p.slots.map((s, i) => i === slotIndex ? { ...s, caption: data.caption } : s) };
+      }));
+    } catch {
+      // Silent — the previous hook stays selected
+    } finally {
+      setSlotLoading(key + '-hook', false);
     }
   }, []);
 
@@ -359,7 +396,7 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
                         />
                       )}
                       <span className={`wpp-badge wpp-badge--${ptype}`}>
-                        {POST_TYPE_LABELS[ptype] ?? ptype}
+                        {slotBadgeLabel(slot)}
                       </span>
                     </div>
                   ) : (
@@ -437,10 +474,31 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
                 <div className="wpp-detail-body">
                   <div className="wpp-detail-meta">
                     <span className="wpp-detail-day">{slot.day}</span>
-                    <span className={`wpp-badge wpp-badge--${ptype}`}>{POST_TYPE_LABELS[ptype] ?? ptype}</span>
+                    <span className={`wpp-badge wpp-badge--${ptype}`}>{slotBadgeLabel(slot)}</span>
                     {slot.theme && <span className="wpp-detail-theme">{slot.theme}</span>}
                   </div>
                   <p className="wpp-detail-caption">{caption}</p>
+
+                  {ptype === 'reel' && (slot.hook_candidates?.length ?? 0) > 0 && (
+                    <div className="wpp-hooks">
+                      <span className="wpp-hooks-label">Hook candidates</span>
+                      {slot.hook_candidates!.map(hook => {
+                        const selected = caption.split('\n', 1)[0] === hook;
+                        return (
+                          <button
+                            key={hook}
+                            type="button"
+                            className={`wpp-hook-option${selected ? ' wpp-hook-option--selected' : ''}`}
+                            aria-pressed={selected}
+                            onClick={() => !selected && handleHookSelect(proposal.id, idx, hook)}
+                            disabled={!!actionLoading[activeSlot + '-hook']}
+                          >
+                            {hook}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
 
                   {/* Date/time input */}
                   <div className="wpp-time-row">

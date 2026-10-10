@@ -1,13 +1,22 @@
 import logging
 from datetime import datetime, timedelta, date
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from mcp.server.mcpserver import MCPServer
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import CalendarSlot
+from services.content_quality import humanize, enforce_hashtag_limit, lint_caption
 
 logger = logging.getLogger(__name__)
 
 mcp = MCPServer("Supabase Database Server")
+
+
+def _humanize_for_account(text: str, account: Dict[str, Any]) -> str:
+    """Anti-slop filter (AD-4) unless the account disabled it, with its banned phrases."""
+    if not account.get("humanizer_enabled", True):
+        return text
+    cleaned, _ = humanize(text, extra_banned=account.get("banned_phrases") or [])
+    return cleaned
 
 @mcp.tool()
 def supabase_get_posts(instagram_account_id: int, limit: int = 10) -> List[Dict[str, Any]]:
@@ -56,18 +65,33 @@ def supabase_create_post(
     media_url: Optional[str] = None,
     scheduled_publish_time: Optional[str] = None,
     media_product_type: str = "FEED",
-    drive_file_id: Optional[str] = None
+    drive_file_id: Optional[str] = None,
+    content_format: Optional[Literal["post", "reel", "carousel", "story"]] = None,
+    matrix_role: Optional[Literal["proof", "teach", "opinion", "offer", "story", "learning", "reflection"]] = None,
 ) -> Dict[str, Any]:
-    """Create a new post draft in the posts table."""
+    """Create a new post draft in the posts table. The caption is cleaned before
+    saving: anti-slop humanizer (unless the account disabled it) and a hard limit
+    of 5 hashtags. content_format is the post format; matrix_role is the slot's role
+    in the weekly content matrix."""
     supabase = get_supabase_admin_client()
     # Resolve the owning user_id from the account: this tool runs with the
     # service-role client (bypasses RLS), but /api/posts reads with the user's
     # client (RLS: user_id = auth.uid()), so a post without user_id is invisible
     # in the calendar even though it exists.
-    acc_res = supabase.table("instagram_accounts").select("user_id").eq("id", instagram_account_id).execute()
-    user_id: Optional[str] = acc_res.data[0].get("user_id") if acc_res.data else None
+    acc_res = supabase.table("instagram_accounts").select(
+        "user_id, humanizer_enabled, banned_phrases"
+    ).eq("id", instagram_account_id).execute()
+    account: Dict[str, Any] = acc_res.data[0] if acc_res.data else {}
+    user_id: Optional[str] = account.get("user_id")
     if user_id is None:
         logger.warning("supabase_create_post: no user_id for instagram_account_id=%s", instagram_account_id)
+
+    # Quality filter (AD-4): this is Hermes' single write point for captions.
+    caption = enforce_hashtag_limit(_humanize_for_account(caption, account))
+    quality_report = lint_caption(
+        caption, format=content_format or "post", extra_banned=account.get("banned_phrases") or []
+    )
+
     post_data = {
         "instagram_account_id": instagram_account_id,
         "user_id": user_id,
@@ -77,7 +101,10 @@ def supabase_create_post(
         "post_type": media_product_type,
         "drive_file_id": drive_file_id,
         "status": "draft",
-        "is_ai_generated": True
+        "is_ai_generated": True,
+        "content_format": content_format,
+        "matrix_role": matrix_role,
+        "quality_report": quality_report,
     }
     response = supabase.table("posts").insert(post_data).execute()
     if response.data and len(response.data) > 0:
@@ -94,13 +121,28 @@ def supabase_create_proposal(
     and caption (post_id, image_id, post_type are optional) — this shape is what
     the planner UI renders, so an incomplete slot won't display correctly. status
     is not a caller-settable param — a new proposal always starts pending_approval,
-    same principle as supabase_create_monthly_campaign hardcoding its own status."""
+    same principle as supabase_create_monthly_campaign hardcoding its own status.
+    Captions and hook_candidates go through the same quality filter as
+    supabase_create_post, so a hook chosen later in the planner is already clean."""
     supabase = get_supabase_admin_client()
+    acc_res = supabase.table("instagram_accounts").select(
+        "humanizer_enabled, banned_phrases"
+    ).eq("id", instagram_account_id).execute()
+    account: Dict[str, Any] = acc_res.data[0] if acc_res.data else {}
+
+    slots_data = []
+    for slot in slots or []:
+        data = slot.model_dump()
+        data["caption"] = enforce_hashtag_limit(_humanize_for_account(data["caption"], account))
+        if data.get("hook_candidates"):
+            data["hook_candidates"] = [_humanize_for_account(h, account) for h in data["hook_candidates"]]
+        slots_data.append(data)
+
     proposal_data = {
         "account_id": instagram_account_id,
         "week_start": week_start,
         "status": "pending_approval",
-        "slots": [s.model_dump() for s in (slots or [])]
+        "slots": slots_data
     }
     response = supabase.table("content_proposals").insert(proposal_data).execute()
     if response.data and len(response.data) > 0:

@@ -94,7 +94,9 @@ def test_supabase_create_post():
         assert result == {"id": 1, "content": "New Post"}
         mock_client.table.assert_any_call("instagram_accounts")
         mock_client.table.assert_any_call("posts")
-        mock_client.table.return_value.insert.assert_called_once_with({
+        inserted = mock_client.table.return_value.insert.call_args[0][0]
+        quality_report = inserted.pop("quality_report")
+        assert inserted == {
             "instagram_account_id": 123,
             "user_id": "user-abc",
             "content": "New Post",
@@ -103,8 +105,11 @@ def test_supabase_create_post():
             "post_type": "FEED",
             "drive_file_id": "drive_123",
             "status": "draft",
-            "is_ai_generated": True
-        })
+            "is_ai_generated": True,
+            "content_format": None,
+            "matrix_role": None,
+        }
+        assert quality_report["hashtag_count"] == 0
 
 
 def test_supabase_create_post_user_id_none_when_account_missing():
@@ -139,14 +144,16 @@ def test_supabase_create_proposal():
         )
 
         assert result == {"id": 2, "week_start": "2026-07-27"}
-        mock_client.table.assert_called_once_with("content_proposals")
+        mock_client.table.assert_any_call("instagram_accounts")
+        mock_client.table.assert_any_call("content_proposals")
         mock_client.table.return_value.insert.assert_called_once_with({
             "account_id": 123,
             "week_start": "2026-07-27",
             "status": "pending_approval",
             "slots": [{
                 "day": "Monday", "post_id": None, "image_id": None,
-                "theme": "match highlight", "caption": "cap 1", "post_type": None
+                "theme": "match highlight", "caption": "cap 1", "post_type": None,
+                "matrix_role": None, "hook_candidates": None
             }]
         })
 
@@ -461,3 +468,191 @@ async def test_supabase_update_post_image_via_mcp():
         assert response.content[0].type == "text"
         assert "10" in response.content[0].text
 
+
+def test_supabase_create_post_applies_humanize_and_hashtag_limit():
+    with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        mock_client.table.return_value.insert.return_value.execute.return_value = MagicMock(
+            data=[{"id": 101, "content": "Cleaned caption"}]
+        )
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{
+                "user_id": "user-abc",
+                "humanizer_enabled": True,
+                "banned_phrases": ["compra ya"]
+            }]
+        )
+
+        raw_caption = (
+            "Descubre este game-changer \u200b para tu negocio ——— compra ya hoy "
+            "#uno #dos #tres #cuatro #cinco #seis #siete"
+        )
+
+        result = supabase_create_post(
+            instagram_account_id=123,
+            caption=raw_caption,
+            content_format="reel",
+            matrix_role="proof"
+        )
+
+        assert result == {"id": 101, "content": "Cleaned caption"}
+        inserted = mock_client.table.return_value.insert.call_args[0][0]
+
+        # Filtro de humanizado aplicado
+        assert "\u200b" not in inserted["content"]
+        assert "———" not in inserted["content"]
+        assert "compra ya" not in inserted["content"]
+        assert "game-changer" not in inserted["content"]
+
+        # Límite duro de 5 hashtags aplicado (AD-7b)
+        assert "#seis" not in inserted["content"]
+        assert "#siete" not in inserted["content"]
+        assert inserted["content"].count("#") <= 5
+
+        # Metadatos persistidos
+        assert inserted["content_format"] == "reel"
+        assert inserted["matrix_role"] == "proof"
+        assert "quality_report" in inserted
+        assert isinstance(inserted["quality_report"], dict)
+        assert "slop" in inserted["quality_report"]
+
+
+def test_supabase_create_post_respects_humanizer_enabled_false():
+    with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        mock_client.table.return_value.insert.return_value.execute.return_value = MagicMock(
+            data=[{"id": 102, "content": "Post"}]
+        )
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{
+                "user_id": "user-abc",
+                "humanizer_enabled": False,
+                "banned_phrases": ["compra ya"]
+            }]
+        )
+
+        raw_caption = "Este game-changer compra ya #uno #dos #tres #cuatro #cinco #seis"
+
+        result = supabase_create_post(
+            instagram_account_id=123,
+            caption=raw_caption
+        )
+
+        assert result == {"id": 102, "content": "Post"}
+        inserted = mock_client.table.return_value.insert.call_args[0][0]
+
+        # Respeta humanizer_enabled=False: no altera términos vetados ni sintéticos
+        assert "game-changer" in inserted["content"]
+        assert "compra ya" in inserted["content"]
+
+        # Pero enforce_hashtag_limit se mantiene (AD-7b)
+        assert "#seis" not in inserted["content"]
+        assert inserted["content"].count("#") <= 5
+        assert "quality_report" in inserted
+
+
+def test_supabase_create_post_idempotence():
+    with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        mock_client.table.return_value.insert.return_value.execute.return_value = MagicMock(
+            data=[{"id": 103, "content": "Clean"}]
+        )
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{
+                "user_id": "user-abc",
+                "humanizer_enabled": True,
+                "banned_phrases": []
+            }]
+        )
+
+        clean_caption = "Entrenamiento de fuerza enfocado en técnica #fitness #gym #salud"
+
+        supabase_create_post(instagram_account_id=123, caption=clean_caption)
+        inserted_1 = mock_client.table.return_value.insert.call_args[0][0]
+
+        # Aplicar el filtro sobre un texto ya limpio no lo modifica
+        assert inserted_1["content"] == clean_caption
+
+
+def test_supabase_create_proposal_saves_matrix_role_and_hook_candidates():
+    with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        mock_client.table.return_value.insert.return_value.execute.return_value = MagicMock(
+            data=[{"id": 201, "week_start": "2026-10-12"}]
+        )
+
+        slots = [
+            CalendarSlot(
+                day="Monday",
+                theme="Proof of work",
+                caption="Gancho elegido",
+                post_type="reel",
+                matrix_role="proof",
+                hook_candidates=["Gancho 1", "Gancho 2", "Gancho 3"]
+            )
+        ]
+
+        result = supabase_create_proposal(
+            instagram_account_id=123,
+            week_start="2026-10-12",
+            slots=slots
+        )
+
+        assert result == {"id": 201, "week_start": "2026-10-12"}
+        inserted = mock_client.table.return_value.insert.call_args[0][0]
+        slot_data = inserted["slots"][0]
+        assert slot_data["matrix_role"] == "proof"
+        assert slot_data["hook_candidates"] == ["Gancho 1", "Gancho 2", "Gancho 3"]
+
+
+def _proposal_client(mock_get_client, account):
+    mock_client = MagicMock()
+    mock_get_client.return_value = mock_client
+    mock_client.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{"id": 301}])
+    mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[account]
+    )
+    return mock_client
+
+
+def test_supabase_create_proposal_cleans_caption_and_hook_candidates():
+    with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client:
+        mock_client = _proposal_client(mock_get_client, {"humanizer_enabled": True, "banned_phrases": ["compra ya"]})
+
+        slots = [CalendarSlot(
+            day="Monday", theme="t", post_type="reel", matrix_role="proof",
+            caption="Un game-changer\u200b total, compra ya #a #b #c #d #e #f",
+            hook_candidates=["Un game-changer total", "Compra ya y gana 40%", "Sin cambios aquí"],
+        )]
+        supabase_create_proposal(instagram_account_id=123, week_start="2026-10-12", slots=slots)
+
+        slot = mock_client.table.return_value.insert.call_args[0][0]["slots"][0]
+        assert "game-changer" not in slot["caption"]
+        assert "\u200b" not in slot["caption"]
+        assert "compra ya" not in slot["caption"]
+        assert slot["caption"].count("#") == 5
+        assert all("game-changer" not in h and "compra ya" not in h.lower() for h in slot["hook_candidates"])
+        assert slot["hook_candidates"][2] == "Sin cambios aquí"
+
+
+def test_supabase_create_proposal_respects_humanizer_disabled():
+    with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client:
+        mock_client = _proposal_client(mock_get_client, {"humanizer_enabled": False, "banned_phrases": []})
+
+        slots = [CalendarSlot(
+            day="Monday", theme="t", post_type="reel", caption="Un game-changer",
+            hook_candidates=["Un game-changer", "Otro", "Tercero"],
+        )]
+        supabase_create_proposal(instagram_account_id=123, week_start="2026-10-12", slots=slots)
+
+        slot = mock_client.table.return_value.insert.call_args[0][0]["slots"][0]
+        assert slot["caption"] == "Un game-changer"
+        assert slot["hook_candidates"][0] == "Un game-changer"

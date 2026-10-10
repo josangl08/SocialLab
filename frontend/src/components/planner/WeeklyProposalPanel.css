@@ -185,6 +185,45 @@
 .wpp-badge--story    { background: rgba(234,179,8,0.18);  color: #fde047; border-color: rgba(234,179,8,0.3); }
 .wpp-badge--post     { background: rgba(34,197,94,0.18);  color: #86efac; border-color: rgba(34,197,94,0.3); }
 
+/* ── Hook candidates (Reels) ─────────────────────────── */
+
+.wpp-hooks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 0.75rem;
+}
+
+.wpp-hooks-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--sl-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.wpp-hook-option {
+  font-size: 11px;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--sl-border);
+  background: transparent;
+  color: var(--sl-text-muted);
+  cursor: pointer;
+}
+
+.wpp-hook-option:hover:not(:disabled) {
+  border-color: rgba(239,68,68,0.5);
+}
+
+.wpp-hook-option--selected {
+  border-color: rgba(239,68,68,0.6);
+  background: rgba(239,68,68,0.12);
+  color: #fca5a5;
+  cursor: default;
+}
+
 /* ── Expanded detail panel ───────────────────────────── */
 
 .wpp-detail-panel {

@@ -251,4 +251,144 @@ describe('WeeklyProposalPanel Component', () => {
       );
     });
   });
+
+  test('renders badge with matrix_role and format [Rol · Formato]', async () => {
+    const proposalsWithRole = [
+      {
+        id: 'proposal-role',
+        account_id: '123',
+        week_start: '2026-06-29',
+        status: 'pending_approval',
+        slots: [
+          {
+            day: 'Monday',
+            theme: 'Proof of work',
+            caption: 'Resultados reales',
+            post_type: 'reel',
+            matrix_role: 'proof',
+            post_id: 1001,
+            image_id: 'file-abc',
+          },
+          {
+            day: 'Tuesday',
+            theme: 'Educational carousel',
+            caption: 'Paso a paso',
+            post_type: 'carousel',
+            matrix_role: 'teach',
+            post_id: 1002,
+            image_id: 'file-def',
+          },
+        ],
+      },
+    ];
+
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (url.includes('/api/agent/proposals?account_id=')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(proposalsWithRole),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    render(
+      <WeeklyProposalPanel
+        accountId={123}
+        refreshSignal={1}
+        onProposalAction={mockOnProposalAction}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading proposals/i)).not.toBeInTheDocument();
+    });
+
+    // Badge combina matrix_role y post_type: [Proof · Reel] y [Teach · Carousel]
+    expect(screen.getByText(/Proof\s*·\s*Reel/i)).toBeInTheDocument();
+    expect(screen.getByText(/Teach\s*·\s*Carousel/i)).toBeInTheDocument();
+  });
+
+  test('renders selector between 3 hook candidates and selecting one updates caption', async () => {
+    const hookCandidates = [
+      'El 78% de las cuentas cometen este error',
+      '¿Y si todo lo que sabes sobre Reels fuera falso?',
+      'Dejé de buscar la perfección y mis ventas subieron un 40%'
+    ];
+
+    const proposalsWithHooks = [
+      {
+        id: 'proposal-hooks',
+        account_id: '123',
+        week_start: '2026-06-29',
+        status: 'pending_approval',
+        slots: [
+          {
+            day: 'Monday',
+            theme: 'Hook test Reel',
+            caption: `${hookCandidates[0]}\n\nAquí va el resto del contenido.`,
+            post_type: 'reel',
+            matrix_role: 'proof',
+            hook_candidates: hookCandidates,
+            post_id: 1001,
+            image_id: 'file-abc',
+          },
+        ],
+      },
+    ];
+
+    const newCaption = `${hookCandidates[1]}\n\nAquí va el resto del contenido.`;
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (url.includes('/api/agent/proposals?account_id=')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(proposalsWithHooks),
+        });
+      }
+      if (url.includes('/slots/0/hook')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ caption: newCaption }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    render(
+      <WeeklyProposalPanel
+        accountId={123}
+        refreshSignal={1}
+        onProposalAction={mockOnProposalAction}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading proposals/i)).not.toBeInTheDocument();
+    });
+
+    const lunLabel = screen.getByText('Mon');
+    const dayBox = lunLabel.closest('div[class*="wpp-day-box"]') as HTMLElement;
+    fireEvent.click(dayBox);
+
+    // Los 3 ganchos candidatos están presentes en el panel
+    expect(screen.getByText(hookCandidates[0])).toBeInTheDocument();
+    expect(screen.getByText(hookCandidates[1])).toBeInTheDocument();
+    expect(screen.getByText(hookCandidates[2])).toBeInTheDocument();
+
+    // Seleccionar el segundo gancho candidato lo persiste y actualiza el caption visible
+    fireEvent.click(screen.getByText(hookCandidates[1]));
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/agent/proposals/proposal-hooks/slots/0/hook'),
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ hook: hookCandidates[1] }),
+        })
+      );
+    });
+    await waitFor(() => {
+      const caption = document.querySelector('.wpp-detail-caption');
+      expect(caption?.textContent?.startsWith(hookCandidates[1])).toBe(true);
+    });
+    expect(screen.getByText(hookCandidates[1]).closest('button')).toHaveAttribute('aria-pressed', 'true');
+  });
 });
+

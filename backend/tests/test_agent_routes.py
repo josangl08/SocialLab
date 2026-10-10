@@ -904,3 +904,49 @@ def test_context_graph_includes_current_month_pending_campaign(mock_agent_admin_
 
 
 
+
+
+def _hook_slot_mocks(mock_agent_supabase, mock_agent_admin_supabase, slot):
+    mock_proposal_exec = MagicMock()
+    mock_proposal_exec.execute.return_value = MagicMock(data=[{
+        "id": "prop-123", "account_id": 456, "week_start": "2026-06-29",
+        "slots": [slot], "status": "pending_approval"
+    }])
+    mock_agent_supabase.table.return_value.select.return_value.eq.return_value = mock_proposal_exec
+
+    tables = {name: MagicMock() for name in ("instagram_accounts", "posts", "content_proposals")}
+    tables["instagram_accounts"].select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{"user_id": USER_ID}]
+    )
+    mock_agent_admin_supabase.table.side_effect = lambda name: tables[name]
+    return tables
+
+
+def test_select_slot_hook_replaces_first_line_in_slot_and_post(mock_agent_supabase, mock_agent_admin_supabase):
+    hooks = ["Gancho uno", "Gancho dos", "Gancho tres"]
+    tables = _hook_slot_mocks(mock_agent_supabase, mock_agent_admin_supabase, {
+        "day": "Monday", "post_id": 1001, "theme": "t", "post_type": "reel",
+        "caption": "Gancho uno\n\nResto del caption #tag", "hook_candidates": hooks,
+    })
+
+    response = client.patch("/api/agent/proposals/prop-123/slots/0/hook", json={"hook": "Gancho dos"})
+
+    assert response.status_code == 200
+    expected = "Gancho dos\n\nResto del caption #tag"
+    assert response.json() == {"caption": expected}
+    tables["posts"].update.assert_called_once_with({"content": expected})
+    saved_slots = tables["content_proposals"].update.call_args[0][0]["slots"]
+    assert saved_slots[0]["caption"] == expected
+
+
+def test_select_slot_hook_rejects_hook_not_in_candidates(mock_agent_supabase, mock_agent_admin_supabase):
+    tables = _hook_slot_mocks(mock_agent_supabase, mock_agent_admin_supabase, {
+        "day": "Monday", "post_id": 1001, "theme": "t", "post_type": "reel",
+        "caption": "Gancho uno", "hook_candidates": ["Gancho uno", "Gancho dos", "Gancho tres"],
+    })
+
+    response = client.patch("/api/agent/proposals/prop-123/slots/0/hook", json={"hook": "Otro gancho"})
+
+    assert response.status_code == 422
+    tables["posts"].update.assert_not_called()
+    tables["content_proposals"].update.assert_not_called()

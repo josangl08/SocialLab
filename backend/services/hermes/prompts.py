@@ -8,6 +8,17 @@ _SPANISH_WEEKDAYS = [
     "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"
 ]
 
+# Reglas deterministas que el filtro de supabase_create_post también aplica (AD-4):
+# se piden en el prompt para que el caption ya salga limpio y el filtro sea un no-op.
+_CAPTION_QUALITY_RULES = (
+    "Reglas de calidad del caption (anti-slop): escribe como una persona, sin lenguaje "
+    "sintético de IA — nada de 'delve into', 'sumergirse en', 'game-changer', 'en el "
+    "vertiginoso mundo', 'no es ningún secreto', 'desbloquea tu potencial' ni muletillas "
+    "parecidas; no encadenes em dashes (—), usa comas o puntos; no uses caracteres "
+    "invisibles. Lo importante y el gancho van en los primeros 125 caracteres, que es lo "
+    "que se ve antes del '… más' en móvil. Máximo 5 hashtags por post, nunca más."
+)
+
 
 def _build_strategy_context(account: dict) -> str:
     """Describe el perfil de la cuenta (tono, audiencia, mix de contenido, cadencia)
@@ -20,7 +31,7 @@ def _build_strategy_context(account: dict) -> str:
     style_guide = account.get('style_guide') or ''
     target_audience = account.get('target_audience') or ''
     hashtag_strategy = account.get('hashtag_strategy', 'minimal')
-    hashtag_range = {'minimal': '1-3', 'moderate': '4-7', 'maximum': '8-12'}.get(hashtag_strategy, '1-3')
+    hashtag_range = {'minimal': '1-2', 'moderate': '3-4', 'maximum': '5'}.get(hashtag_strategy, '1-2')
 
     sector = account.get('sector') or ''
     purpose = account.get('purpose') or ''
@@ -32,28 +43,30 @@ def _build_strategy_context(account: dict) -> str:
     reference_accounts = ', '.join(str(r) for r in ref_raw if r) if isinstance(ref_raw, list) else str(ref_raw).strip()
 
     hashtag_playbook = load_playbook("hashtag-layering")
+    hooks_playbook = load_playbook("hooks")
     if voice_mode == 'professional':
-        hooks_playbook = load_playbook("hooks")
         voice = (
             f"Voz de marca de tono {tone}, semiformal, emojis mínimos (0-1). "
-            f"Empieza con el beneficio principal o propuesta de valor, abriendo con un gancho:\n{hooks_playbook}\n"
+            f"Empieza con el beneficio principal o propuesta de valor, abriendo con un gancho "
+            f"de las fórmulas de abajo, priorizando las del modo commercial_campaign:\n{hooks_playbook}\n"
             f"CTA de conversión al final ('Contáctanos', 'Reserva ahora', 'Link en bio'). "
             f"{hashtag_playbook}\n"
-            f"Ajusta el total al rango {hashtag_range} hashtags. "
+            f"Ajusta el total a {hashtag_range} hashtags. "
             f"Guía de estilo: {style_guide or 'profesional y directo'}."
         )
     else:
         voice = (
             f"Voz en primera persona, tono {tone}. El caption debe ser CORTO por defecto — "
             f"una frase, unas pocas palabras, o incluso solo emojis sin texto (una opción "
-            f"válida y a menudo la mejor). Cuando el caption pase de una frase, considera abrir con un gancho "
-            f"como opción para conectar con la imagen. Nada de fórmula fija: no fuerces un CTA ni una "
+            f"válida y a menudo la mejor). Cuando el caption pase de una frase, abre con una fórmula de "
+            f"curiosidad o anécdota del modo personal_storyline (o de las válidas en ambos modos):\n{hooks_playbook}\n"
+            f"Nada de fórmula fija: no fuerces un CTA ni una "
             f"pregunta al final en cada post — a veces encaja invitar a comentar u opinar, "
             f"a veces no; decide según lo que pide la imagen, priorizando brevedad y "
             f"naturalidad sobre estructura. "
             f"Audiencia: {target_audience or 'comunidad general'}. "
             f"{hashtag_playbook}\n"
-            f"Ajusta el total al rango {hashtag_range} hashtags. "
+            f"Ajusta el total a {hashtag_range} hashtags. "
             f"Guía de estilo: {style_guide or 'cercano, casual y breve — como hablarías con un amigo'}."
         )
 
@@ -102,11 +115,15 @@ def _build_strategy_context(account: dict) -> str:
             "Úsalos para programar los posts — no es necesario consultar el histórico de rendimiento."
         )
 
+    banned_phrases = account.get('banned_phrases') or []
+    if banned_phrases:
+        extra.append(f"Términos vetados por la cuenta (no los uses nunca): {', '.join(banned_phrases)}.")
+
     memory_summary = account.get('agent_memory_summary')
     if memory_summary:
         extra.append(f"Aprendizajes de sesiones anteriores: {memory_summary}")
 
-    return f"{voice} {' '.join(extra)}".strip()
+    return f"{voice}\n{_CAPTION_QUALITY_RULES} {' '.join(extra)}".strip()
 
 
 def _build_brand_rules_context(account_id: int) -> str:
@@ -176,14 +193,23 @@ def get_system_prompt(
         "has_data es true, usa best_times_by_weekday para elegir la hora de cada post según su "
         "día de la semana (0=lunes); si no hay dato para ese día, o has_data es false, usa una "
         "hora razonable por defecto. Crea cada post con supabase_create_post, incluyendo "
-        "scheduled_publish_time. Guarda el post_id que te devuelva y el drive_file_id que "
+        "scheduled_publish_time, content_format (post, reel, carousel o story) y matrix_role "
+        "(ver matriz semanal abajo). Guarda el post_id que te devuelva y el drive_file_id que "
         "usaste para cada uno — los necesitas en el paso 7.\n"
+        "Si el post es un carrusel, estructura el caption como el recorrido de las "
+        "diapositivas: portada (cover) de 6 palabras como máximo, una diapositiva que "
+        "plantee lo que está en juego, ideas de 25 palabras como máximo cada una, un "
+        "resumen (recap) y un CTA final.\n"
         "7. Agrupa los posts creados en una única supabase_create_proposal para la semana "
         "elegida. Cada slot DEBE incluir post_id (el id devuelto por supabase_create_post para "
         "ese día) e image_id (el mismo drive_file_id que usaste al crear ese post) — sin estos "
         "dos campos el planner no podrá mostrar la foto ni vincular el slot con su post. El campo "
         "day de cada slot debe repetir el mismo nombre en inglés (Monday..Sunday) que usaste en "
-        "el paso 5, nunca traducido.\n"
+        "el paso 5, nunca traducido. Cada slot DEBE incluir también matrix_role (el mismo que "
+        "usaste en supabase_create_post) y, si el post es un reel, hook_candidates: una lista "
+        "de exactamente 3 ganchos candidatos distintos (fórmulas diferentes del playbook de "
+        "ganchos, cada uno de 125 caracteres como máximo), con el primero igual a la primera "
+        "línea del caption. En los demás formatos omite hook_candidates.\n"
         "8. Llama a supabase_update_last_sync al terminar, sin importar si creaste una "
         "propuesta o no.\n\n"
         "Si crees que un análisis de qué tipo de contenido visual rinde mejor para esta cuenta "
@@ -197,7 +223,12 @@ def get_system_prompt(
         "llamadas a tools) para señalar que la sesión terminó."
     )
 
-    return f"{task_instructions}\n\n{strategy_context}{captions_context}{_build_brand_rules_context(account_id)}".strip()
+    matrix_context = (
+        "\n\nMatriz de contenidos (usa la matriz semanal del strategy_mode de la campaña "
+        f"para asignar matrix_role a cada post):\n{load_playbook('content-matrix')}"
+    )
+
+    return f"{task_instructions}\n\n{strategy_context}{matrix_context}{captions_context}{_build_brand_rules_context(account_id)}".strip()
 
 
 def _resolve_edit_post_id(context: dict) -> Any:

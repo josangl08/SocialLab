@@ -37,6 +37,8 @@ class Post(PostBase):
     drive_file_id: Optional[str] = None
     content_format: Optional[str] = None
     content_structure: Optional[dict] = None
+    quality_report: Optional[dict] = None
+    matrix_role: Optional[str] = None
 
 # --- Modelos de Inteligencia Artificial ---
 class InstagramAccountConfigUpdate(BaseModel):
@@ -163,6 +165,8 @@ class CalendarSlot(BaseModel):
     theme: str
     caption: str
     post_type: Optional[str] = None  # "post" | "reel" | "carousel" | "story"
+    matrix_role: Optional[str] = None
+    hook_candidates: Optional[list[str]] = None
 
 class ContentProposal(BaseModel):
     id: str

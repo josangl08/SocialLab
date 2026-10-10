@@ -565,6 +565,36 @@ def update_slot_type(
     return {"updated": True}
 
 
+class SlotHookRequest(BaseModel):
+    hook: str
+
+
+@router.patch("/proposals/{proposal_id}/slots/{slot_index}/hook")
+def select_slot_hook(
+    proposal_id: str,
+    slot_index: int,
+    request: SlotHookRequest,
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
+):
+    """Swap the caption's first line for one of the slot's hook_candidates (Reels)."""
+    proposal, slots = _get_proposal_and_slot(proposal_id, slot_index, str(current_user.id), supabase)
+    slot = slots[slot_index]
+    if request.hook not in (slot.get('hook_candidates') or []):
+        raise HTTPException(status_code=422, detail="El gancho no es uno de los candidatos del slot")
+
+    rest = (slot.get('caption') or '').split('\n', 1)
+    caption = request.hook + (f"\n{rest[1]}" if len(rest) > 1 else '')
+
+    post_id = slot.get('post_id')
+    if post_id:
+        admin_supabase.table('posts').update({'content': caption}).eq('id', post_id).execute()
+
+    slots[slot_index]['caption'] = caption
+    admin_supabase.table('content_proposals').update({'slots': slots}).eq('id', proposal_id).execute()
+    return {"caption": caption}
+
+
 _WEEKDAY_OFFSET: dict = {
     'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3,
     'Friday': 4, 'Saturday': 5, 'Sunday': 6,

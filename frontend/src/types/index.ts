@@ -51,6 +51,8 @@ export interface CalendarSlot {
   theme: string;
   caption: string;
   post_type?: string;
+  matrix_role?: string;
+  hook_candidates?: string[];
 }
 
 export interface ContentProposal {

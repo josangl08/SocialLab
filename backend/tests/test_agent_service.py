@@ -185,7 +185,7 @@ def test_build_strategy_context_new_fields():
     assert "Objetivo: Captación de clientes." in context
     assert "Pilares de contenido: Rutinas, Recetas saludables." in context
     assert "Cuentas de referencia: @fitgym, @healthy_food." in context
-    assert "4-7 hashtags" in context
+    assert "3-4 hashtags" in context
 
 
 def test_build_strategy_context_hashtag_strategy_mapping():
@@ -193,9 +193,9 @@ def test_build_strategy_context_hashtag_strategy_mapping():
     acc_moderate = {'account_type': 'personal', 'hashtag_strategy': 'moderate'}
     acc_maximum = {'account_type': 'personal', 'hashtag_strategy': 'maximum'}
 
-    assert "1-3 hashtags" in _build_strategy_context(acc_minimal)
-    assert "4-7 hashtags" in _build_strategy_context(acc_moderate)
-    assert "8-12 hashtags" in _build_strategy_context(acc_maximum)
+    assert "1-2 hashtags" in _build_strategy_context(acc_minimal)
+    assert "3-4 hashtags" in _build_strategy_context(acc_moderate)
+    assert "a 5 hashtags" in _build_strategy_context(acc_maximum)
 
 
 def test_build_strategy_context_caption_voice_overrides_account_type():
