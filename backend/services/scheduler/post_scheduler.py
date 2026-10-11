@@ -22,7 +22,8 @@ from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 from database.supabase_client import get_supabase_admin_client
 from services.publisher.instagram_publisher import (
     InstagramPublisher,
-    InstagramPublishError
+    InstagramPublishError,
+    resolve_publish_type
 )
 
 logger = logging.getLogger(__name__)
@@ -86,8 +87,7 @@ def publish_post_job(post_id: int) -> None:
             media_url=post_data['media_url'],
             caption=post_data.get('content', ''),
             instagram_account_id=instagram_account_id,
-            post_type=post_data.get('post_type', 'FEED'),
-            video_url=post_data.get('video_url'),
+            **resolve_publish_type(post_data),
             trial_graduation=post_data.get('trial_graduation')
         )
 

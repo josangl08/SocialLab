@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from auth.dependencies import get_current_user, get_user_supabase_client
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import User, Post
-from services.publisher.instagram_publisher import InstagramPublisher, InstagramPublishError
+from services.publisher.instagram_publisher import InstagramPublisher, InstagramPublishError, resolve_publish_type
 from supabase import Client
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,8 @@ def _structure_fields(content_format: Optional[str], content_structure: Optional
 
 
 class PublishPostRequest(BaseModel):
-    post_type: Optional[str] = Field(default='FEED')
+    # Sin valor se usa el tipo guardado en el post (resolve_publish_type)
+    post_type: Optional[str] = Field(default=None)
 
 
 class PublishPostResponse(BaseModel):
@@ -296,13 +297,15 @@ def publish_post_now(
             raise HTTPException(status_code=400, detail="Post must be associated with an Instagram account")
 
         publisher = InstagramPublisher()
-        post_type = request.post_type or post.get('post_type', 'FEED')
+        publish_type = resolve_publish_type(
+            {**post, 'content_format': None, 'post_type': request.post_type} if request.post_type else post
+        )
 
         result = publisher.publish_post(
             media_url=post['media_url'],
-            caption=post.get('caption', ''),
+            caption=post.get('content', ''),
             instagram_account_id=instagram_account_id,
-            post_type=post_type,
+            **publish_type,
             trial_graduation=post.get('trial_graduation')
         )
 

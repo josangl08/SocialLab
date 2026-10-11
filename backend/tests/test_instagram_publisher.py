@@ -178,3 +178,32 @@ def test_publish_carousel_ignores_trial_graduation(publisher, mock_account):
             data = call_item[1].get("data", {})
             assert "trial_params" not in data
 
+
+# --- resolve_publish_type: tipo guardado en posts -> argumentos de publish_post ---
+
+from services.publisher.instagram_publisher import resolve_publish_type
+
+
+@pytest.mark.parametrize("post", [
+    {"post_type": "reel", "content_format": "reel", "media_url": "https://x/v.mp4"},   # Studio
+    {"post_type": "REELS", "media_url": "https://x/v.mp4"},                             # Hermes
+    {"post_type": "VIDEO", "media_url": "https://x/v.mp4"},                             # sync
+])
+def test_resolve_reels_use_media_url_as_video(post):
+    assert resolve_publish_type(post) == {"post_type": "REELS", "video_url": "https://x/v.mp4"}
+
+
+@pytest.mark.parametrize("post,expected", [
+    ({"post_type": "story"}, "STORY"),
+    ({"post_type": "STORIES"}, "STORY"),
+    ({"post_type": "post", "content_format": "post"}, "FEED"),
+    ({"post_type": "carousel", "content_format": "carousel"}, "FEED"),
+    ({"post_type": "IMAGE"}, "FEED"),
+    ({}, "FEED"),
+])
+def test_resolve_other_types(post, expected):
+    assert resolve_publish_type(post) == {"post_type": expected, "video_url": None}
+
+
+def test_content_format_wins_over_post_type():
+    assert resolve_publish_type({"post_type": "FEED", "content_format": "reel", "media_url": "u"})["post_type"] == "REELS"

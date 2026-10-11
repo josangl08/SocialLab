@@ -25,6 +25,25 @@ from utils.encryption import decrypt_token
 
 logger = logging.getLogger(__name__)
 
+_REEL_TYPES = {'REEL', 'REELS', 'VIDEO'}
+_STORY_TYPES = {'STORY', 'STORIES'}
+
+
+def resolve_publish_type(post: Dict) -> Dict[str, Optional[str]]:
+    """
+    Traduce el tipo guardado en `posts` a los argumentos de publish_post.
+
+    `post_type` llega en varias convenciones: el Studio guarda 'reel'/'story'/'post',
+    Hermes 'REELS'/'STORIES'/'FEED' y el sync de Instagram 'VIDEO'/'IMAGE'. `content_format`
+    manda si existe. `posts` no tiene columna de vídeo: el vídeo de un Reel es su media_url.
+    """
+    kind = (post.get('content_format') or post.get('post_type') or 'FEED').upper()
+    if kind in _REEL_TYPES:
+        return {'post_type': 'REELS', 'video_url': post.get('video_url') or post.get('media_url')}
+    if kind in _STORY_TYPES:
+        return {'post_type': 'STORY', 'video_url': None}
+    return {'post_type': 'FEED', 'video_url': None}
+
 
 class InstagramPublishError(Exception):
     """Custom exception for Instagram publishing errors."""
