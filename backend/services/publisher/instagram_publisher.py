@@ -452,7 +452,8 @@ class InstagramPublisher:
         logger.info(f"Successfully published carousel: {media_id}")
 
         # Get permalink
-        permalink = self._get_media_permalink(media_id, access_token)
+        media_info = self._get_media_info(media_id, access_token)
+        permalink = media_info.get('permalink', '')
 
         return {
             'id': media_id,
