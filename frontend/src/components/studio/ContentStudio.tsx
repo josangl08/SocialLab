@@ -12,6 +12,7 @@ import QualityInspector from './QualityInspector';
 import RepurposePanel, { type RepurposePiece } from './RepurposePanel';
 import CarouselEditor from './CarouselEditor';
 import IdeaGenerator from './IdeaGenerator';
+import ProspectComments from './ProspectComments';
 import './ContentStudio.css';
 
 export interface ContentStudioProps {
@@ -359,6 +360,10 @@ export const ContentStudio: React.FC<ContentStudioProps> = ({ onPostGenerated })
             beats={reel?.beats.beats}
             beatsTotalSeconds={reel?.beats.total_s}
             beatsLoopsToHook={reel?.beats.loops_to_hook}
+          />
+          <ProspectComments
+            accountId={selectedAccountId ? Number(selectedAccountId) : null}
+            strategyMode={strategyMode}
           />
         </div>
       </div>

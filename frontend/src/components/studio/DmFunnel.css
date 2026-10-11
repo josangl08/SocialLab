@@ -1,0 +1,55 @@
+.dm-funnel-container {
+  padding: 16px;
+  color: var(--text-color, #f0f2f8);
+}
+
+.dm-funnel-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 10px;
+}
+
+.dm-funnel-form input {
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text-color, #f0f2f8);
+}
+
+.dm-funnel-form input:focus {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: var(--bs-primary, #0d6efd);
+  color: #fff;
+}
+
+.dm-funnel-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.dm-funnel-card-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.dm-funnel-text {
+  font-size: 0.88rem;
+  color: #fff;
+  line-height: 1.4;
+}
+
+.dm-funnel-copy-btn {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-color, #f0f2f8);
+  border-radius: 4px;
+}
+
+.dm-funnel-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}

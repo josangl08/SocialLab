@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Literal, Optional, Any
+from typing import Literal, Optional, Any, Union
 
 # --- Modelos de Usuario ---
 class UserRegister(BaseModel):
@@ -505,5 +505,55 @@ class SwipeFileResponse(BaseModel):
     by_formula: list[SwipeFileByFormula] = []
 
 
+# --- Modelos de Conversión y Comunidad (Fase F) ---
+
+CommentTriageLabel = Literal["lead", "question", "objection", "support", "noise"]
 
 
+class CommentTriageItem(BaseModel):
+    id: Union[str, int]
+    text: str
+    username: Optional[str] = None
+    label: CommentTriageLabel
+    suggested_reply: str
+
+
+class CommentsTriageResponse(BaseModel):
+    source: Literal["api", "unavailable", "manual"]
+    comments: list[CommentTriageItem] = []
+
+
+class CommentsTriageManualRequest(BaseModel):
+    comments: list[str] = Field(..., min_length=1, max_length=100)
+    account_id: Optional[int] = None
+    strategy_mode: Optional[Literal["commercial_campaign", "personal_storyline"]] = None
+    language: Optional[str] = "es"
+
+
+class ProspectCommentItem(BaseModel):
+    type: int = Field(..., ge=1, le=9)
+    type_name: str
+    text: str
+
+
+class ProspectCommentsRequest(BaseModel):
+    target_post_text: str = Field(..., min_length=1, max_length=5000)
+    account_id: Optional[int] = None
+    strategy_mode: Optional[Literal["commercial_campaign", "personal_storyline"]] = None
+    language: Optional[str] = "es"
+
+
+class ProspectCommentsResponse(BaseModel):
+    suggestions: list[ProspectCommentItem] = []
+
+
+class DmFunnelRequest(BaseModel):
+    keyword: str = Field(..., min_length=1, max_length=50)
+    resource_description: str = Field(..., min_length=1, max_length=500)
+    account_id: Optional[int] = None
+    language: Optional[str] = "es"
+
+
+class DmFunnelResponse(BaseModel):
+    delivery_dm: str = Field(..., min_length=1)
+    follow_ups: list[str] = Field(..., min_length=2, max_length=2)

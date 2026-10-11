@@ -337,4 +337,57 @@ export interface SwipeFileResponse {
   by_formula: SwipeFileByFormula[];
 }
 
+// --- Conversión y Comunidad (Fase F) ---
 
+export type CommentTriageLabel = 'lead' | 'question' | 'objection' | 'support' | 'noise';
+
+export type CommentTriageSource = 'api' | 'unavailable' | 'manual';
+
+export interface CommentTriageItem {
+  id: string | number;
+  text: string;
+  username?: string | null;
+  label: CommentTriageLabel;
+  suggested_reply: string;
+}
+
+export interface CommentsTriageResponse {
+  source: CommentTriageSource;
+  comments: CommentTriageItem[];
+}
+
+export interface CommentsTriageManualRequest {
+  comments: string[];
+  account_id?: number;
+  strategy_mode?: StrategyMode;
+  language?: 'es' | 'en';
+}
+
+export interface ProspectCommentItem {
+  type: number;
+  type_name: string;
+  text: string;
+}
+
+export interface ProspectCommentsRequest {
+  target_post_text: string;
+  account_id?: number;
+  strategy_mode?: StrategyMode;
+  language?: 'es' | 'en';
+}
+
+export interface ProspectCommentsResponse {
+  suggestions: ProspectCommentItem[];
+}
+
+export interface DmFunnelRequest {
+  keyword: string;
+  resource_description: string;
+  account_id?: number;
+  language?: 'es' | 'en';
+}
+
+export interface DmFunnelResponse {
+  delivery_dm: string;
+  follow_ups: string[];
+}

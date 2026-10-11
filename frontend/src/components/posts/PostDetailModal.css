@@ -448,3 +448,8 @@
   margin-top: 1px;
   color: #fcb045;
 }
+
+.pdm-community {
+  margin-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}

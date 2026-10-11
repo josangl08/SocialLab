@@ -1,0 +1,129 @@
+.comment-triage-container {
+  padding: 16px;
+  color: var(--text-color, #f0f2f8);
+}
+
+.comment-triage-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 12px;
+}
+
+.triage-disclaimer {
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+
+.triage-textarea {
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text-color, #f0f2f8);
+  font-size: 0.9rem;
+}
+
+.triage-textarea:focus {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: var(--bs-primary, #0d6efd);
+  color: #fff;
+}
+
+.triage-comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.triage-item-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.triage-username {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--bs-info, #0dcaf0);
+}
+
+.triage-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+}
+
+.triage-badge-lead {
+  background: rgba(25, 135, 84, 0.2);
+  color: #20c997;
+  border: 1px solid rgba(25, 135, 84, 0.4);
+}
+
+.triage-badge-question {
+  background: rgba(13, 202, 240, 0.2);
+  color: #0dcaf0;
+  border: 1px solid rgba(13, 202, 240, 0.4);
+}
+
+.triage-badge-objection {
+  background: rgba(255, 193, 7, 0.2);
+  color: #ffc107;
+  border: 1px solid rgba(255, 193, 7, 0.4);
+}
+
+.triage-badge-support {
+  background: rgba(13, 110, 253, 0.2);
+  color: #6ea8fe;
+  border: 1px solid rgba(13, 110, 253, 0.4);
+}
+
+.triage-badge-noise {
+  background: rgba(108, 117, 125, 0.2);
+  color: #adb5bd;
+  border: 1px solid rgba(108, 117, 125, 0.4);
+}
+
+.triage-badge-default {
+  background: rgba(255, 255, 255, 0.1);
+  color: #dee2e6;
+}
+
+.triage-comment-text {
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: var(--text-color, #e0e4ec);
+}
+
+.triage-reply-box {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.triage-reply-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+  text-transform: uppercase;
+}
+
+.triage-reply-text {
+  font-size: 0.88rem;
+  color: #fff;
+  line-height: 1.4;
+}
+
+.triage-copy-btn {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-color, #f0f2f8);
+  border-radius: 4px;
+}
+
+.triage-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}

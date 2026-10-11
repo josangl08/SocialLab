@@ -22,6 +22,9 @@ from models.schemas import (
     RepurposeOut,
     StoryFrame,
     StoryOut,
+    CommentTriageItem,
+    ProspectCommentItem,
+    DmFunnelResponse,
 )
 from services.content_quality import get_hook_formulas, humanize, lint_caption, score_hook, time_beats
 from services.gemini_service import clean_and_parse_json, generate_gemini_content
@@ -554,3 +557,223 @@ async def generate_bio_rewrite(
         raise ValueError("Gemini no devolvió una bio")
     set_in_cache(cache_key, bio)
     return bio
+
+
+# --- Triaje de comentarios y comunidad (Fase F) ---
+
+COMMENTS_CACHE_TTL_SECONDS = 900  # 15 minutes TTL (AD-8)
+_COMMENTS_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+
+
+def clear_comments_cache() -> None:
+    """Limpia la caché en memoria de comentarios leídos de Graph API."""
+    _COMMENTS_CACHE.clear()
+
+
+def get_comments_from_cache(media_id: str) -> Optional[List[Dict[str, Any]]]:
+    """Obtiene comentarios en caché si no han expirado (15 min)."""
+    entry = _COMMENTS_CACHE.get(media_id)
+    if entry:
+        timestamp, comments = entry
+        if time.time() - timestamp < COMMENTS_CACHE_TTL_SECONDS:
+            return comments
+        else:
+            del _COMMENTS_CACHE[media_id]
+    return None
+
+
+def set_comments_in_cache(media_id: str, comments: List[Dict[str, Any]]) -> None:
+    """Almacena comentarios en caché con timestamp actual."""
+    _COMMENTS_CACHE[media_id] = (time.time(), comments)
+
+
+_TRIAGE_LABELS: Dict[str, Tuple[str, ...]] = {
+    "commercial_campaign": ("lead", "question", "objection", "support", "noise"),
+    "personal_storyline": ("question", "support", "noise"),
+}
+
+_TRIAGE_STRATEGY: Dict[str, str] = {
+    "commercial_campaign": (
+        "Cuenta comercial. Etiquetas:\n"
+        "- lead: muestra intención de compra o pide precio, información o contratar.\n"
+        "- question: pregunta sobre el contenido.\n"
+        "- objection: duda o pega sobre precio, utilidad o confianza.\n"
+        "- support: elogio, agradecimiento o apoyo.\n"
+        "- noise: emojis sueltos, spam o texto sin contenido.\n"
+        "Respuestas: al lead, invítale a hablar por DM sin presionar; a la objeción, reconócela y aclárala "
+        "con un dato; a la pregunta, respóndela de forma breve."
+    ),
+    "personal_storyline": (
+        "Cuenta personal, sin venta. Etiquetas (solo estas):\n"
+        "- question: pregunta o curiosidad (también si pregunta por precios o comprar).\n"
+        "- support: elogio, apoyo o experiencia compartida.\n"
+        "- noise: emojis sueltos, spam o texto sin contenido.\n"
+        "Respuestas: cercanas y conversacionales, que inviten a seguir hablando (una pregunta de vuelta, "
+        "una anécdota breve). Nada de DM comerciales ni llamadas a la venta."
+    ),
+}
+
+
+def build_triage_prompt(comments: List[str], strategy_mode: StrategyMode, language: str = "es") -> str:
+    numbered = "\n".join(f"{i}. {c}" for i, c in enumerate(comments, start=1))
+    return f"""Clasifica los comentarios de una publicación de Instagram y sugiere una respuesta para cada uno.
+Idioma de las respuestas: {language}.
+
+{_TRIAGE_STRATEGY[strategy_mode]}
+{_COMMON_RULES}
+Respuestas de 1 o 2 frases, sin hashtags.
+
+COMENTARIOS:
+{numbered}
+
+Responde ÚNICAMENTE con un JSON válido, un elemento por comentario y en el mismo orden:
+{{"comments": [{{"index": 1, "label": "question", "reply": "..."}}]}}"""
+
+
+async def triage_comments(
+    raw_comments: List[Dict[str, Any]],
+    strategy_mode: StrategyMode = "personal_storyline",
+    language: str = "es",
+    account_id: int = 0,
+) -> List[CommentTriageItem]:
+    """
+    Etiqueta cada comentario y sugiere una respuesta (una sola llamada Gemini, caché 1 h).
+    - commercial_campaign: lead / question / objection / support / noise
+    - personal_storyline: question / support / noise (lead y objection pasan a question)
+    """
+    if not raw_comments:
+        return []
+    texts = [str(c.get("text") or "") for c in raw_comments]
+    cache_key = _get_cache_key("triage", account_id, strategy_mode, "\n".join(texts), language)
+    parsed = get_from_cache(cache_key)
+    if parsed is None:
+        raw_response = await generate_gemini_content(
+            build_triage_prompt(texts, strategy_mode, language), json_mode=True
+        )
+        parsed = await clean_and_parse_json(raw_response)
+        set_in_cache(cache_key, parsed)
+
+    by_index = {
+        item.get("index"): item for item in parsed.get("comments", []) if isinstance(item, dict)
+    }
+    allowed = _TRIAGE_LABELS[strategy_mode]
+    results: List[CommentTriageItem] = []
+    for i, c in enumerate(raw_comments, start=1):
+        item = by_index.get(i, {})
+        label = item.get("label")
+        if label not in allowed:
+            label = "question" if label in ("lead", "objection") else "noise"
+        results.append(CommentTriageItem(
+            id=c.get("id") or str(i),
+            text=texts[i - 1],
+            username=c.get("username"),
+            label=label,
+            suggested_reply=_clean_text(str(item.get("reply") or ""), language=language),
+        ))
+    return results
+
+
+PROSPECT_COMMENT_TYPES: List[str] = [
+    "Dato complementario",
+    "Experiencia propia",
+    "Matiz respetuoso",
+    "Pregunta reflexiva",
+    "Síntesis clave",
+    "Analogía",
+    "Pregunta de seguimiento",
+    "Caso práctico",
+    "Agradecimiento concreto",
+]
+
+
+def build_prospect_prompt(target_post_text: str, strategy_mode: StrategyMode, language: str = "es") -> str:
+    types = "\n".join(f"{i}. {name}" for i, name in enumerate(PROSPECT_COMMENT_TYPES, start=1))
+    tone = (
+        "Tono de profesional del sector que aporta criterio; sin autopromoción ni enlaces."
+        if strategy_mode == "commercial_campaign"
+        else "Tono cercano de creador que conecta con otro; sin venta ni autopromoción."
+    )
+    return f"""Escribe comentarios con sustancia para dejar en la publicación de otra cuenta del sector.
+Idioma: {language}. {tone}
+{_COMMON_RULES}
+Cada comentario: 1 a 3 frases, específico de esta publicación (nada genérico como "gran post"), sin hashtags.
+
+Un comentario por cada tipo:
+{types}
+
+PUBLICACIÓN:
+\"\"\"{target_post_text}\"\"\"
+
+Responde ÚNICAMENTE con un JSON válido:
+{{"suggestions": [{{"type": 1, "text": "..."}}]}}"""
+
+
+async def generate_prospect_comments(
+    target_post_text: str,
+    strategy_mode: StrategyMode = "personal_storyline",
+    language: str = "es",
+    account_id: int = 0,
+) -> List[ProspectCommentItem]:
+    """Un comentario de prospección por cada uno de los 9 tipos (Gemini, caché 1 h)."""
+    cache_key = _get_cache_key("prospect", account_id, strategy_mode, target_post_text, language)
+    cached = get_from_cache(cache_key)
+    if cached is not None:
+        return cached
+
+    raw_response = await generate_gemini_content(
+        build_prospect_prompt(target_post_text, strategy_mode, language), json_mode=True
+    )
+    parsed = await clean_and_parse_json(raw_response)
+    by_type = {
+        s.get("type"): s for s in parsed.get("suggestions", []) if isinstance(s, dict)
+    }
+    suggestions = [
+        ProspectCommentItem(
+            type=i,
+            type_name=name,
+            text=_clean_text(str(by_type[i].get("text") or ""), language=language),
+        )
+        for i, name in enumerate(PROSPECT_COMMENT_TYPES, start=1)
+        if i in by_type and by_type[i].get("text")
+    ]
+    set_in_cache(cache_key, suggestions)
+    return suggestions
+
+
+def build_dm_funnel_prompt(keyword: str, resource_description: str, language: str = "es") -> str:
+    return f"""Una publicación de Instagram pide comentar la palabra clave "{keyword}" para recibir este recurso:
+{resource_description}
+
+Escribe los mensajes directos que la cuenta enviará a quien comente. Idioma: {language}.
+{_COMMON_RULES}
+- delivery_dm: agradece el comentario mencionando la palabra clave "{keyword}", entrega el recurso (usa el marcador [ENLACE]) y termina con una pregunta abierta.
+- follow_ups: exactamente 2 seguimientos cortos (a las 24 h y a los 3 días) que pregunten si le sirvió y ofrezcan ayuda, sin presionar.
+
+Responde ÚNICAMENTE con un JSON válido:
+{{"delivery_dm": "...", "follow_ups": ["...", "..."]}}"""
+
+
+async def generate_dm_funnel(
+    keyword: str,
+    resource_description: str,
+    language: str = "es",
+    account_id: int = 0,
+) -> DmFunnelResponse:
+    """DM de entrega del recurso + 2 seguimientos (Gemini, caché 1 h). Solo cuentas comerciales en la UI."""
+    cache_key = _get_cache_key(
+        "dm_funnel", account_id, "commercial_campaign", f"{keyword}|{resource_description}", language
+    )
+    cached = get_from_cache(cache_key)
+    if cached is not None:
+        return cached
+
+    raw_response = await generate_gemini_content(
+        build_dm_funnel_prompt(keyword, resource_description, language), json_mode=True
+    )
+    parsed = await clean_and_parse_json(raw_response)
+    funnel = DmFunnelResponse(
+        delivery_dm=_clean_text(str(parsed.get("delivery_dm") or ""), language=language),
+        follow_ups=[_clean_text(str(f), language=language) for f in parsed.get("follow_ups", [])[:2]],
+    )
+    set_in_cache(cache_key, funnel)
+    return funnel

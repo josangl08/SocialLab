@@ -5,7 +5,7 @@ import logging
 import requests
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from fastapi import HTTPException
 from httpx import ReadError
 
@@ -781,3 +781,20 @@ def fetch_live_profile(account: Dict) -> Dict:
         account.get('instagram_business_account_id'),
     )
     return service.get_profile()
+
+
+def fetch_media_comments(account: Dict, instagram_media_id: str) -> List[Dict[str, Any]]:
+    """Lee comentarios en vivo de un post publicado (Graph API GET /{media-id}/comments)."""
+    raw_token = account.get('long_lived_access_token')
+    if not raw_token:
+        raise ValueError("Cuenta sin access token configurado")
+    token = decrypt_token(raw_token)
+    url = f"{InstagramInsightsService.BASE_URL}/{instagram_media_id}/comments"
+    resp = requests.get(
+        url,
+        params={"fields": "id,text,username,timestamp", "access_token": token},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data.get("data", [])

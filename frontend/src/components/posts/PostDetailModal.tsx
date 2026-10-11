@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { apiClient, ApiError } from '../../api/client';
-import type { Post } from '../../types';
+import type { Post, StrategyMode } from '../../types';
+import { getFirstOfDayOfMonth } from '../../features/agent/AgentStrategyDrawer';
+import type { MonthlyCampaign } from '../../features/agent/AgentStrategyDrawer';
+import CommentTriage from '../studio/CommentTriage';
+import DmFunnel from '../studio/DmFunnel';
 import './PostDetailModal.css';
 
 interface PostDetailModalProps {
@@ -47,12 +51,27 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
   const [scheduleDate, setScheduleDate]   = useState('');
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError]     = useState('');
+  const [strategyMode, setStrategyMode]   = useState<StrategyMode | null>(null);
 
   useEffect(() => {
     setActionStep('idle');
     setActionError('');
     setScheduleDate('');
   }, [post?.id, show]);
+
+  // Estrategia de la campaña del mes; sin campaña → personal (AD-2)
+  const accountId = post?.instagram_account_id;
+  useEffect(() => {
+    setStrategyMode(null);
+    if (!show || !accountId) return;
+    let active = true;
+    const monthDate = getFirstOfDayOfMonth(new Date());
+    apiClient
+      .get<MonthlyCampaign | null>(`/api/agent/campaign?account_id=${accountId}&month_date=${monthDate}`)
+      .then((campaign) => { if (active) setStrategyMode(campaign?.strategy_mode ?? 'personal_storyline'); })
+      .catch(() => { if (active) setStrategyMode('personal_storyline'); });
+    return () => { active = false; };
+  }, [accountId, show]);
 
   useEffect(() => {
     if (!show) return;
@@ -408,6 +427,18 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
               </div>
             )}
           </div>
+
+          {/* ── Comunidad (Fase F): solo sugerencias para copiar ── */}
+          {post.status === 'published' && strategyMode && (
+            <div className="pdm-community">
+              <CommentTriage postId={post.id} strategyMode={strategyMode} />
+            </div>
+          )}
+          {strategyMode === 'commercial_campaign' && accountId && (
+            <div className="pdm-community">
+              <DmFunnel strategyMode={strategyMode} accountId={accountId} />
+            </div>
+          )}
         </div>
 
         {/* ── Error strip ────────────────────────── */}

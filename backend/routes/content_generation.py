@@ -12,6 +12,8 @@ import asyncio
 import json
 import logging
 
+import requests
+
 from auth.dependencies import get_current_user, get_user_supabase_client
 from models.schemas import (
     User,
@@ -36,10 +38,16 @@ from models.schemas import (
     ProfileAuditItem,
     ProfileAuditResponse,
     SwipeFileResponse,
+    CommentsTriageResponse,
+    CommentsTriageManualRequest,
+    ProspectCommentsRequest,
+    ProspectCommentsResponse,
+    DmFunnelRequest,
+    DmFunnelResponse,
 )
 from services import content_formats
 from services.analytics import AnalyticsService
-from services.instagram_insights import fetch_live_profile
+from services.instagram_insights import fetch_live_profile, fetch_media_comments
 from services.content_quality import (
     lint_caption,
     humanize,
@@ -616,6 +624,114 @@ async def get_swipe_file_endpoint(
     """Swipe File de ganchos propios ordenados por Outlier Multiple y agregados por fórmula (sin Gemini)."""
     _verify_account_access(account_id, supabase)
     return SwipeFileResponse(**AnalyticsService(supabase).get_swipe_file(account_id))
+
+
+# --- Endpoints de Conversión y Comunidad (Fase F): solo sugerencias, nada se escribe en Graph API ---
+
+@router.get("/comments/{post_id}/triage", response_model=CommentsTriageResponse)
+async def get_post_comments_triage(
+    post_id: int,
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client),
+) -> CommentsTriageResponse:
+    """Triaje de los comentarios de un post publicado (lectura Graph API cacheada 15 min)."""
+    post_res = supabase.table('posts').select('id, instagram_account_id, instagram_post_id').eq('id', post_id).execute()
+    if not post_res.data:
+        raise HTTPException(status_code=404, detail="Post no encontrado")
+    post = post_res.data[0]
+
+    account_id = post.get('instagram_account_id')
+    media_id = post.get('instagram_post_id')
+    if not account_id or not media_id:
+        return CommentsTriageResponse(source="unavailable", comments=[])
+
+    acc_res = supabase.table('instagram_accounts').select('*').eq('id', account_id).execute()
+    if not acc_res.data:
+        raise HTTPException(status_code=404, detail="Cuenta de Instagram no encontrada")
+    account = acc_res.data[0]
+
+    raw_comments = content_formats.get_comments_from_cache(str(media_id))
+    if raw_comments is None:
+        try:
+            raw_comments = await asyncio.to_thread(fetch_media_comments, account, str(media_id))
+        except requests.HTTPError as e:
+            # No se registra el mensaje: la URL lleva el access_token
+            status = e.response.status_code if e.response is not None else None
+            logger.warning(f"Graph API rechazó la lectura de comentarios del post {post_id} (HTTP {status})")
+            return CommentsTriageResponse(source="unavailable", comments=[])
+        except Exception as e:
+            logger.warning(f"No se pudieron leer los comentarios del post {post_id}: {type(e).__name__}")
+            return CommentsTriageResponse(source="unavailable", comments=[])
+        content_formats.set_comments_in_cache(str(media_id), raw_comments)
+
+    mode = await content_formats.resolve_strategy_mode(account_id)
+    comments = await _run_generator(content_formats.triage_comments(
+        raw_comments, strategy_mode=mode, language=account.get('default_language') or 'es',
+        account_id=account_id,
+    ))
+    return CommentsTriageResponse(source="api", comments=comments)
+
+
+async def _optional_account_mode(
+    account_id: Optional[int], strategy_mode: Optional[str], supabase: Client
+) -> str:
+    """Estrategia explícita > campaña de la cuenta > personal (AD-2)."""
+    if account_id:
+        _verify_account_access(account_id, supabase)
+    if strategy_mode:
+        return strategy_mode
+    if account_id:
+        return await content_formats.resolve_strategy_mode(account_id)
+    return "personal_storyline"
+
+
+@router.post("/comments/triage", response_model=CommentsTriageResponse)
+async def post_manual_comments_triage(
+    request: CommentsTriageManualRequest,
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client),
+) -> CommentsTriageResponse:
+    """Triaje de comentarios pegados por el usuario (fallback sin permiso de comentarios)."""
+    mode = await _optional_account_mode(request.account_id, request.strategy_mode, supabase)
+    raw_comments = [
+        {"id": str(i), "text": text.strip()}
+        for i, text in enumerate((c for c in request.comments if c.strip()), start=1)
+    ]
+    comments = await _run_generator(content_formats.triage_comments(
+        raw_comments, strategy_mode=mode, language=request.language or "es",
+        account_id=request.account_id or 0,
+    ))
+    return CommentsTriageResponse(source="manual", comments=comments)
+
+
+@router.post("/prospect-comments", response_model=ProspectCommentsResponse)
+async def post_prospect_comments(
+    request: ProspectCommentsRequest,
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client),
+) -> ProspectCommentsResponse:
+    """Comentarios de prospección (9 tipos) para publicaciones de otras cuentas del sector."""
+    mode = await _optional_account_mode(request.account_id, request.strategy_mode, supabase)
+    suggestions = await _run_generator(content_formats.generate_prospect_comments(
+        request.target_post_text, strategy_mode=mode, language=request.language or "es",
+        account_id=request.account_id or 0,
+    ))
+    return ProspectCommentsResponse(suggestions=suggestions)
+
+
+@router.post("/dm-funnel", response_model=DmFunnelResponse)
+async def post_dm_funnel(
+    request: DmFunnelRequest,
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client),
+) -> DmFunnelResponse:
+    """DM de entrega del recurso por palabra clave + 2 seguimientos."""
+    if request.account_id:
+        _verify_account_access(request.account_id, supabase)
+    return await _run_generator(content_formats.generate_dm_funnel(
+        request.keyword, request.resource_description, language=request.language or "es",
+        account_id=request.account_id or 0,
+    ))
 
 
 # Helper functions

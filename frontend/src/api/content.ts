@@ -20,6 +20,12 @@ import type {
   RepurposeOut,
   ProfileAuditResponse,
   SwipeFileResponse,
+  CommentsTriageResponse,
+  CommentsTriageManualRequest,
+  ProspectCommentsRequest,
+  ProspectCommentsResponse,
+  DmFunnelRequest,
+  DmFunnelResponse,
 } from '../types';
 
 export const contentApi = {
@@ -101,5 +107,33 @@ export const contentApi = {
     options?: { signal?: AbortSignal }
   ): Promise<SwipeFileResponse> => {
     return apiClient.get<SwipeFileResponse>(`/content/swipe-file/${accountId}`, options);
+  },
+
+  getCommentsTriage: (
+    postId: number,
+    options?: { signal?: AbortSignal }
+  ): Promise<CommentsTriageResponse> => {
+    return apiClient.get<CommentsTriageResponse>(`/content/comments/${postId}/triage`, options);
+  },
+
+  triageManualComments: (
+    data: CommentsTriageManualRequest,
+    options?: { signal?: AbortSignal }
+  ): Promise<CommentsTriageResponse> => {
+    return apiClient.post<CommentsTriageResponse>('/content/comments/triage', data, options);
+  },
+
+  generateProspectComments: (
+    data: ProspectCommentsRequest,
+    options?: { signal?: AbortSignal }
+  ): Promise<ProspectCommentsResponse> => {
+    return apiClient.post<ProspectCommentsResponse>('/content/prospect-comments', data, options);
+  },
+
+  generateDmFunnel: (
+    data: DmFunnelRequest,
+    options?: { signal?: AbortSignal }
+  ): Promise<DmFunnelResponse> => {
+    return apiClient.post<DmFunnelResponse>('/content/dm-funnel', data, options);
   },
 };
