@@ -4,6 +4,7 @@ import { describe, test, expect, vi } from 'vitest';
 import KPIStrip from '../components/analytics/cards/KPIStrip';
 import AnalyticsPostDetailModal from '../components/analytics/panels/AnalyticsPostDetailModal';
 import DemographicsChart from '../components/analytics/charts/DemographicsChart';
+import FollowerGrowthChart from '../components/analytics/charts/FollowerGrowthChart';
 
 // Mock Recharts to prevent jsdom layout issues
 vi.mock('recharts', () => ({
@@ -50,6 +51,29 @@ describe('KPIStrip Component', () => {
     expect(screen.getByText('3.5%')).toBeInTheDocument();
     expect(screen.getByText('150')).toBeInTheDocument();
     expect(screen.getByText('45')).toBeInTheDocument();
+  });
+});
+
+describe('FollowerGrowthChart Component', () => {
+  test('renders empty state if data is empty or null', () => {
+    render(<FollowerGrowthChart data={[]} />);
+    expect(screen.getByText('No hay datos de crecimiento disponibles')).toBeInTheDocument();
+  });
+
+  test('renders loading state when loading is true', () => {
+    render(<FollowerGrowthChart data={[]} loading={true} />);
+    expect(screen.getByText('Cargando datos de crecimiento...')).toBeInTheDocument();
+  });
+
+  test('renders chart with data points', () => {
+    const mockGrowth = [
+      { date: '2026-05-01', follower_count: 1000, change: 10 },
+      { date: '2026-05-02', follower_count: 1025, change: 25 },
+      { date: '2026-05-03', follower_count: 1020, change: -5 },
+    ];
+
+    render(<FollowerGrowthChart data={mockGrowth} />);
+    expect(screen.getByTestId('line-chart')).toBeInTheDocument();
   });
 });
 
@@ -100,6 +124,23 @@ describe('AnalyticsPostDetailModal Component', () => {
     const closeButton = screen.getByRole('button', { name: /close/i });
     fireEvent.click(closeButton);
     expect(handleClose).toHaveBeenCalledTimes(1);
+  });
+
+  test('renders gracefully with 0 watch time or missing fields', () => {
+    const minimalPost = {
+      id: 'post-min',
+      post_type: 'IMAGE',
+      likes: 0,
+      comments: 0,
+      saved: 0,
+      views: 0,
+    };
+
+    render(
+      <AnalyticsPostDetailModal isOpen={true} onClose={vi.fn()} post={minimalPost} />
+    );
+
+    expect(screen.getAllByText('0')).toHaveLength(4); // likes, comments, saved, views
   });
 });
 

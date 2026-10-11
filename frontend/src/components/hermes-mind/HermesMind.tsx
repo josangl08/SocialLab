@@ -6,6 +6,7 @@ import type { InstagramAccount, ContentProposal } from '../../types';
 import { RioDeInfluencia, type RioOutput } from './rio/RioDeInfluencia';
 import { ExpedientesPanel } from './expedientes/ExpedientesPanel';
 import { OrbitaPanel } from './orbita/OrbitaPanel';
+import { SwipeFile } from '../studio/SwipeFile';
 import {
   type DecisionSummary,
   type DecisionsResponse,
@@ -73,6 +74,7 @@ export const HermesMind: React.FC<HermesMindProps> = ({ accountId: accountIdProp
 
   const [activeSourceKey, setActiveSourceKey] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [view, setView] = useState<'decisions' | 'swipe'>('decisions');
 
   // resolve the user's primary account (single-account app for now)
   useEffect(() => {
@@ -238,7 +240,27 @@ export const HermesMind: React.FC<HermesMindProps> = ({ accountId: accountIdProp
           Hermes Mind
           <span className="hm-sub">Por qué el agente decidió lo que decidió — y cómo corregirlo.</span>
         </h1>
-        {proposals.length > 0 && (
+        <div className="hm-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'decisions'}
+            className={`hm-tab${view === 'decisions' ? ' active' : ''}`}
+            onClick={() => setView('decisions')}
+          >
+            Decisiones
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'swipe'}
+            className={`hm-tab${view === 'swipe' ? ' active' : ''}`}
+            onClick={() => setView('swipe')}
+          >
+            Swipe File
+          </button>
+        </div>
+        {view === 'decisions' && proposals.length > 0 && (
           <label className="hm-filter">
             Propuesta
             <select value={proposalId} onChange={(e) => setProposalId(e.target.value)}>
@@ -254,6 +276,10 @@ export const HermesMind: React.FC<HermesMindProps> = ({ accountId: accountIdProp
         )}
       </header>
 
+      {view === 'swipe' ? (
+        <SwipeFile accountId={accountId} />
+      ) : (
+      <>
       <RioDeInfluencia
         sources={rioSources}
         totalDecisions={decisions.length}
@@ -281,6 +307,8 @@ export const HermesMind: React.FC<HermesMindProps> = ({ accountId: accountIdProp
           onClearFilter={() => setActiveSourceKey(null)}
         />
       </div>
+      </>
+      )}
     </div>
   );
 };

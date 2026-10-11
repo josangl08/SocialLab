@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field, ValidationError
 from datetime import datetime
+import asyncio
 import json
 import logging
 
@@ -31,9 +32,22 @@ from models.schemas import (
     StoryOut,
     RepurposeRequest,
     RepurposeOut,
+    ProfileAuditRequest,
+    ProfileAuditItem,
+    ProfileAuditResponse,
+    SwipeFileResponse,
 )
 from services import content_formats
-from services.content_quality import lint_caption, humanize, score_hook, get_hook_formulas, time_beats
+from services.analytics import AnalyticsService
+from services.instagram_insights import fetch_live_profile
+from services.content_quality import (
+    lint_caption,
+    humanize,
+    score_hook,
+    get_hook_formulas,
+    time_beats,
+    audit_profile,
+)
 from database.supabase_client import get_supabase_client
 from supabase import Client
 from services.google_drive_connector import get_drive_connector
@@ -550,6 +564,58 @@ async def generate_repurpose_format(
     return await _run_generator(content_formats.generate_repurpose(
         request.account_id, request.transcript, request.strategy_mode, request.language or "es"
     ))
+
+
+@router.post("/audit-profile", response_model=ProfileAuditResponse)
+async def audit_profile_endpoint(
+    request: ProfileAuditRequest,
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
+) -> ProfileAuditResponse:
+    """Auditoría de perfil: score determinista (rúbrica de 12 puntos) + bio sugerida (Gemini, cacheada).
+    La bio del perfil no se modifica."""
+    res = supabase.table('instagram_accounts').select('*').eq('id', request.account_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Cuenta de Instagram no encontrada")
+    account = res.data[0]
+
+    # bio y web no se guardan en BD: se leen del perfil en vivo (1 llamada, acción del usuario)
+    try:
+        profile = await asyncio.to_thread(fetch_live_profile, account)
+        account = {**account, **{k: v for k, v in profile.items() if v}}
+    except Exception as e:
+        logger.warning(f"Auditoría sin datos en vivo del perfil {request.account_id}: {e}")
+
+    audit = audit_profile(account)
+    failed_tips = [it['tip'] for it in audit['items'] if not it['passed']]
+    try:
+        bio_rewrite: Optional[str] = await content_formats.generate_bio_rewrite(
+            request.account_id,
+            account.get('biography') or '',
+            failed_tips,
+            language=account.get('default_language') or 'es',
+        )
+    except Exception as e:
+        # El score es determinista: si Gemini falla, la auditoría se devuelve sin bio
+        logger.warning(f"No se pudo generar la bio sugerida para {request.account_id}: {e}")
+        bio_rewrite = None
+
+    return ProfileAuditResponse(
+        score=audit['score'],
+        items=[ProfileAuditItem(**it) for it in audit['items']],
+        bio_rewrite=bio_rewrite,
+    )
+
+
+@router.get("/swipe-file/{account_id}", response_model=SwipeFileResponse)
+async def get_swipe_file_endpoint(
+    account_id: int,
+    current_user: User = Depends(get_current_user),
+    supabase: Client = Depends(get_user_supabase_client)
+) -> SwipeFileResponse:
+    """Swipe File de ganchos propios ordenados por Outlier Multiple y agregados por fórmula (sin Gemini)."""
+    _verify_account_access(account_id, supabase)
+    return SwipeFileResponse(**AnalyticsService(supabase).get_swipe_file(account_id))
 
 
 # Helper functions

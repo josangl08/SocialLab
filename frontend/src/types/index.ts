@@ -15,6 +15,7 @@ export interface Post {
   content_structure?: ContentStructure | null;
   quality_report?: QualityReport | null;
   matrix_role?: string | null;
+  trial_graduation?: 'MANUAL' | 'SS_PERFORMANCE' | null;
 }
 
 export interface InstagramAccount {
@@ -296,4 +297,44 @@ export interface RepurposeRequest {
   strategy_mode?: StrategyMode;
   language?: 'es' | 'en';
 }
+
+// --- Profile Audit & Swipe File (Fase E) ---
+
+export interface ProfileAuditItem {
+  id: string;
+  label: string;
+  passed: boolean;
+  weight: number;
+  tip: string;
+}
+
+export interface ProfileAuditResponse {
+  score: number;
+  items: ProfileAuditItem[];
+  bio_rewrite?: string | null;
+}
+
+export interface SwipeFileItem {
+  post_id: string | number;
+  hook_text: string;
+  formula_id?: number | null;
+  formula_name?: string | null;
+  outlier_multiple?: number | null;
+  sends_per_reach?: number | null;
+  is_trial?: boolean;
+  reels_skip_rate?: number | null;
+}
+
+export interface SwipeFileByFormula {
+  formula_id: number;
+  formula_name?: string | null;
+  count: number;
+  avg_outlier?: number | null;
+}
+
+export interface SwipeFileResponse {
+  items: SwipeFileItem[];
+  by_formula: SwipeFileByFormula[];
+}
+
 

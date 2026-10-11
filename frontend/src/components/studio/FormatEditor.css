@@ -44,3 +44,10 @@
   object-fit: cover;
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
+
+.format-editor-trial {
+  padding: 10px 12px;
+  border: 1px solid var(--sl-border);
+  border-radius: 8px;
+  background: var(--sl-surface);
+}

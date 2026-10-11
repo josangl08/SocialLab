@@ -1,0 +1,28 @@
+.account-growth-totals {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 12px;
+  font-size: 0.85rem;
+  color: var(--sl-muted);
+}
+
+.account-growth-totals strong {
+  color: var(--sl-text, #f0f2f8);
+  margin-left: 4px;
+}
+
+.account-growth-totals .account-growth-follows {
+  color: #6ee7b7;
+}
+
+.account-growth-totals .account-growth-unfollows {
+  color: #fd1d1d;
+}
+
+.account-growth-empty {
+  margin: 0;
+  padding: 24px 0;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--sl-muted);
+}

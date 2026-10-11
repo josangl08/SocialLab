@@ -13,6 +13,8 @@ Las migraciones deben ejecutarse en orden cronológico:
 20. `020_db_indices_faltantes.sql` - Índices faltantes en content_proposals, visual_analyses, y agent_logs
 32. `032_backfill_hermes_posts_user_id.sql` - Rellena posts.user_id NULL (posts de Hermes creados sin user_id)
 33. `033_content_studio.sql` - Columnas content_format, content_structure, quality_report, matrix_role en posts y humanizer_enabled, banned_phrases en instagram_accounts
+34. `034_trial_reels.sql` - Columnas posts.trial_graduation y post_performance.reels_skip_rate para Trial Reels (AD-10)
+35. `035_account_growth.sql` - Columnas follows, unfollows y profile_links_taps en instagram_account_snapshots (AD-9)
 
 ## Cómo Ejecutar
 

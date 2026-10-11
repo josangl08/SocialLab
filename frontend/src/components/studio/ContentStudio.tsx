@@ -140,6 +140,9 @@ export const ContentStudio: React.FC<ContentStudioProps> = ({ onPostGenerated })
       formData.append('status', payload.status);
       formData.append('notify_telegram', String(payload.notifyTelegram));
       formData.append('content_format', format);
+      if (format === 'reel' && payload.trialGraduation) {
+        formData.append('trial_graduation', payload.trialGraduation);
+      }
       const structure: ContentStructure | null =
         format === 'carousel' && slides
           ? { slides }

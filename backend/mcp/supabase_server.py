@@ -68,11 +68,14 @@ def supabase_create_post(
     drive_file_id: Optional[str] = None,
     content_format: Optional[Literal["post", "reel", "carousel", "story"]] = None,
     matrix_role: Optional[Literal["proof", "teach", "opinion", "offer", "story", "learning", "reflection"]] = None,
+    trial_graduation: Optional[Literal["MANUAL", "SS_PERFORMANCE"]] = None,
 ) -> Dict[str, Any]:
     """Create a new post draft in the posts table. The caption is cleaned before
     saving: anti-slop humanizer (unless the account disabled it) and a hard limit
     of 5 hashtags. content_format is the post format; matrix_role is the slot's role
-    in the weekly content matrix."""
+    in the weekly content matrix. trial_graduation publishes a Reel as a Trial Reel
+    (shown only to non-followers) to test its hook: MANUAL or SS_PERFORMANCE;
+    ignored unless content_format is "reel"."""
     supabase = get_supabase_admin_client()
     # Resolve the owning user_id from the account: this tool runs with the
     # service-role client (bypasses RLS), but /api/posts reads with the user's
@@ -105,6 +108,7 @@ def supabase_create_post(
         "content_format": content_format,
         "matrix_role": matrix_role,
         "quality_report": quality_report,
+        "trial_graduation": trial_graduation if content_format == "reel" else None,
     }
     response = supabase.table("posts").insert(post_data).execute()
     if response.data and len(response.data) > 0:

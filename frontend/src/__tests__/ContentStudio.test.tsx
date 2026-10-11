@@ -162,6 +162,55 @@ describe('ContentStudio Component', () => {
     expect(screen.queryByRole('button', { name: /Estadísticas deportivas/i })).not.toBeInTheDocument();
   });
 
+  test('Reel de prueba: envía trial_graduation con la graduación elegida', async () => {
+    render(
+      <MemoryRouter>
+        <ContentStudio />
+      </MemoryRouter>
+    );
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Texto del Caption/i)).toBeInTheDocument();
+    });
+
+    // En Post no se ofrece la prueba
+    expect(screen.queryByLabelText(/Publicar como prueba/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Reel$/i }));
+    fireEvent.click(screen.getByLabelText(/Publicar como prueba \(solo no seguidores\)/i));
+    fireEvent.change(screen.getByLabelText(/Graduación del Reel de prueba/i), {
+      target: { value: 'SS_PERFORMANCE' },
+    });
+    fireEvent.change(screen.getByLabelText(/Texto del Caption/i), { target: { value: 'Gancho' } });
+    fireEvent.click(screen.getByRole('button', { name: /Guardar borrador/i }));
+
+    await waitFor(() => {
+      expect(apiClient.postForm).toHaveBeenCalledTimes(1);
+    });
+    const [, formData] = (apiClient.postForm as any).mock.calls[0];
+    expect(formData.get('content_format')).toBe('reel');
+    expect(formData.get('trial_graduation')).toBe('SS_PERFORMANCE');
+  });
+
+  test('sin activar la prueba no envía trial_graduation', async () => {
+    render(
+      <MemoryRouter>
+        <ContentStudio />
+      </MemoryRouter>
+    );
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Texto del Caption/i)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^Reel$/i }));
+    fireEvent.change(screen.getByLabelText(/Texto del Caption/i), { target: { value: 'Gancho' } });
+    fireEvent.click(screen.getByRole('button', { name: /Guardar borrador/i }));
+
+    await waitFor(() => {
+      expect(apiClient.postForm).toHaveBeenCalledTimes(1);
+    });
+    const [, formData] = (apiClient.postForm as any).mock.calls[0];
+    expect(formData.get('trial_graduation')).toBeNull();
+  });
+
   test('guarda borrador con notify_telegram=false', async () => {
     render(
       <MemoryRouter>

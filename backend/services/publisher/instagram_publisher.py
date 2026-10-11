@@ -11,6 +11,7 @@ Date: 2025-01-16
 """
 
 import os
+import json
 import time
 import logging
 from typing import Dict, Optional, List
@@ -118,7 +119,8 @@ class InstagramPublisher:
         video_url: Optional[str] = None,
         cover_url: Optional[str] = None,
         is_carousel: bool = False,
-        carousel_children: Optional[List[str]] = None
+        carousel_children: Optional[List[str]] = None,
+        trial_graduation: Optional[str] = None
     ) -> Dict:
         """
         Publishes a post to Instagram.
@@ -195,7 +197,8 @@ class InstagramPublisher:
                     access_token,
                     video_url,
                     caption,
-                    cover_url
+                    cover_url,
+                    trial_graduation=trial_graduation
                 )
             elif post_type == 'STORY':
                 return self._publish_story(
@@ -281,7 +284,8 @@ class InstagramPublisher:
         access_token: str,
         video_url: str,
         caption: str,
-        cover_url: Optional[str] = None
+        cover_url: Optional[str] = None,
+        trial_graduation: Optional[str] = None
     ) -> Dict:
         """
         Publishes a Reel (video content).
@@ -292,6 +296,7 @@ class InstagramPublisher:
             video_url: Public URL of the video
             caption: Caption text
             cover_url: Optional cover image URL
+            trial_graduation: Optional trial graduation strategy (MANUAL or SS_PERFORMANCE)
 
         Returns:
             Dict with 'id' and 'permalink'
@@ -305,7 +310,8 @@ class InstagramPublisher:
             video_url,
             caption,
             media_type='REELS',
-            cover_url=cover_url
+            cover_url=cover_url,
+            trial_graduation=trial_graduation
         )
 
         # Reels take longer to process
@@ -467,7 +473,8 @@ class InstagramPublisher:
         media_url: str,
         caption: str,
         media_type: str = 'IMAGE',
-        cover_url: Optional[str] = None
+        cover_url: Optional[str] = None,
+        trial_graduation: Optional[str] = None
     ) -> str:
         """
         Creates a media container (Step 1 of publishing).
@@ -479,6 +486,7 @@ class InstagramPublisher:
             caption: Caption text
             media_type: IMAGE, REELS, or STORIES
             cover_url: Optional cover image for videos
+            trial_graduation: Optional trial graduation strategy (MANUAL or SS_PERFORMANCE)
 
         Returns:
             Container ID
@@ -499,6 +507,8 @@ class InstagramPublisher:
             payload['video_url'] = media_url
             if cover_url:
                 payload['cover_url'] = cover_url
+            if trial_graduation:
+                payload['trial_params'] = json.dumps({'graduation_strategy': trial_graduation})
         elif media_type == 'STORIES':
             payload['media_type'] = 'STORIES'
             payload['image_url'] = media_url

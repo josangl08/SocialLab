@@ -1,0 +1,47 @@
+.swipe-file-container {
+  padding: 16px;
+  color: #f0f2f8;
+}
+
+.swipe-file-header {
+  margin-bottom: 20px;
+}
+
+.swipe-file-formula-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.swipe-file-badge {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+}
+
+.swipe-file-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.swipe-file-table th,
+.swipe-file-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  text-align: left;
+}
+
+.swipe-file-hook {
+  font-weight: 500;
+}
+
+.swipe-file-trial {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--bs-info);
+}

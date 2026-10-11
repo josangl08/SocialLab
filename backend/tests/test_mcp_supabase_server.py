@@ -108,6 +108,7 @@ def test_supabase_create_post():
             "is_ai_generated": True,
             "content_format": None,
             "matrix_role": None,
+            "trial_graduation": None,
         }
         assert quality_report["hashtag_count"] == 0
 
@@ -656,3 +657,28 @@ def test_supabase_create_proposal_respects_humanizer_disabled():
         slot = mock_client.table.return_value.insert.call_args[0][0]["slots"][0]
         assert slot["caption"] == "Un game-changer"
         assert slot["hook_candidates"][0] == "Un game-changer"
+
+
+def _create_post_with_trial(content_format):
+    with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{"id": 1}])
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{"user_id": "user-abc", "humanizer_enabled": True, "banned_phrases": []}]
+        )
+        supabase_create_post(
+            instagram_account_id=123, caption="Gancho\nCuerpo",
+            content_format=content_format, trial_graduation="MANUAL",
+        )
+        return mock_client.table.return_value.insert.call_args[0][0]
+
+
+def test_supabase_create_post_trial_reel():
+    """Hermes puede crear un Reel como Trial Reel (AD-10)."""
+    assert _create_post_with_trial("reel")["trial_graduation"] == "MANUAL"
+
+
+def test_supabase_create_post_trial_ignored_outside_reels():
+    assert _create_post_with_trial("post")["trial_graduation"] is None
+    assert _create_post_with_trial(None)["trial_graduation"] is None

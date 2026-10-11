@@ -952,6 +952,48 @@ def test_select_slot_hook_rejects_hook_not_in_candidates(mock_agent_supabase, mo
     tables["content_proposals"].update.assert_not_called()
 
 
+# ==============================================================================
+# Filtro anti-slop en la configuración de la cuenta
+# ==============================================================================
+
+def test_get_agent_config_includes_anti_slop(mock_agent_admin_supabase):
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = \
+        MagicMock(data=[{"id": 1, "user_id": USER_ID, "humanizer_enabled": False, "banned_phrases": ["sinergia"]}])
+    data = client.get("/api/agent/config/1").json()
+    assert data["humanizer_enabled"] is False
+    assert data["banned_phrases"] == ["sinergia"]
+
+
+def test_get_agent_config_anti_slop_defaults(mock_agent_admin_supabase):
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = \
+        MagicMock(data=[{"id": 1, "user_id": USER_ID, "humanizer_enabled": None, "banned_phrases": None}])
+    data = client.get("/api/agent/config/1").json()
+    assert data["humanizer_enabled"] is True
+    assert data["banned_phrases"] == []
+
+
+def _put_config(mock_admin, body):
+    mock_admin.table.return_value.select.return_value.eq.return_value.execute.return_value = \
+        MagicMock(data=[{"user_id": USER_ID}])
+    resp = client.put("/api/agent/config/1", json=body)
+    assert resp.status_code == 200
+    return mock_admin.table.return_value.update.call_args[0][0]
+
+
+def test_put_agent_config_saves_anti_slop(mock_agent_admin_supabase):
+    updated = _put_config(mock_agent_admin_supabase, {
+        "humanizer_enabled": False, "banned_phrases": [" sinergia ", "sinergia", "", "disruptivo"],
+    })
+    assert updated["humanizer_enabled"] is False
+    assert updated["banned_phrases"] == ["sinergia", "disruptivo"]
+
+
+def test_put_agent_config_without_anti_slop_keeps_columns(mock_agent_admin_supabase):
+    updated = _put_config(mock_agent_admin_supabase, {"sector": "Fitness"})
+    assert "humanizer_enabled" not in updated
+    assert "banned_phrases" not in updated
+
+
 def test_get_agent_config_foreign_account_403(mock_agent_admin_supabase):
     """La configuración de una cuenta de otro usuario no se expone."""
     mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = \
@@ -967,10 +1009,10 @@ def test_get_agent_config_missing_account_404(mock_agent_admin_supabase):
     assert client.get("/api/agent/config/1").status_code == 404
 
 
+
 def test_get_agent_config_own_account_200(mock_agent_admin_supabase):
     mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = \
         MagicMock(data=[{"id": 1, "user_id": USER_ID, "sector": "Fitness"}])
     resp = client.get("/api/agent/config/1")
     assert resp.status_code == 200
     assert resp.json()["sector"] == "Fitness"
-

@@ -135,7 +135,10 @@ def full_sync_account(instagram_service, db_client, user_id, instagram_account_i
             "email_contacts": 0,  # Requiere configuración especial
             "phone_call_clicks": 0,  # Requiere configuración especial
             "text_message_clicks": 0,  # Requiere configuración especial
-            "get_directions_clicks": 0  # Requiere configuración especial
+            "get_directions_clicks": 0,  # Requiere configuración especial
+            "follows": account_insights.get("follows", 0),  # Últimas 24 h (AD-9)
+            "unfollows": account_insights.get("unfollows", 0),
+            "profile_links_taps": account_insights.get("profile_links_taps", 0),
         }
         # Delete + Insert para evitar problemas con upsert en múltiples columnas
         db_client.table("instagram_account_snapshots").delete().match({

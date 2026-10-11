@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal, Optional, Any
 
 # --- Modelos de Usuario ---
 class UserRegister(BaseModel):
@@ -23,6 +23,7 @@ class PostBase(BaseModel):
     status: Literal["draft", "scheduled", "published", "failed"] = "draft"
     scheduled_at: Optional[datetime] = None
     instagram_account_id: Optional[int] = None
+    trial_graduation: Optional[Literal["MANUAL", "SS_PERFORMANCE"]] = None
 
 class PostCreate(PostBase):
     pass
@@ -39,6 +40,7 @@ class Post(PostBase):
     content_structure: Optional[dict] = None
     quality_report: Optional[dict] = None
     matrix_role: Optional[str] = None
+    trial_graduation: Optional[Literal["MANUAL", "SS_PERFORMANCE"]] = None
 
 # --- Modelos de Inteligencia Artificial ---
 class InstagramAccountConfigUpdate(BaseModel):
@@ -140,6 +142,9 @@ class AgentConfig(BaseModel):
     scheduling_mode: Literal["fixed", "flexible"] = "flexible"
     preferred_days: list[str] = []
     content_type_mix: dict = {"post": 2, "reel": 1, "carousel": 1, "story": 0}
+    # Filtro anti-slop por cuenta (migración 033); None = no se modifica
+    humanizer_enabled: Optional[bool] = None
+    banned_phrases: Optional[list[str]] = None
 
 class VisualAnalysis(BaseModel):
     drive_file_id: str
@@ -455,6 +460,49 @@ class RepurposeRequest(BaseModel):
     transcript: str = Field(..., max_length=30000)
     strategy_mode: Optional[Literal["commercial_campaign", "personal_storyline"]] = None
     language: Optional[Literal["es", "en"]] = "es"
+
+
+# --- Modelos de Profile Audit y Swipe File (Fase E) ---
+
+class ProfileAuditRequest(BaseModel):
+    account_id: int
+
+
+class ProfileAuditItem(BaseModel):
+    id: str
+    label: str
+    passed: bool
+    weight: int
+    tip: str
+
+
+class ProfileAuditResponse(BaseModel):
+    score: int
+    items: list[ProfileAuditItem] = []
+    bio_rewrite: Optional[str] = None
+
+
+class SwipeFileItem(BaseModel):
+    post_id: Any
+    hook_text: str
+    formula_id: Optional[int] = None
+    formula_name: Optional[str] = None
+    outlier_multiple: Optional[float] = None
+    sends_per_reach: Optional[float] = None
+    is_trial: bool = False
+    reels_skip_rate: Optional[float] = None
+
+
+class SwipeFileByFormula(BaseModel):
+    formula_id: int
+    formula_name: Optional[str] = None
+    count: int = 0
+    avg_outlier: Optional[float] = None
+
+
+class SwipeFileResponse(BaseModel):
+    items: list[SwipeFileItem] = []
+    by_formula: list[SwipeFileByFormula] = []
 
 
 

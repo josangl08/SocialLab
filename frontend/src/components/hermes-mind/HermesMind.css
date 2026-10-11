@@ -75,6 +75,27 @@
   background-position: right 11px center;
 }
 
+.hermes-mind-page .hm-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--hm-surface-2);
+  border: 1px solid var(--hm-border-2);
+  border-radius: var(--hm-radius-sm);
+}
+.hermes-mind-page .hm-tab {
+  background: none;
+  border: none;
+  border-radius: var(--hm-radius-sm);
+  color: var(--hm-muted);
+  font-size: 0.8rem;
+  padding: 5px 12px;
+}
+.hermes-mind-page .hm-tab.active {
+  background: var(--hm-border-2);
+  color: var(--hm-text);
+}
+
 /* ---- panels + workbench ---- */
 .hermes-mind-page .hm-panel {
   background: var(--hm-surface);

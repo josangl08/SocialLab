@@ -8,12 +8,12 @@ Verifications:
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from main import app
-from auth.dependencies import get_current_user
+from auth.dependencies import get_current_user, get_user_supabase_client
 from models.schemas import User
-from tests.conftest import USER_ID
+from tests.conftest import USER_ID, MockSupabaseClient
 
 
 @pytest.fixture
@@ -64,6 +64,14 @@ class TestContentRoutesAuthentication:
 
     def test_hook_formulas_requires_auth(self, unauth_client):
         resp = unauth_client.get("/content/hook-formulas")
+        assert resp.status_code in (401, 403)
+
+    def test_audit_profile_requires_auth(self, unauth_client):
+        resp = unauth_client.post("/content/audit-profile", json={"account_id": 1})
+        assert resp.status_code in (401, 403)
+
+    def test_swipe_file_requires_auth(self, unauth_client):
+        resp = unauth_client.get("/content/swipe-file/1")
         assert resp.status_code in (401, 403)
 
 
@@ -145,3 +153,98 @@ class TestContentRoutesResponses:
         formulas = resp.json()
         assert len(formulas) == 26
         assert "personal_storyline" in formulas[0]["best_for"]
+
+
+class TestSwipeFileAndAuditRoutes:
+    def test_audit_profile_validation_error(self, auth_client):
+        # Missing account_id field
+        resp = auth_client.post("/content/audit-profile", json={})
+        assert resp.status_code == 422
+
+    def test_audit_profile_foreign_account_404(self, auth_client):
+        prev = app.dependency_overrides.get(get_user_supabase_client)
+        app.dependency_overrides[get_user_supabase_client] = lambda: MockSupabaseClient({"instagram_accounts": []})
+        try:
+            resp = auth_client.post("/content/audit-profile", json={"account_id": 99})
+            assert resp.status_code == 404
+        finally:
+            _restore_db_override(prev)
+
+    def test_audit_profile_success(self, auth_client):
+        """Score determinista con los datos en vivo del perfil + bio sugerida (Gemini mockeado)."""
+        sample_acc = {"id": 1, "username": "maria_dev", "default_language": "es"}
+        live_profile = {
+            "name": "María Dev | SaaS con Python",
+            "biography": "Ayudo a escalar SaaS con Python y FastAPI\n5 años fundando startups\nDescarga la guía 👇",
+            "website": "https://mariadev.es/guia",
+            "profile_picture_url": "https://img.test/pic.jpg",
+        }
+        prev = app.dependency_overrides.get(get_user_supabase_client)
+        app.dependency_overrides[get_user_supabase_client] = lambda: MockSupabaseClient({"instagram_accounts": [sample_acc]})
+        try:
+            with patch("routes.content_generation.fetch_live_profile", return_value=live_profile), \
+                 patch("routes.content_generation.content_formats.generate_bio_rewrite",
+                       new=AsyncMock(return_value="Bio nueva")) as bio_mock:
+                first = auth_client.post("/content/audit-profile", json={"account_id": 1}).json()
+                second = auth_client.post("/content/audit-profile", json={"account_id": 1}).json()
+            assert len(first["items"]) == 12
+            assert first["score"] > 0
+            assert first["score"] == second["score"]  # sin cambios en el perfil -> misma puntuación
+            assert first["bio_rewrite"] == "Bio nueva"
+            # La bio actual llega al generador junto con los consejos de los puntos fallidos
+            args = bio_mock.call_args.args
+            assert args[1] == live_profile["biography"]
+            failed = [it["tip"] for it in first["items"] if not it["passed"]]
+            assert args[2] == failed
+        finally:
+            _restore_db_override(prev)
+
+    def test_audit_profile_without_live_profile_or_gemini(self, auth_client):
+        """Si falla la Graph API o Gemini, se devuelve el score igualmente y bio_rewrite null."""
+        prev = app.dependency_overrides.get(get_user_supabase_client)
+        app.dependency_overrides[get_user_supabase_client] = lambda: MockSupabaseClient({"instagram_accounts": [{"id": 1}]})
+        try:
+            with patch("routes.content_generation.fetch_live_profile", side_effect=RuntimeError("token")), \
+                 patch("routes.content_generation.content_formats.generate_bio_rewrite",
+                       new=AsyncMock(side_effect=RuntimeError("gemini"))):
+                resp = auth_client.post("/content/audit-profile", json={"account_id": 1})
+            assert resp.status_code == 200
+            assert resp.json()["bio_rewrite"] is None
+            assert len(resp.json()["items"]) == 12
+        finally:
+            _restore_db_override(prev)
+
+    def test_swipe_file_foreign_account_404(self, auth_client):
+        prev = app.dependency_overrides.get(get_user_supabase_client)
+        app.dependency_overrides[get_user_supabase_client] = lambda: MockSupabaseClient({"instagram_accounts": []})
+        try:
+            resp = auth_client.get("/content/swipe-file/99")
+            assert resp.status_code == 404
+        finally:
+            _restore_db_override(prev)
+
+    def test_swipe_file_delegates_to_analytics_service(self, auth_client):
+        swipe = {
+            "items": [{"post_id": 5, "hook_text": "Perdí 18.000€", "formula_id": 3,
+                       "formula_name": "Pérdida cuantificada", "outlier_multiple": 2.5,
+                       "sends_per_reach": 0.05, "is_trial": True, "reels_skip_rate": 40.0}],
+            "by_formula": [{"formula_id": 3, "formula_name": "Pérdida cuantificada", "count": 1, "avg_outlier": 2.5}],
+        }
+        prev = app.dependency_overrides.get(get_user_supabase_client)
+        app.dependency_overrides[get_user_supabase_client] = lambda: MockSupabaseClient({"instagram_accounts": [{"id": 1}]})
+        try:
+            with patch("routes.content_generation.AnalyticsService.get_swipe_file", return_value=swipe) as svc:
+                resp = auth_client.get("/content/swipe-file/1")
+            assert resp.status_code == 200
+            assert resp.json() == swipe
+            svc.assert_called_once_with(1)
+        finally:
+            _restore_db_override(prev)
+
+
+def _restore_db_override(previous):
+    if previous is None:
+        app.dependency_overrides.pop(get_user_supabase_client, None)
+    else:
+        app.dependency_overrides[get_user_supabase_client] = previous
+

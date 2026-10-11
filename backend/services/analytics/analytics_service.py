@@ -9,6 +9,7 @@ Date: 2025-01-19
 """
 import logging
 import json
+import statistics
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Dict, List, Optional
@@ -17,6 +18,8 @@ from collections import defaultdict
 # Zona horaria de la cuenta — Instagram guarda timestamps en UTC
 _ACCOUNT_TZ = ZoneInfo('Europe/Madrid')
 from database.supabase_client import retry_on_network_error
+from services.content_quality import score_hook
+from services.content_formats import get_strategy_mode
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,164 @@ class AnalyticsService:
         """
         self.db = db_client
         self.instagram_service = instagram_service
+
+    @staticmethod
+    def calculate_sends_per_reach(shares: Optional[int], reach: Optional[int]) -> Optional[float]:
+        """
+        Calcula el ratio de Sends per Reach (shares / reach).
+        Retorna None si reach es 0 o no está disponible (evita división por cero).
+        """
+        if reach is None or reach <= 0:
+            return None
+        shares_val = shares or 0
+        return round(shares_val / reach, 4)
+
+    @staticmethod
+    def calculate_median_views(views_list: List[int]) -> Optional[float]:
+        """
+        Mediana de vistas de los posts con vistas (> 0).
+        Retorna None si hay menos de 5 (datos insuficientes).
+        """
+        with_views = [v for v in views_list if v and v > 0]
+        if len(with_views) < 5:
+            return None
+        return float(statistics.median(with_views))
+
+    @staticmethod
+    def calculate_outlier_multiple(views: Optional[int], median_views: Optional[float]) -> Optional[float]:
+        """
+        Cuántas veces supera un post la mediana de vistas de 90 días (views / median_views).
+        Retorna None si no hay mediana (datos insuficientes) o el post no tiene vistas.
+        """
+        if not median_views or median_views <= 0 or views is None or views < 0:
+            return None
+        return round(views / median_views, 2)
+
+    @staticmethod
+    def calculate_growth_series(daily_data: List[Dict]) -> List[Dict]:
+        """
+        Deriva la serie diaria de crecimiento de seguidores:
+        altas (follows), bajas (unfollows) y neto por día — AD-9.
+        """
+        series = []
+        for item in daily_data:
+            follows = int(item.get('follows') or 0)
+            unfollows = int(item.get('unfollows') or 0)
+            series.append({
+                'date': item.get('date') or '',
+                'follows': follows,
+                'unfollows': unfollows,
+                'net': follows - unfollows,
+            })
+        return series
+
+    def _get_median_views_90d(self, instagram_account_id: int) -> Optional[float]:
+        """Mediana de vistas de los posts publicados en los últimos 90 días."""
+        cutoff = datetime.utcnow() - timedelta(days=90)
+        result = self.db.table('posts').select(
+            'id, post_performance(impressions)'
+        ).eq('instagram_account_id', instagram_account_id).eq(
+            'status', 'published'
+        ).gte('publication_date', cutoff.isoformat()).execute()
+        views = [
+            int((p.get('post_performance') or {}).get('impressions') or 0)
+            for p in (result.data or []) if p
+        ]
+        return self.calculate_median_views(views)
+
+    def _get_follower_growth(self, instagram_account_id: int, days: int) -> Dict:
+        """Serie de altas/bajas y toques en botones de contacto desde los snapshots diarios — AD-9."""
+        cutoff = (datetime.utcnow() - timedelta(days=days)).date()
+        result = self.db.table('instagram_account_snapshots').select(
+            'date, follows, unfollows, profile_links_taps'
+        ).eq('instagram_account_id', instagram_account_id).gte(
+            'date', cutoff.isoformat()
+        ).order('date').execute()
+        rows = result.data or []
+        series = self.calculate_growth_series(rows)
+        return {
+            'follower_growth': {
+                'series': series,
+                'follows': sum(d['follows'] for d in series),
+                'unfollows': sum(d['unfollows'] for d in series),
+                'net': sum(d['net'] for d in series),
+            },
+            'contact_button_taps': sum(int(r.get('profile_links_taps') or 0) for r in rows),
+        }
+
+    def get_swipe_file(self, instagram_account_id: int) -> Dict:
+        """
+        Swipe File: primera línea de los posts publicados en los últimos 90 días,
+        clasificada por fórmula de gancho y ordenada por Outlier Multiple, más el
+        agregado por fórmula. Sin Gemini (score_hook es determinista).
+        Los Trial Reels llevan su reels_skip_rate para comparar ganchos (AD-10).
+        """
+        cutoff = datetime.utcnow() - timedelta(days=90)
+        result = self.db.table('posts').select(
+            'id, content, trial_graduation, '
+            'post_performance(impressions, reach, shares, reels_skip_rate)'
+        ).eq('instagram_account_id', instagram_account_id).eq(
+            'status', 'published'
+        ).gte('publication_date', cutoff.isoformat()).execute()
+        posts = [p for p in (result.data or []) if p]
+
+        def _perf(post: Dict) -> Dict:
+            perf = post.get('post_performance') or {}
+            return (perf[0] if perf else {}) if isinstance(perf, list) else perf
+
+        median_views = self.calculate_median_views(
+            [int(_perf(p).get('impressions') or 0) for p in posts]
+        )
+
+        items: List[Dict] = []
+        by_formula: Dict[int, Dict] = {}
+        for post in posts:
+            lines = [l.strip() for l in (post.get('content') or '').splitlines() if l.strip()]
+            if not lines:
+                continue
+            perf = _perf(post)
+            scored = score_hook(lines[0])
+            outlier = self.calculate_outlier_multiple(int(perf.get('impressions') or 0), median_views)
+            items.append({
+                'post_id': post.get('id'),
+                'hook_text': lines[0],
+                'formula_id': scored['formula_id'],
+                'formula_name': scored['formula_name'],
+                'outlier_multiple': outlier,
+                'sends_per_reach': self.calculate_sends_per_reach(
+                    int(perf.get('shares') or 0), int(perf.get('reach') or 0)
+                ),
+                'is_trial': post.get('trial_graduation') is not None,
+                'reels_skip_rate': perf.get('reels_skip_rate'),
+            })
+            if scored['formula_id'] is not None:
+                agg = by_formula.setdefault(scored['formula_id'], {
+                    'formula_id': scored['formula_id'],
+                    'formula_name': scored['formula_name'],
+                    'count': 0,
+                    'outliers': [],
+                })
+                agg['count'] += 1
+                if outlier is not None:
+                    agg['outliers'].append(outlier)
+
+        def _by_outlier(value: Optional[float]):
+            return (value is not None, value or 0)
+
+        items.sort(key=lambda it: _by_outlier(it['outlier_multiple']), reverse=True)
+        formulas = [
+            {
+                'formula_id': agg['formula_id'],
+                'formula_name': agg['formula_name'],
+                'count': agg['count'],
+                'avg_outlier': (
+                    round(sum(agg['outliers']) / len(agg['outliers']), 2) if agg['outliers'] else None
+                ),
+            }
+            for agg in by_formula.values()
+        ]
+        formulas.sort(key=lambda f: _by_outlier(f['avg_outlier']), reverse=True)
+        return {'items': items, 'by_formula': formulas}
 
     def get_comprehensive_analytics(
         self,
@@ -92,14 +253,23 @@ class AnalyticsService:
             audience = self._analyze_audience(instagram_account_id, days)
             result = self._get_empty_analytics(account_info)
             result['data']['audience'] = audience
+            # Altas/bajas y toques de contacto son de cuenta: se muestran aunque no haya posts
+            result['data']['overview'].update(
+                self._get_follower_growth(instagram_account_id, days)
+            )
+            result['data']['overview']['strategy_mode'] = get_strategy_mode(instagram_account_id)
             return result
 
         # 3. Calcular todas las métricas
+        median_views = self._get_median_views_90d(instagram_account_id)
         overview = self._calculate_overview(
             posts,
             account_info,
-            compare
+            compare,
+            median_views=median_views
         )
+        overview.update(self._get_follower_growth(instagram_account_id, days))
+        overview['strategy_mode'] = get_strategy_mode(instagram_account_id)
 
         # 4. Si compare=True, calcular crecimiento vs periodo anterior
         if compare:
@@ -110,8 +280,11 @@ class AnalyticsService:
         by_content_type = self._analyze_by_content_type(posts)
 
         # 6. Top posts (por engagement), posts recientes (por fecha) y mejores horarios por día
-        top_posts = self._get_top_posts(posts, limit=3)
-        recent_posts = self._get_recent_posts(posts, limit=5)
+        top_posts = self._get_top_posts(posts, limit=3, median_views=median_views)
+        top_posts_by_outlier = self._get_top_posts(
+            posts, limit=3, median_views=median_views, sort_by='outlier'
+        )
+        recent_posts = self._get_recent_posts(posts, limit=5, median_views=median_views)
         best_times_by_weekday = self._calculate_best_times_by_weekday(posts)
 
         # 7. Tendencias temporales
@@ -144,6 +317,7 @@ class AnalyticsService:
                 'audience': audience,
                 'by_content_type': by_content_type,
                 'top_posts': top_posts,
+                'top_posts_by_outlier': top_posts_by_outlier,
                 'recent_posts': recent_posts,
                 'best_times_by_weekday': best_times_by_weekday,
                 'engagement_trend': engagement_trend,
@@ -215,7 +389,8 @@ class AnalyticsService:
         query = self.db.table('posts').select(
             'id, content, media_url, publication_date, '
             'instagram_post_id, post_type, '
-            'post_performance(likes, comments, saves, reach, impressions, total_interactions)'
+            'post_performance(likes, comments, shares, saves, reach, impressions, '
+            'total_interactions, reels_skip_rate)'
         ).eq('instagram_account_id', instagram_account_id).eq(
             'status', 'published'
         )
@@ -255,7 +430,8 @@ class AnalyticsService:
         self,
         posts: List[Dict],
         account_info: Dict,
-        include_growth: bool = False
+        include_growth: bool = False,
+        median_views: Optional[float] = None
     ) -> Dict:
         """
         Calcula métricas generales de overview.
@@ -303,6 +479,18 @@ class AnalyticsService:
             f"engagement_rate={avg_engagement_rate:.2f}%"
         )
 
+        # Sends per Reach medio: los posts sin alcance no cuentan (AD-7)
+        sends_ratios = [
+            r for r in (
+                self.calculate_sends_per_reach(
+                    _perf_int(p.get('post_performance') or {}, 'shares'),
+                    _perf_int(p.get('post_performance') or {}, 'reach'),
+                )
+                for p in posts
+            ) if r is not None
+        ]
+        avg_sends_per_reach = round(sum(sends_ratios) / len(sends_ratios), 4) if sends_ratios else None
+
         overview = {
             'total_posts': total_posts,
             'follower_count': account_info['follower_count'],
@@ -315,6 +503,8 @@ class AnalyticsService:
             'total_interactions': total_interactions,
             'avg_interactions_per_post': round(avg_interactions_per_post, 1),
             'engagement_rate': round(avg_engagement_rate, 2),
+            'median_views': median_views,
+            'avg_sends_per_reach': avg_sends_per_reach,
         }
 
         # Preparar estructura para growth si se solicita
@@ -752,13 +942,21 @@ class AnalyticsService:
 
         return result
 
-    def _get_top_posts(self, posts: List[Dict], limit: int = 3) -> List[Dict]:
+    def _get_top_posts(
+        self,
+        posts: List[Dict],
+        limit: int = 3,
+        median_views: Optional[float] = None,
+        sort_by: str = 'engagement'
+    ) -> List[Dict]:
         """
-        Obtiene los posts con mejor engagement.
+        Obtiene los posts con mejor engagement (o mayor Outlier Multiple).
 
         Args:
             posts: Lista de posts
             limit: Número de posts a retornar
+            median_views: Mediana de vistas de 90 días para el Outlier Multiple
+            sort_by: 'engagement' u 'outlier' (sin dato de outlier van al final)
 
         Returns:
             Lista de top posts
@@ -787,23 +985,37 @@ class AnalyticsService:
                 'likes': int(likes or 0),
                 'comments': int(comments or 0),
                 'engagement': int(engagement or 0),
+                'shares': int(perf.get('shares') or 0),
                 'impressions': int(perf.get('impressions') or 0),
                 'reach': int(perf.get('reach') or 0),
                 'saved': int(perf.get('saves') or 0),
+                'sends_per_reach': self.calculate_sends_per_reach(
+                    int(perf.get('shares') or 0), int(perf.get('reach') or 0)
+                ),
+                'outlier_multiple': self.calculate_outlier_multiple(
+                    int(perf.get('impressions') or 0), median_views
+                ),
                 'avg_watch_time_ms': 0,
                 'total_watch_time_ms': 0,
             })
 
-        # Ordenar por engagement y tomar top N
-        top = sorted(
-            posts_with_engagement,
-            key=lambda x: x['engagement'],
-            reverse=True
-        )[:limit]
+        if sort_by == 'outlier':
+            def sort_key(x: Dict):
+                return (x['outlier_multiple'] is not None, x['outlier_multiple'] or 0)
+        else:
+            def sort_key(x: Dict):
+                return x['engagement']
+
+        top = sorted(posts_with_engagement, key=sort_key, reverse=True)[:limit]
 
         return top
 
-    def _get_recent_posts(self, posts: List[Dict], limit: int = 3) -> List[Dict]:
+    def _get_recent_posts(
+        self,
+        posts: List[Dict],
+        limit: int = 3,
+        median_views: Optional[float] = None
+    ) -> List[Dict]:
         """Retorna los posts más recientes por fecha de publicación."""
         posts_with_data = []
 
@@ -812,6 +1024,12 @@ class AnalyticsService:
             perf = raw_perf or {}
             likes = perf.get('likes', 0)
             comments = perf.get('comments', 0)
+            shares = perf.get('shares', 0)
+            reach_val = int(perf.get('reach') or 0)
+            impressions_val = int(perf.get('impressions') or 0)
+            sends_per_reach = self.calculate_sends_per_reach(int(shares or 0), reach_val)
+            outlier_multiple = self.calculate_outlier_multiple(impressions_val, median_views)
+
             instagram_post_id = post.get('instagram_post_id', '')
             permalink = (
                 f"https://www.instagram.com/p/{instagram_post_id}/"
@@ -826,10 +1044,13 @@ class AnalyticsService:
                 'post_type': (post.get('post_type') or 'IMAGE').upper(),
                 'likes': int(likes or 0),
                 'comments': int(comments or 0),
+                'shares': int(shares or 0),
                 'engagement': int((likes or 0) + (comments or 0)),
-                'impressions': int(perf.get('impressions') or 0),
-                'reach': int(perf.get('reach') or 0),
+                'impressions': impressions_val,
+                'reach': reach_val,
                 'saved': int(perf.get('saves') or 0),
+                'sends_per_reach': sends_per_reach,
+                'outlier_multiple': outlier_multiple,
                 'avg_watch_time_ms': 0,
                 'total_watch_time_ms': 0,
                 'has_stats': raw_perf is not None,
@@ -979,7 +1200,8 @@ class AnalyticsService:
         """
         query = self.db.table('posts').select(
             'drive_file_id, post_type, publication_date, '
-            'post_performance(likes, comments, saves, reach, impressions, total_interactions)'
+            'post_performance(likes, comments, shares, saves, reach, impressions, '
+            'total_interactions, reels_skip_rate)'
         ).eq('instagram_account_id', instagram_account_id).eq(
             'status', 'published'
         ).not_.is_('drive_file_id', 'null')

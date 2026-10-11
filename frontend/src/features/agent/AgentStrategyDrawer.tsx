@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { HybridSelect } from './HybridSelect';
 import { CampaignChatBox } from './CampaignChatBox';
 import { apiClient, ApiError } from '../../api/client';
+import { ProfileAudit } from '../../components/studio/ProfileAudit';
 
 export interface ContentTypeMix {
   post: number;
@@ -28,6 +29,8 @@ export interface AgentStrategyConfig {
   scheduling_mode: 'fixed' | 'flexible';
   preferred_days: string[];
   content_type_mix: ContentTypeMix;
+  humanizer_enabled?: boolean;
+  banned_phrases?: string[];
 }
 
 export interface Milestone {
@@ -226,6 +229,10 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
   const [generatedBanner, setGeneratedBanner] = useState(false);
   const [suggestingTimes, setSuggestingTimes] = useState(false);
   const [wizard, setWizard] = useState<WizardState>({ dedica: [], contenido: [], objetivo: [], referentes: [] });
+  const [showAuditModal, setShowAuditModal] = useState(false);
+  const [humanizerEnabled, setHumanizerEnabled] = useState(true);
+  const [bannedPhrases, setBannedPhrases] = useState<string[]>([]);
+  const [newBannedPhrase, setNewBannedPhrase] = useState('');
 
   const [campaign, setCampaign] = useState<MonthlyCampaign>(() => emptyCampaign(accountId, getFirstOfDayOfMonth(new Date())));
   const [newMilestoneDate, setNewMilestoneDate] = useState('');
@@ -358,7 +365,11 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
     setSaved(false);
     setError(null);
     apiClient.get<Partial<AgentStrategyConfig>>(`/api/agent/config/${accountId}`)
-      .then(data => setCfg({ ...DEFAULT, ...data }))
+      .then(data => {
+        setCfg({ ...DEFAULT, ...data });
+        if (data.humanizer_enabled !== undefined) setHumanizerEnabled(data.humanizer_enabled);
+        if (data.banned_phrases) setBannedPhrases(data.banned_phrases);
+      })
       .catch(() => setCfg(DEFAULT))
       .finally(() => setLoading(false));
   }, [show, accountId]);
@@ -458,7 +469,12 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
     if (!token) return;
     setSaving(true); setError(null);
     try {
-      const payload = { ...cfg, posts_per_week: totalPosts };
+      const payload = {
+        ...cfg,
+        posts_per_week: totalPosts,
+        humanizer_enabled: humanizerEnabled,
+        banned_phrases: bannedPhrases,
+      };
       try {
         await apiClient.put(`/api/agent/config/${accountId}`, payload);
       } catch {
@@ -503,7 +519,19 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
               </div>
               <h5 className="mb-0 fw-bold text-white">{wizardMode ? '✨ Asistente IA' : `@${accountUsername || `cuenta_${accountId}`}`}</h5>
             </div>
-            <button type="button" className="btn-close btn-close-white mt-1" onClick={onHide} style={{ opacity: 0.4 }} />
+            <div className="d-flex align-items-center gap-2">
+              {!wizardMode && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-info"
+                  style={{ fontSize: '0.78rem', borderRadius: 8, padding: '4px 10px' }}
+                  onClick={() => setShowAuditModal(true)}
+                >
+                  <i className="bi bi-shield-check me-1" />Auditar perfil
+                </button>
+              )}
+              <button type="button" className="btn-close btn-close-white mt-1" onClick={onHide} style={{ opacity: 0.4 }} />
+            </div>
           </div>
         </div>
 
@@ -646,6 +674,67 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
                       {o.label}<div style={{ fontSize: '0.62rem', opacity: 0.65, fontWeight: 400 }}>{o.desc}</div>
                     </button>
                   ))}
+                </div>
+              </div>
+
+              <Sep />
+
+              {/* Filtro anti-slop */}
+              <SL icon="bi-shield-slash" label="Filtro anti-slop" />
+              <div className="mb-3" style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '14px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)' }}>
+                <div className="form-check form-switch mb-3">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="anti-slop-toggle"
+                    checked={humanizerEnabled}
+                    onChange={e => setHumanizerEnabled(e.target.checked)}
+                  />
+                  <label className="form-check-label small" htmlFor="anti-slop-toggle" style={{ color: 'rgba(255,255,255,0.85)' }}>
+                    Limpieza automática de lenguaje sintético
+                  </label>
+                </div>
+                <FL icon="bi-slash-circle" label="Términos vetados" />
+                <div className="d-flex flex-wrap gap-2 mb-2">
+                  {bannedPhrases.map((phrase, i) => (
+                    <span key={i} style={{ backgroundColor: 'rgba(239,68,68,0.12)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 20, padding: '3px 10px', fontSize: '0.76rem', display: 'flex', alignItems: 'center', gap: 5 }}>
+                      {phrase}
+                      <button type="button" onClick={() => setBannedPhrases(prev => prev.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', color: '#fca5a5', padding: 0, cursor: 'pointer', lineHeight: 1, fontSize: '0.9rem', opacity: 0.7 }}>×</button>
+                    </span>
+                  ))}
+                </div>
+                <div className="d-flex gap-2">
+                  <input
+                    className="form-control form-control-sm"
+                    style={inp}
+                    placeholder="Nuevo término vetado..."
+                    value={newBannedPhrase}
+                    onChange={e => setNewBannedPhrase(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const t = newBannedPhrase.trim();
+                        if (t && !bannedPhrases.includes(t)) {
+                          setBannedPhrases(prev => [...prev, t]);
+                          setNewBannedPhrase('');
+                        }
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-secondary"
+                    style={{ flexShrink: 0 }}
+                    onClick={() => {
+                      const t = newBannedPhrase.trim();
+                      if (t && !bannedPhrases.includes(t)) {
+                        setBannedPhrases(prev => [...prev, t]);
+                        setNewBannedPhrase('');
+                      }
+                    }}
+                  >
+                    <i className="bi bi-plus" />
+                  </button>
                 </div>
               </div>
 
@@ -974,6 +1063,11 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
           )}
         </div>
       </div>
+      <ProfileAudit
+        accountId={accountId}
+        isOpen={showAuditModal}
+        onClose={() => setShowAuditModal(false)}
+      />
     </>
   );
 };

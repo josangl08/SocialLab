@@ -9,6 +9,8 @@ from typing import Dict, List, Optional
 from fastapi import HTTPException
 from httpx import ReadError
 
+from utils.encryption import decrypt_token
+
 logger = logging.getLogger(__name__)
 
 
@@ -117,14 +119,46 @@ class InstagramInsightsService:
             logger.warning(f"⚠️  No se pudo obtener la métrica 'reach': {e}")
 
 
+        # 4. Altas/bajas de seguidores y toques en botones de contacto de las últimas 24 h (AD-9).
+        # Se guardan en el snapshot diario, así que la serie se reconstruye por fecha.
+        day_since = int((until_date - timedelta(days=1)).timestamp())
+        day_until = int(until_date.timestamp())
+        try:
+            data = self._make_request(endpoint, {
+                'metric': 'follows_and_unfollows',
+                'period': 'day',
+                'metric_type': 'total_value',
+                'breakdown': 'follow_type',
+                'since': day_since,
+                'until': day_until,
+            })
+            by_type = self._parse_breakdown(data)
+            insights['follows'] = by_type.get('FOLLOWER', 0)
+            insights['unfollows'] = by_type.get('NON_FOLLOWER', 0)
+        except Exception as e:
+            logger.warning(f"⚠️  No se pudo obtener 'follows_and_unfollows': {e}")
+
+        try:
+            data = self._make_request(endpoint, {
+                'metric': 'profile_links_taps',
+                'period': 'day',
+                'metric_type': 'total_value',
+                'breakdown': 'contact_button_type',
+                'since': day_since,
+                'until': day_until,
+            })
+            insights['profile_links_taps'] = sum(self._parse_breakdown(data).values())
+        except Exception as e:
+            logger.warning(f"⚠️  No se pudo obtener 'profile_links_taps': {e}")
+
         # Asegurar que todas las claves esperadas existan para evitar KeyErrors
         expected_metrics = [
             'follower_count', 'media_count', 'name', 'username', 'profile_picture_url',
-            'total_interactions', 'reach'
+            'total_interactions', 'reach', 'follows', 'unfollows', 'profile_links_taps'
         ]
         for key in expected_metrics:
             if key not in insights:
-                if any(k in key for k in ['count', 'reach', 'interactions']):
+                if any(k in key for k in ['count', 'reach', 'interactions', 'follows', 'taps']):
                     insights[key] = 0
                 else:
                     insights[key] = ''
@@ -135,6 +169,24 @@ class InstagramInsightsService:
         )
 
         return insights
+
+    def get_profile(self) -> Dict:
+        """Campos públicos del perfil que no se guardan en BD (bio, web) para la auditoría."""
+        return self._make_request(
+            f"{self.instagram_account_id}",
+            {'fields': 'username,name,biography,website,profile_picture_url'}
+        )
+
+    @staticmethod
+    def _parse_breakdown(data: Dict) -> Dict[str, int]:
+        """Convierte una respuesta total_value con un breakdown en {dimensión: valor}."""
+        result: Dict[str, int] = {}
+        for item in data.get('data', []):
+            for breakdown in (item.get('total_value') or {}).get('breakdowns', []):
+                for row in breakdown.get('results', []):
+                    key = ','.join(str(v) for v in row.get('dimension_values', []))
+                    result[key] = result.get(key, 0) + int(row.get('value', 0) or 0)
+        return result
 
     def get_account_insights_detailed(
         self,
@@ -345,7 +397,7 @@ class InstagramInsightsService:
 
     def get_media_insights(self, media_id: str, media_type: str = '') -> Dict:
         endpoint = f"{media_id}/insights"
-        base_metrics = ['reach', 'saved', 'total_interactions', 'views']
+        base_metrics = ['reach', 'saved', 'shares', 'total_interactions', 'views']
         params = {'metric': ','.join(base_metrics)}
         data = self._make_request(endpoint, params)
 
@@ -365,18 +417,20 @@ class InstagramInsightsService:
 
         # Fetch Reels-specific watch time metrics for VIDEO/REEL posts
         if media_type.upper() in ('VIDEO', 'REELS'):
-            try:
-                reel_params = {
-                    'metric': 'ig_reels_avg_watch_time,ig_reels_video_view_total_time'
-                }
-                reel_data = self._make_request(endpoint, reel_params)
-                for item in reel_data.get('data', []):
-                    metric_name = item.get('name')
-                    values = item.get('values', [])
-                    if values:
-                        insights[metric_name] = values[0].get('value', 0)
-            except Exception as e:
-                logger.debug(f"Watch time metrics not available for {media_id}: {e}")
+            # reels_skip_rate (AD-10) va en la misma llamada; Meta la marca "en desarrollo",
+            # así que si la API la rechaza se reintenta solo con las de watch time
+            reel_metrics = ['ig_reels_avg_watch_time', 'ig_reels_video_view_total_time', 'reels_skip_rate']
+            for metrics in (reel_metrics, reel_metrics[:2]):
+                try:
+                    reel_data = self._make_request(endpoint, {'metric': ','.join(metrics)})
+                    for item in reel_data.get('data', []):
+                        metric_name = item.get('name')
+                        values = item.get('values', [])
+                        if values:
+                            insights[metric_name] = values[0].get('value', 0)
+                    break
+                except Exception as e:
+                    logger.debug(f"Reel metrics {metrics} not available for {media_id}: {e}")
 
         return insights
 
@@ -505,6 +559,8 @@ class InstagramInsightsService:
                             'reach': reach,
                             'impressions': impressions,
                         })
+                        if 'reels_skip_rate' in insights:
+                            perf_data['reels_skip_rate'] = insights['reels_skip_rate']
 
                         if impressions > 0 or reach > 0:
                             posts_with_insights += 1
@@ -716,3 +772,12 @@ class InstagramInsightsService:
         trend = sorted(daily_engagement.values(), key=lambda x: x['date'])
 
         return trend
+
+
+def fetch_live_profile(account: Dict) -> Dict:
+    """Perfil en vivo (bio, web...) de una fila de instagram_accounts; descifra su token."""
+    service = InstagramInsightsService(
+        decrypt_token(account.get('long_lived_access_token')),
+        account.get('instagram_business_account_id'),
+    )
+    return service.get_profile()

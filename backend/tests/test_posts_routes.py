@@ -625,3 +625,45 @@ def test_update_post_persists_structure_only_when_sent(mock_supabase, mock_admin
 
     client.put("/api/posts/1", data={"content": "C", "post_type": "carousel", "status": "draft"})
     assert "content_structure" not in update.call_args[0][0]
+
+
+# ==============================================================================
+# trial_graduation (Trial Reels, AD-10)
+# ==============================================================================
+
+def test_create_reel_persists_trial_graduation(mock_supabase, mock_admin_supabase):
+    row = {"id": 1, "user_id": USER_ID, "content": "C", "post_type": "reel", "status": "draft",
+           "created_at": "2026-06-27T12:00:00", "content_format": "reel", "trial_graduation": "MANUAL"}
+    insert = _mock_insert(mock_supabase, row)
+
+    response = client.post("/api/posts", data={
+        "content": "C", "post_type": "reel", "status": "draft", "notify_telegram": False,
+        "content_format": "reel", "trial_graduation": "MANUAL",
+    })
+
+    assert response.status_code == 200
+    assert insert.call_args[0][0]["trial_graduation"] == "MANUAL"
+    assert response.json()["trial_graduation"] == "MANUAL"
+
+
+def test_create_non_reel_ignores_trial_graduation(mock_supabase, mock_admin_supabase):
+    row = {"id": 1, "user_id": USER_ID, "content": "C", "post_type": "carousel", "status": "draft",
+           "created_at": "2026-06-27T12:00:00"}
+    insert = _mock_insert(mock_supabase, row)
+
+    response = client.post("/api/posts", data={
+        "content": "C", "post_type": "carousel", "status": "draft", "notify_telegram": False,
+        "content_format": "carousel", "trial_graduation": "SS_PERFORMANCE",
+    })
+
+    assert response.status_code == 200
+    assert insert.call_args[0][0]["trial_graduation"] is None
+
+
+def test_create_post_invalid_trial_graduation_422(mock_supabase, mock_admin_supabase):
+    response = client.post("/api/posts", data={
+        "content": "C", "post_type": "reel", "status": "draft", "notify_telegram": False,
+        "content_format": "reel", "trial_graduation": "AUTO",
+    })
+    assert response.status_code == 422
+    mock_supabase.table.return_value.insert.assert_not_called()

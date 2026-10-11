@@ -15,6 +15,7 @@ import 'bootstrap-icons/font/bootstrap-icons.css';
 import { apiClient } from '../../api/client';
 import './Analytics.css';
 import { FollowerGrowthChart } from './charts/FollowerGrowthChart';
+import { AccountGrowthChart, type AccountGrowth } from './charts/AccountGrowthChart';
 import { DemographicsChart } from './charts/DemographicsChart';
 import { ActivityHeatmap } from './charts/ActivityHeatmap';
 import { TopLocations } from './charts/TopLocations';
@@ -76,6 +77,8 @@ interface TopPost {
   avg_watch_time_ms: number;
   total_watch_time_ms: number;
   date: string;
+  outlier_multiple: number | null;
+  sends_per_reach: number | null;
 }
 
 interface AnalyticsData {
@@ -89,6 +92,11 @@ interface AnalyticsData {
     views: number;
     total_interactions: number;
     engagement_rate: number;
+    avg_sends_per_reach: number | null;
+    median_views: number | null;
+    contact_button_taps: number;
+    strategy_mode: 'commercial_campaign' | 'personal_storyline';
+    follower_growth: AccountGrowth | null;
     growth?: {
       posts: number;
       likes: number;
@@ -98,6 +106,7 @@ interface AnalyticsData {
   };
   by_content_type?: Record<string, ContentTypeStats>;
   top_posts: TopPost[];
+  top_posts_by_outlier: TopPost[];
   engagement_trend: Array<{ date: string; likes: number; comments: number; engagement?: number }>;
   best_posting_times: Array<{ time: string; avg_engagement: number }>;
   best_posting_times_raw?: BestPostingTimeRaw[];
@@ -108,6 +117,28 @@ interface AnalyticsData {
 type InnerTab = 'rendimiento' | 'audiencia' | 'contenido';
 type DemographicsMode = 'followers' | 'engaged';
 type TimeRange = '7days' | '30days' | '90days' | 'all';
+type TopPostsSort = 'engagement' | 'outlier';
+
+const mapTopPost = (post: Record<string, any>): TopPost => ({
+  id: post.id ?? '',
+  content: post.caption ?? 'Sin descripción',
+  media_url: post.media_url ?? '',
+  permalink: post.permalink ?? '',
+  post_type: post.post_type ?? 'IMAGE',
+  likes: post.likes ?? 0,
+  comments: post.comments ?? 0,
+  saved: post.saved ?? 0,
+  views: post.impressions ?? 0,
+  reach: post.reach ?? 0,
+  avg_watch_time_ms: post.avg_watch_time_ms ?? 0,
+  total_watch_time_ms: post.total_watch_time_ms ?? 0,
+  date: post.timestamp ?? new Date().toISOString(),
+  outlier_multiple: post.outlier_multiple ?? null,
+  sends_per_reach: post.sends_per_reach ?? null,
+});
+
+const formatPercent = (ratio: number | null) =>
+  ratio == null ? '—' : `${(ratio * 100).toFixed(1).replace('.', ',')} %`;
 
 const COLORS = ['#833ab4', '#fd1d1d', '#fcb045', '#818cf8', '#6ee7b7'];
 const DAYS_MAP: Record<TimeRange, number> = { '7days': 7, '30days': 30, '90days': 90, 'all': 3650 };
@@ -126,6 +157,7 @@ const Analytics: React.FC = () => {
   const [activeTab, setActiveTab] = useState<InnerTab>('rendimiento');
   const [demographicsMode, setDemographicsMode] = useState<DemographicsMode>('followers');
   const [selectedPost, setSelectedPost] = useState<TopPost | null>(null);
+  const [topPostsSort, setTopPostsSort] = useState<TopPostsSort>('engagement');
 
   useEffect(() => {
     const token = localStorage.getItem('authToken');
@@ -158,24 +190,16 @@ const Analytics: React.FC = () => {
             views: ov.views ?? ov.impressions ?? 0,
             total_interactions: ov.total_interactions ?? 0,
             engagement_rate: ov.engagement_rate ?? 0,
+            avg_sends_per_reach: ov.avg_sends_per_reach ?? null,
+            median_views: ov.median_views ?? null,
+            contact_button_taps: ov.contact_button_taps ?? 0,
+            strategy_mode: ov.strategy_mode ?? 'personal_storyline',
+            follower_growth: ov.follower_growth ?? null,
             growth: ov.growth,
           },
           by_content_type: raw.by_content_type ?? {},
-          top_posts: (raw.top_posts ?? []).map((post: Record<string, unknown>) => ({
-            id: post.id ?? '',
-            content: post.caption ?? 'Sin descripción',
-            media_url: post.media_url ?? '',
-            permalink: post.permalink ?? '',
-            post_type: (post.post_type as string) ?? 'IMAGE',
-            likes: post.likes ?? 0,
-            comments: post.comments ?? 0,
-            saved: post.saved ?? 0,
-            views: post.impressions ?? 0,
-            reach: post.reach ?? 0,
-            avg_watch_time_ms: post.avg_watch_time_ms ?? 0,
-            total_watch_time_ms: post.total_watch_time_ms ?? 0,
-            date: post.timestamp ?? new Date().toISOString(),
-          })),
+          top_posts: (raw.top_posts ?? []).map(mapTopPost),
+          top_posts_by_outlier: (raw.top_posts_by_outlier ?? []).map(mapTopPost),
           engagement_trend: (raw.engagement_trend ?? []).map((item: Record<string, unknown>) => ({
             date: item.date as string,
             likes: (item.likes as number) ?? 0,
@@ -252,7 +276,13 @@ const Analytics: React.FC = () => {
     { title: 'Engagement',     value: `${analytics.overview.engagement_rate}%`,                     icon: 'graph-up-arrow', color: 'success' as const },
     { title: 'Interacciones',  value: analytics.overview.total_interactions.toLocaleString('es-ES'), icon: 'heart-fill',     color: 'warning' as const },
     { title: 'Guardados',      value: analytics.overview.total_saves.toLocaleString('es-ES'),        icon: 'bookmark-fill',  color: 'success' as const },
+    { title: 'Sends / Reach',  value: formatPercent(analytics.overview.avg_sends_per_reach),         icon: 'send-fill',      color: 'info' as const },
+    ...(analytics.overview.strategy_mode === 'commercial_campaign'
+      ? [{ title: 'Toques en contacto', value: analytics.overview.contact_button_taps.toLocaleString('es-ES'), icon: 'telephone-fill', color: 'warning' as const }]
+      : []),
   ];
+
+  const shownTopPosts = topPostsSort === 'outlier' ? analytics.top_posts_by_outlier : analytics.top_posts;
 
   const contentTypeChartData = analytics.by_content_type
     ? Object.entries(analytics.by_content_type).map(([, stats]) => ({
@@ -380,6 +410,16 @@ const Analytics: React.FC = () => {
 
               <div className="an-section">
                 <div className="an-section-title">
+                  <i className="bi bi-arrow-down-up"></i>
+                  Altas y Bajas de Seguidores
+                </div>
+                <div className="an-chart-body">
+                  <AccountGrowthChart growth={analytics.overview.follower_growth} />
+                </div>
+              </div>
+
+              <div className="an-section">
+                <div className="an-section-title">
                   <i className="bi bi-clock"></i>
                   Actividad de Seguidores
                 </div>
@@ -488,12 +528,28 @@ const Analytics: React.FC = () => {
           )}
 
           <div className="an-section">
-            <div className="an-section-title">
-              <i className="bi bi-trophy"></i>
-              Posts Más Exitosos
+            <div className="an-section-title-row">
+              <div className="an-section-title">
+                <i className="bi bi-trophy"></i>
+                Posts Más Exitosos
+              </div>
+              <div className="an-demographics-toggle" aria-label="Ordenar posts">
+                <button
+                  className={`an-demographics-pill${topPostsSort === 'engagement' ? ' active' : ''}`}
+                  onClick={() => setTopPostsSort('engagement')}
+                >
+                  Engagement
+                </button>
+                <button
+                  className={`an-demographics-pill${topPostsSort === 'outlier' ? ' active' : ''}`}
+                  onClick={() => setTopPostsSort('outlier')}
+                >
+                  Outlier Multiple
+                </button>
+              </div>
             </div>
             <div className="an-top-posts-grid">
-              {analytics.top_posts.map((post) => (
+              {shownTopPosts.map((post) => (
                 <div
                   key={post.id}
                   className="an-post-card"
@@ -515,6 +571,16 @@ const Analytics: React.FC = () => {
                       <span><i className="bi bi-heart-fill me-1" style={{ color: '#fd1d1d' }}></i>{post.likes}</span>
                       <span><i className="bi bi-chat-fill me-1" style={{ color: '#833ab4' }}></i>{post.comments}</span>
                       <span><i className="bi bi-bookmark-fill me-1" style={{ color: '#6ee7b7' }}></i>{post.saved}</span>
+                    </div>
+                    <div className="an-post-card-stats an-post-card-metrics">
+                      <span title="Vistas frente a la mediana de 90 días">
+                        {post.outlier_multiple != null
+                          ? `${post.outlier_multiple.toString().replace('.', ',')}×`
+                          : 'Datos insuficientes'}
+                      </span>
+                      <span title="Sends per Reach">
+                        <i className="bi bi-send-fill me-1"></i>{formatPercent(post.sends_per_reach)}
+                      </span>
                     </div>
                   </div>
                 </div>

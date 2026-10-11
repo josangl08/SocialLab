@@ -7,7 +7,11 @@ export interface SavePostPayload {
   status: 'draft' | 'scheduled';
   scheduledAt?: string | null;
   notifyTelegram: boolean;
+  /** Trial Reel (AD-10): solo se envía en Reels */
+  trialGraduation?: TrialGraduation | null;
 }
+
+export type TrialGraduation = 'MANUAL' | 'SS_PERFORMANCE';
 
 export interface FormatEditorProps {
   format: Exclude<ContentFormat, 'story'>;
@@ -44,6 +48,9 @@ export const FormatEditor: React.FC<FormatEditorProps> = ({
   const [selectedFormulaId, setSelectedFormulaId] = useState<string>('');
   const [mediaPreview, setMediaPreview] = useState<string | null>(mediaUrl);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [trialEnabled, setTrialEnabled] = useState(false);
+  const [trialGraduation, setTrialGraduation] = useState<TrialGraduation>('MANUAL');
+  const trialPayload = format === 'reel' && trialEnabled ? trialGraduation : null;
 
   useEffect(() => {
     contentApi
@@ -97,6 +104,7 @@ export const FormatEditor: React.FC<FormatEditorProps> = ({
       status: 'scheduled',
       scheduledAt: schedDate.toISOString(),
       notifyTelegram: false,
+      trialGraduation: trialPayload,
     });
   };
 
@@ -106,6 +114,7 @@ export const FormatEditor: React.FC<FormatEditorProps> = ({
       status: 'draft',
       scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null,
       notifyTelegram: false,
+      trialGraduation: trialPayload,
     });
   };
 
@@ -115,6 +124,7 @@ export const FormatEditor: React.FC<FormatEditorProps> = ({
       status: 'draft',
       scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null,
       notifyTelegram: true,
+      trialGraduation: trialPayload,
     });
   };
 
@@ -219,6 +229,35 @@ export const FormatEditor: React.FC<FormatEditorProps> = ({
           onChange={(e) => onCaptionChange(e.target.value)}
         />
       </div>
+
+      {/* Trial Reel (AD-10): solo Reels */}
+      {format === 'reel' && (
+        <div className="format-editor-trial mb-3">
+          <div className="form-check form-switch">
+            <input
+              className="form-check-input"
+              type="checkbox"
+              id="trial-reel-toggle"
+              checked={trialEnabled}
+              onChange={(e) => setTrialEnabled(e.target.checked)}
+            />
+            <label className="form-check-label small" htmlFor="trial-reel-toggle">
+              Publicar como prueba (solo no seguidores)
+            </label>
+          </div>
+          {trialEnabled && (
+            <select
+              aria-label="Graduación del Reel de prueba"
+              className="form-select form-select-sm bg-dark text-light border-secondary mt-2"
+              value={trialGraduation}
+              onChange={(e) => setTrialGraduation(e.target.value as TrialGraduation)}
+            >
+              <option value="MANUAL">Graduación manual (la decides tú desde Instagram)</option>
+              <option value="SS_PERFORMANCE">Graduación automática si rinde bien</option>
+            </select>
+          )}
+        </div>
+      )}
 
       {/* Fecha programada */}
       <div className="mb-3">

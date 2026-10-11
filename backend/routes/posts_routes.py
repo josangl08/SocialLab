@@ -22,6 +22,7 @@ admin_supabase = get_supabase_admin_client()
 
 
 CONTENT_FORMATS = ('post', 'reel', 'carousel', 'story')
+TRIAL_GRADUATIONS = ('MANUAL', 'SS_PERFORMANCE')
 
 
 def _structure_fields(content_format: Optional[str], content_structure: Optional[str]) -> dict:
@@ -69,10 +70,17 @@ def create_post(
     notify_telegram: bool = Form(True),
     content_format: Optional[str] = Form(None),
     content_structure: Optional[str] = Form(None),
+    trial_graduation: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ):
     structure_fields = _structure_fields(content_format, content_structure)
+    if trial_graduation is not None and trial_graduation not in TRIAL_GRADUATIONS:
+        raise HTTPException(status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail=f"trial_graduation debe ser uno de {', '.join(TRIAL_GRADUATIONS)}.")
+    # Trial Reels (AD-10): solo los Reels se publican como prueba; en otros formatos se ignora
+    if content_format != 'reel':
+        trial_graduation = None
     if not notify_telegram and status == 'scheduled':
         if not scheduled_at:
             raise HTTPException(
@@ -120,6 +128,7 @@ def create_post(
             'status': status,
             'scheduled_at': scheduled_at.isoformat() if scheduled_at else None,
             'instagram_account_id': instagram_account_id,
+            'trial_graduation': trial_graduation,
             **structure_fields,
         }).execute()
 
@@ -293,7 +302,8 @@ def publish_post_now(
             media_url=post['media_url'],
             caption=post.get('caption', ''),
             instagram_account_id=instagram_account_id,
-            post_type=post_type
+            post_type=post_type,
+            trial_graduation=post.get('trial_graduation')
         )
 
         published_at = datetime.utcnow()

@@ -126,3 +126,172 @@ def test_get_visual_performance_data_returns_empty_when_no_posts(mock_db):
     rows = service.get_visual_performance_data(instagram_account_id=7)
 
     assert rows == []
+
+
+# --- Tests Fase E: Métricas de Rendimiento, Mediana y Crecimiento ---
+
+def test_sends_per_reach_normal():
+    """Post con 40 compartidos y 2 000 de alcance -> 0.02 (2.0%)."""
+    result = AnalyticsService.calculate_sends_per_reach(shares=40, reach=2000)
+    assert result == 0.02
+
+
+def test_sends_per_reach_division_by_zero():
+    """Post con alcance 0 o desconocido -> None (sin ZeroDivisionError)."""
+    assert AnalyticsService.calculate_sends_per_reach(shares=40, reach=0) is None
+    assert AnalyticsService.calculate_sends_per_reach(shares=40, reach=None) is None
+    assert AnalyticsService.calculate_sends_per_reach(shares=0, reach=0) is None
+
+
+def test_calculate_median_views():
+    """Mediana de los posts con vistas; < 5 posts con vistas -> None."""
+    assert AnalyticsService.calculate_median_views([100, 200, 300, 400, 500]) == 300.0
+    assert AnalyticsService.calculate_median_views([100, 200, 300, 400, 500, 600]) == 350.0
+    assert AnalyticsService.calculate_median_views([100, 200, 300, 400]) is None
+    # Los posts sin vistas no cuentan para el mínimo de 5
+    assert AnalyticsService.calculate_median_views([0, 0, 100, 200, 300, 400]) is None
+    assert AnalyticsService.calculate_median_views([]) is None
+
+
+def test_outlier_multiple_calculation():
+    """Post viral con 5 200 vistas y mediana 1 000 -> 5.2x."""
+    assert AnalyticsService.calculate_outlier_multiple(views=5200, median_views=1000.0) == 5.2
+
+
+def test_outlier_multiple_without_median():
+    """Sin mediana (datos insuficientes) o mediana 0 -> None, sin ZeroDivisionError."""
+    assert AnalyticsService.calculate_outlier_multiple(views=5200, median_views=None) is None
+    assert AnalyticsService.calculate_outlier_multiple(views=5200, median_views=0.0) is None
+
+
+def test_growth_series_daily_calculation():
+    """Semana con 120 altas y 30 bajas -> neto +90 (AD-9)."""
+    daily_raw = [
+        {"date": "2026-05-01", "follows": 70, "unfollows": 10},
+        {"date": "2026-05-02", "follows": 50, "unfollows": 20},
+    ]
+    series = AnalyticsService.calculate_growth_series(daily_raw)
+    assert series[0] == {"date": "2026-05-01", "follows": 70, "unfollows": 10, "net": 60}
+    assert series[1] == {"date": "2026-05-02", "follows": 50, "unfollows": 20, "net": 30}
+    assert sum(d["net"] for d in series) == 90
+
+
+def test_follower_growth_from_snapshots(mock_db):
+    """La serie y los toques de contacto salen de instagram_account_snapshots."""
+    mock_db.table.return_value.select.return_value.eq.return_value.gte.return_value \
+        .order.return_value.execute.return_value.data = [
+            {"date": "2026-05-01", "follows": 70, "unfollows": 10, "profile_links_taps": 3},
+            {"date": "2026-05-02", "follows": 50, "unfollows": 20, "profile_links_taps": None},
+        ]
+    service = AnalyticsService(db_client=mock_db)
+    result = service._get_follower_growth(instagram_account_id=1, days=7)
+
+    mock_db.table.assert_called_with('instagram_account_snapshots')
+    growth = result['follower_growth']
+    assert (growth['follows'], growth['unfollows'], growth['net']) == (120, 30, 90)
+    assert len(growth['series']) == 2
+    assert result['contact_button_taps'] == 3
+
+
+def test_overview_includes_fase_e_metrics(mock_db):
+    """Overview: median_views (la de 90 días que recibe) y Sends per Reach medio sin posts sin alcance."""
+    service = AnalyticsService(db_client=mock_db)
+    account_info = {'id': 1, 'follower_count': 1000, 'reach': 5000}
+    posts = [
+        {'post_performance': {'impressions': 100, 'reach': 1000, 'shares': 20}},
+        {'post_performance': {'impressions': 200, 'reach': 1000, 'shares': 40}},
+        {'post_performance': {'impressions': 300, 'reach': 0, 'shares': 50}},
+        {'post_performance': None},
+    ]
+    overview = service._calculate_overview(posts, account_info, median_views=250.0)
+
+    assert overview['median_views'] == 250.0
+    assert overview['avg_sends_per_reach'] == 0.03  # media de 0.02 y 0.04; reach 0 no cuenta
+
+
+def test_overview_sends_per_reach_none_without_reach(mock_db):
+    service = AnalyticsService(db_client=mock_db)
+    posts = [{'post_performance': {'impressions': 100, 'reach': 0, 'shares': 5}}]
+    overview = service._calculate_overview(posts, {'id': 1, 'follower_count': 10})
+    assert overview['avg_sends_per_reach'] is None
+    assert overview['median_views'] is None
+
+
+def test_recent_posts_includes_shares_sends_and_outlier(mock_db):
+    """Recent posts incluye shares, sends_per_reach y outlier_multiple con la mediana recibida."""
+    service = AnalyticsService(db_client=mock_db)
+    posts = [
+        {'instagram_post_id': 'p1', 'publication_date': '2026-05-05', 'post_performance': {'impressions': 600, 'reach': 2000, 'shares': 40}},
+        {'instagram_post_id': 'p2', 'publication_date': '2026-05-04', 'post_performance': {'impressions': 200, 'reach': 0, 'shares': 10}},
+    ]
+    recent = service._get_recent_posts(posts, limit=5, median_views=400.0)
+    p1 = next(p for p in recent if p['id'] == 'p1')
+    p2 = next(p for p in recent if p['id'] == 'p2')
+    assert p1['shares'] == 40
+    assert p1['sends_per_reach'] == 0.02
+    assert p1['outlier_multiple'] == 1.5
+    assert p2['sends_per_reach'] is None
+
+    no_median = service._get_recent_posts(posts, limit=5)
+    assert all(p['outlier_multiple'] is None for p in no_median)
+
+
+def test_top_posts_sorted_by_outlier(mock_db):
+    """sort_by='outlier' ordena por Outlier Multiple; sin dato van al final."""
+    service = AnalyticsService(db_client=mock_db)
+    posts = [
+        {'instagram_post_id': 'a', 'post_performance': {'likes': 100, 'impressions': 100}},
+        {'instagram_post_id': 'b', 'post_performance': {'likes': 1, 'impressions': 900}},
+        {'instagram_post_id': 'c', 'post_performance': {'likes': 50, 'impressions': 300}},
+    ]
+    by_outlier = service._get_top_posts(posts, limit=3, median_views=300.0, sort_by='outlier')
+    assert [p['id'] for p in by_outlier] == ['b', 'c', 'a']
+    assert by_outlier[0]['outlier_multiple'] == 3.0
+    by_engagement = service._get_top_posts(posts, limit=3, median_views=300.0)
+    assert by_engagement[0]['id'] == 'a'
+
+
+def _swipe_db(mock_db, rows):
+    mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value \
+        .gte.return_value.execute.return_value.data = rows
+    return AnalyticsService(db_client=mock_db)
+
+
+def test_swipe_file_sorted_by_outlier_with_formula_summary(mock_db):
+    rows = [
+        {'id': i, 'content': f'Gancho {i}\nCuerpo', 'trial_graduation': None,
+         'post_performance': {'impressions': v, 'reach': 1000, 'shares': 20}}
+        for i, v in enumerate([100, 200, 300, 400, 1500], start=1)
+    ]
+    rows[4]['trial_graduation'] = 'MANUAL'
+    rows[4]['post_performance']['reels_skip_rate'] = 41.5
+    service = _swipe_db(mock_db, rows)
+
+    with patch('services.analytics.analytics_service.score_hook',
+               return_value={'formula_id': 3, 'formula_name': 'Pérdida cuantificada'}):
+        result = service.get_swipe_file(1)
+
+    items = result['items']
+    assert items[0]['post_id'] == 5
+    assert items[0]['hook_text'] == 'Gancho 5'
+    assert items[0]['outlier_multiple'] == 5.0  # mediana 300
+    assert items[0]['sends_per_reach'] == 0.02
+    assert items[0]['is_trial'] is True
+    assert items[0]['reels_skip_rate'] == 41.5
+    assert result['by_formula'] == [{
+        'formula_id': 3, 'formula_name': 'Pérdida cuantificada', 'count': 5,
+        'avg_outlier': round((1/3 + 2/3 + 1 + 4/3 + 5) / 5, 2),
+    }]
+
+
+def test_swipe_file_insufficient_data(mock_db):
+    """< 5 posts con vistas -> outlier None; sin texto -> el post no entra."""
+    rows = [
+        {'id': 1, 'content': 'Solo un gancho', 'post_performance': {'impressions': 100, 'reach': 0}},
+        {'id': 2, 'content': '', 'post_performance': {'impressions': 100}},
+    ]
+    service = _swipe_db(mock_db, rows)
+    result = service.get_swipe_file(1)
+    assert len(result['items']) == 1
+    assert result['items'][0]['outlier_multiple'] is None
+    assert result['items'][0]['sends_per_reach'] is None

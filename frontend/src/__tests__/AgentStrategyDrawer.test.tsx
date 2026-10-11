@@ -51,6 +51,12 @@ describe('MonthlyCampaignSection in AgentStrategyDrawer', () => {
           }),
         });
       }
+      if (url.includes('/content/audit-profile')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ score: 70, items: [] }),
+        });
+      }
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({}),
@@ -266,4 +272,86 @@ describe('MonthlyCampaignSection in AgentStrategyDrawer', () => {
       expect(screen.getByTestId('campaign-chat-box')).toBeInTheDocument();
     });
   });
+
+  test('opens ProfileAudit modal when clicking "Auditar perfil"', async () => {
+    render(
+      <AgentStrategyDrawer
+        accountId={12}
+        show={true}
+        onHide={mockOnHide}
+        onSave={mockOnSave}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Auditar perfil/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText(/Auditar perfil/i));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('profile-audit-modal')).toBeInTheDocument();
+      expect(screen.getByText('Auditoría de Perfil')).toBeInTheDocument();
+    });
+  });
+
+  test('renders anti-slop section with toggle and allows adding banned phrases', async () => {
+    let savedPayload: any = null;
+    (global.fetch as any).mockImplementation((url: string, options?: any) => {
+      if (url.includes('/api/agent/config/12')) {
+        if (options?.method === 'PUT') {
+          savedPayload = JSON.parse(options.body);
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            humanizer_enabled: true,
+            banned_phrases: ['sinergia'],
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    render(
+      <AgentStrategyDrawer
+        accountId={12}
+        show={true}
+        onHide={mockOnHide}
+        onSave={mockOnSave}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Filtro anti-slop')).toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText(/Limpieza automática de lenguaje sintético/i)).toBeChecked();
+    expect(screen.getByText('sinergia')).toBeInTheDocument();
+
+    // Add another banned phrase
+    const input = screen.getByPlaceholderText('Nuevo término vetado...') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'holístico' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    expect(screen.getByText('holístico')).toBeInTheDocument();
+
+    // Toggle off
+    const toggle = screen.getByLabelText(/Limpieza automática de lenguaje sintético/i);
+    fireEvent.click(toggle);
+    expect(toggle).not.toBeChecked();
+
+    // Click save
+    const saveButton = screen.getByText(/Guardar Estrategia/i);
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      expect(savedPayload).toBeTruthy();
+      expect(savedPayload.humanizer_enabled).toBe(false);
+      expect(savedPayload.banned_phrases).toContain('sinergia');
+      expect(savedPayload.banned_phrases).toContain('holístico');
+    });
+  });
 });
+

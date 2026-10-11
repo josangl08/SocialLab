@@ -257,7 +257,8 @@ STRATEGY_FIELDS = (
     'id, account_type, sector, purpose, target_audience, style_guide, '
     'default_tone, default_language, posting_frequency, best_times, '
     'content_pillars, hashtag_strategy, caption_voice, reference_accounts, '
-    'posts_per_week, scheduling_mode, preferred_days, content_type_mix, last_agent_sync'
+    'posts_per_week, scheduling_mode, preferred_days, content_type_mix, last_agent_sync, '
+    'humanizer_enabled, banned_phrases'
 )
 
 @router.get("/config/{account_id}")
@@ -290,6 +291,8 @@ def get_agent_config(
             'scheduling_mode': row.get('scheduling_mode', 'flexible'),
             'preferred_days': row.get('preferred_days') or [],
             'content_type_mix': row.get('content_type_mix') or {'post': 2, 'reel': 1, 'carousel': 1, 'story': 0},
+            'humanizer_enabled': row.get('humanizer_enabled', True) is not False,
+            'banned_phrases': row.get('banned_phrases') or [],
         }
     except HTTPException:
         raise
@@ -314,7 +317,7 @@ def update_agent_config(
         if str(acc_res.data[0]['user_id']) != str(current_user.id):
             raise HTTPException(status_code=403, detail="No tienes acceso a esta cuenta")
 
-        admin_supabase.table('instagram_accounts').update({
+        update_data = {
             'account_type': config.account_type,
             'sector': config.sector,
             'purpose': config.purpose,
@@ -332,7 +335,15 @@ def update_agent_config(
             'scheduling_mode': config.scheduling_mode,
             'preferred_days': config.preferred_days,
             'content_type_mix': config.content_type_mix,
-        }).eq('id', account_id).execute()
+        }
+        # Solo si se envían: clientes que no conocen el filtro no lo resetean
+        if config.humanizer_enabled is not None:
+            update_data['humanizer_enabled'] = config.humanizer_enabled
+        if config.banned_phrases is not None:
+            update_data['banned_phrases'] = list(dict.fromkeys(
+                p.strip() for p in config.banned_phrases if p.strip()
+            ))
+        admin_supabase.table('instagram_accounts').update(update_data).eq('id', account_id).execute()
 
         return {"updated": True}
     except HTTPException:

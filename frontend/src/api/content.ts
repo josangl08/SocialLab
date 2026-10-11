@@ -18,6 +18,8 @@ import type {
   StoryOut,
   RepurposeRequest,
   RepurposeOut,
+  ProfileAuditResponse,
+  SwipeFileResponse,
 } from '../types';
 
 export const contentApi = {
@@ -85,5 +87,19 @@ export const contentApi = {
     options?: { signal?: AbortSignal }
   ): Promise<RepurposeOut> => {
     return apiClient.post<RepurposeOut>('/content/formats/repurpose', data, options);
+  },
+
+  auditProfile: (
+    data: { account_id: number },
+    options?: { signal?: AbortSignal }
+  ): Promise<ProfileAuditResponse> => {
+    return apiClient.post<ProfileAuditResponse>('/content/audit-profile', data, options);
+  },
+
+  getSwipeFile: (
+    accountId: number,
+    options?: { signal?: AbortSignal }
+  ): Promise<SwipeFileResponse> => {
+    return apiClient.get<SwipeFileResponse>(`/content/swipe-file/${accountId}`, options);
   },
 };

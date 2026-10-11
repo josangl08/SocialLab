@@ -77,14 +77,14 @@ def _fetch_month_campaign(account_id: int) -> List[Dict[str, Any]]:
     return res.data or []
 
 
-async def resolve_strategy_mode(account_id: int) -> StrategyMode:
+def get_strategy_mode(account_id: int) -> StrategyMode:
     """
     Resolves the strategy mode for an account (AD-2):
     1. Active/approved campaign of current month -> its strategy_mode.
     2. Otherwise -> 'personal_storyline'.
     """
     try:
-        rows = await asyncio.to_thread(_fetch_month_campaign, account_id)
+        rows = _fetch_month_campaign(account_id)
         if rows and rows[0].get("status") in ("approved", "active"):
             mode = rows[0].get("strategy_mode")
             if mode in ("commercial_campaign", "personal_storyline"):
@@ -92,6 +92,11 @@ async def resolve_strategy_mode(account_id: int) -> StrategyMode:
     except Exception as e:
         logger.warning(f"Error resolving strategy mode for account {account_id}: {e}")
     return "personal_storyline"
+
+
+async def resolve_strategy_mode(account_id: int) -> StrategyMode:
+    """Async version of get_strategy_mode (the Supabase query runs in a thread)."""
+    return await asyncio.to_thread(get_strategy_mode, account_id)
 
 
 # --- Prompts Builder ---
@@ -491,3 +496,61 @@ async def generate_repurpose(
     repurpose_out = RepurposeOut(reels=reels, carousels=carousels)
     set_in_cache(cache_key, repurpose_out)
     return repurpose_out
+
+
+# --- Reescritura de bio (auditoría de perfil) ---
+
+_BIO_STRATEGY: Dict[str, str] = {
+    "commercial_campaign": (
+        "Cuenta comercial: a quién ayuda, qué resultado concreto consigue, una prueba de autoridad "
+        "y una llamada a la acción hacia el enlace."
+    ),
+    "personal_storyline": (
+        "Cuenta personal: quién es, de qué va su historia y qué encontrará quien le siga; "
+        "tono cercano, sin lenguaje de venta."
+    ),
+}
+
+
+def build_bio_prompt(
+    current_bio: str, failed_tips: List[str], strategy_mode: StrategyMode, language: str = "es"
+) -> str:
+    tips = "\n".join(f"- {t}" for t in failed_tips) or "- (ninguno)"
+    return f"""Reescribe la biografía de Instagram de esta cuenta. Idioma: {language}.
+{_COMMON_RULES}
+ESTRATEGIA: {_BIO_STRATEGY[strategy_mode]}
+Máximo 150 caracteres, 3 o 4 líneas cortas separadas por saltos de línea.
+
+BIO ACTUAL:
+{current_bio or "(vacía)"}
+
+PUNTOS DE LA AUDITORÍA QUE NO CUMPLE:
+{tips}
+
+Responde solo con JSON: {{"bio": "..."}}"""
+
+
+async def generate_bio_rewrite(
+    account_id: int,
+    current_bio: str,
+    failed_tips: List[str],
+    strategy_mode: Optional[StrategyMode] = None,
+    language: str = "es",
+) -> str:
+    """Bio sugerida acorde a la estrategia (Gemini, cacheada 1 h por bio + puntos fallidos)."""
+    resolved_mode = strategy_mode or await resolve_strategy_mode(account_id)
+    cache_key = _get_cache_key(
+        "bio", account_id, resolved_mode, current_bio + "|" + "|".join(failed_tips), language
+    )
+    cached = get_from_cache(cache_key)
+    if cached is not None:
+        return cached
+
+    prompt = build_bio_prompt(current_bio, failed_tips, resolved_mode, language)
+    raw_response = await generate_gemini_content(prompt, json_mode=True)
+    parsed = await clean_and_parse_json(raw_response)
+    bio = _clean_text(str(parsed.get("bio", "")).strip(), language=language)
+    if not bio:
+        raise ValueError("Gemini no devolvió una bio")
+    set_in_cache(cache_key, bio)
+    return bio

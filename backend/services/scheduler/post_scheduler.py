@@ -87,7 +87,8 @@ def publish_post_job(post_id: int) -> None:
             caption=post_data.get('content', ''),
             instagram_account_id=instagram_account_id,
             post_type=post_data.get('post_type', 'FEED'),
-            video_url=post_data.get('video_url')
+            video_url=post_data.get('video_url'),
+            trial_graduation=post_data.get('trial_graduation')
         )
 
         # Update post as published
