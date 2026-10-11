@@ -950,3 +950,27 @@ def test_select_slot_hook_rejects_hook_not_in_candidates(mock_agent_supabase, mo
     assert response.status_code == 422
     tables["posts"].update.assert_not_called()
     tables["content_proposals"].update.assert_not_called()
+
+
+def test_get_agent_config_foreign_account_403(mock_agent_admin_supabase):
+    """La configuración de una cuenta de otro usuario no se expone."""
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = \
+        MagicMock(data=[{"id": 1, "user_id": "otro-usuario", "sector": "Fitness"}])
+    resp = client.get("/api/agent/config/1")
+    assert resp.status_code == 403
+    assert "sector" not in resp.json()
+
+
+def test_get_agent_config_missing_account_404(mock_agent_admin_supabase):
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = \
+        MagicMock(data=[])
+    assert client.get("/api/agent/config/1").status_code == 404
+
+
+def test_get_agent_config_own_account_200(mock_agent_admin_supabase):
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = \
+        MagicMock(data=[{"id": 1, "user_id": USER_ID, "sector": "Fitness"}])
+    resp = client.get("/api/agent/config/1")
+    assert resp.status_code == 200
+    assert resp.json()["sector"] == "Fitness"
+

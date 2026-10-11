@@ -266,12 +266,12 @@ def get_agent_config(
     current_user: User = Depends(get_current_user)
 ):
     try:
-        acc_res = admin_supabase.table('instagram_accounts').select(STRATEGY_FIELDS).eq('id', account_id).execute()
+        acc_res = admin_supabase.table('instagram_accounts').select(f'user_id, {STRATEGY_FIELDS}').eq('id', account_id).execute()
         if not acc_res.data:
             raise HTTPException(status_code=404, detail="Cuenta no encontrada")
-        if str(acc_res.table if hasattr(acc_res, 'table') else ''):
-            pass
         row = acc_res.data[0]
+        if str(row.get('user_id')) != str(current_user.id):
+            raise HTTPException(status_code=403, detail="No tienes acceso a esta cuenta")
         return {
             'account_type': row.get('account_type', 'personal'),
             'sector': row.get('sector') or '',
