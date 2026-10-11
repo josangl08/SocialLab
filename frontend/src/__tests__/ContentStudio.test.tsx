@@ -351,9 +351,9 @@ describe('ContentStudio Component', () => {
       caption: 'Caption P1',
       preview_url: 'https://storage.test/templates/p1.png',
     });
-    (global.fetch as any).mockResolvedValue({
+    vi.mocked(globalThis.fetch).mockResolvedValue({
       blob: () => Promise.resolve(new Blob(['png'], { type: 'image/png' })),
-    });
+    } as unknown as Response);
 
     render(
       <MemoryRouter>
@@ -372,7 +372,7 @@ describe('ContentStudio Component', () => {
       expect(apiClient.postForm).toHaveBeenCalledTimes(1);
     });
     const [, formData] = (apiClient.postForm as any).mock.calls[0];
-    expect(global.fetch).toHaveBeenCalledWith('https://storage.test/templates/p1.png');
+    expect(globalThis.fetch).toHaveBeenCalledWith('https://storage.test/templates/p1.png');
     expect(formData.get('content')).toBe('Caption P1');
     expect(formData.get('media_file')).toBeInstanceOf(Blob);
   });

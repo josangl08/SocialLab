@@ -62,8 +62,8 @@ export const ContentStudio: React.FC<ContentStudioProps> = ({ onPostGenerated })
       .get<InstagramAccount[]>('/instagram/accounts')
       .then((data) => {
         setAccounts(data || []);
-        if (data && data.length > 0 && !selectedAccountId) {
-          setSelectedAccountId(String(data[0].id));
+        if (data && data.length > 0) {
+          setSelectedAccountId((curr) => curr || String(data[0].id));
         }
       })
       .catch(() => {});
@@ -179,7 +179,7 @@ export const ContentStudio: React.FC<ContentStudioProps> = ({ onPostGenerated })
 
       setFeedback({ message: msg, type: 'success' });
       onPostGenerated?.();
-    } catch (err: any) {
+    } catch (err) {
       const detail = err instanceof ApiError ? err.detail : 'Error al guardar la publicación.';
       setFeedback({ message: detail, type: 'error' });
     } finally {
