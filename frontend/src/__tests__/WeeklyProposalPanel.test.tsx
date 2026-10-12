@@ -35,7 +35,7 @@ describe('WeeklyProposalPanel Component', () => {
     vi.clearAllMocks();
     (useAuth as any).mockReturnValue({ token: mockToken });
 
-    global.fetch = vi.fn().mockImplementation((url: string) => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes('/api/agent/proposals/proposal-1/slots/0/regenerate')) {
         return Promise.resolve({
           ok: true,
@@ -101,7 +101,7 @@ describe('WeeklyProposalPanel Component', () => {
     fireEvent.click(screen.getByText('Approve all'));
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(globalThis.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/api/agent/proposals/proposal-1/approve'),
         expect.objectContaining({ method: 'POST' })
       );
@@ -123,7 +123,7 @@ describe('WeeklyProposalPanel Component', () => {
     fireEvent.click(screen.getByText('Reject'));
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(globalThis.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/api/agent/proposals/proposal-1/reject'),
         expect.objectContaining({ method: 'POST' })
       );
@@ -149,7 +149,7 @@ describe('WeeklyProposalPanel Component', () => {
     fireEvent.click(screen.getByText('Regenerate'));
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(globalThis.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/api/agent/proposals/proposal-1/slots/0/regenerate'),
         expect.objectContaining({ method: 'POST' })
       );
@@ -172,7 +172,7 @@ describe('WeeklyProposalPanel Component', () => {
     fireEvent.click(screen.getByText('Skip'));
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(globalThis.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/api/agent/proposals/proposal-1/slots/0/skip'),
         expect.objectContaining({ method: 'POST' })
       );
@@ -187,12 +187,12 @@ describe('WeeklyProposalPanel Component', () => {
         onProposalAction={mockOnProposalAction}
       />
     );
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   test('calls onProposalsFound when proposal count increases during polling', async () => {
     let callCount = 0;
-    global.fetch = vi.fn().mockImplementation(() => {
+    globalThis.fetch = vi.fn().mockImplementation(() => {
       callCount++;
       const data = callCount === 1 ? [] : mockProposals;
       return Promise.resolve({ ok: true, json: () => Promise.resolve(data) });
@@ -208,7 +208,7 @@ describe('WeeklyProposalPanel Component', () => {
       />
     );
 
-    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
     expect(onProposalsFound).not.toHaveBeenCalled();
 
     rerender(
@@ -242,7 +242,7 @@ describe('WeeklyProposalPanel Component', () => {
     fireEvent.click(screen.getByText('Reel'));
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(globalThis.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/api/agent/proposals/proposal-1/slots/0/type'),
         expect.objectContaining({
           method: 'POST',
@@ -282,7 +282,7 @@ describe('WeeklyProposalPanel Component', () => {
       },
     ];
 
-    (global.fetch as any).mockImplementation((url: string) => {
+    (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url.includes('/api/agent/proposals?account_id=')) {
         return Promise.resolve({
           ok: true,
@@ -338,7 +338,7 @@ describe('WeeklyProposalPanel Component', () => {
     ];
 
     const newCaption = `${hookCandidates[1]}\n\nAquí va el resto del contenido.`;
-    (global.fetch as any).mockImplementation((url: string) => {
+    (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url.includes('/api/agent/proposals?account_id=')) {
         return Promise.resolve({
           ok: true,
@@ -376,7 +376,7 @@ describe('WeeklyProposalPanel Component', () => {
     fireEvent.click(screen.getByText(hookCandidates[1]));
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(globalThis.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/api/agent/proposals/proposal-hooks/slots/0/hook'),
         expect.objectContaining({
           method: 'PATCH',
@@ -389,6 +389,20 @@ describe('WeeklyProposalPanel Component', () => {
       expect(caption?.textContent?.startsWith(hookCandidates[1])).toBe(true);
     });
     expect(screen.getByText(hookCandidates[1]).closest('button')).toHaveAttribute('aria-pressed', 'true');
+  });
+  test('slot con foto adjuntada por Telegram muestra esa imagen en vez de la de Drive', async () => {
+    mockProposals[0].slots[0] = { ...mockProposals[0].slots[0], image_id: null as any, media_url: 'https://storage.test/telegram/p1_0.jpg' } as any;
+    try {
+      const { container } = render(
+        <WeeklyProposalPanel accountId={123} refreshSignal={1} onProposalAction={mockOnProposalAction} />
+      );
+      await waitFor(() => expect(screen.queryByText(/Loading proposals/i)).not.toBeInTheDocument());
+
+      const thumb = container.querySelector('img.wpp-day-thumb') as HTMLImageElement;
+      expect(thumb.getAttribute('src')).toBe('https://storage.test/telegram/p1_0.jpg');
+    } finally {
+      mockProposals[0].slots[0] = { ...mockProposals[0].slots[0], image_id: 'file-abc', media_url: undefined } as any;
+    }
   });
 });
 

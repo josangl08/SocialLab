@@ -15,6 +15,7 @@ Las migraciones deben ejecutarse en orden cronológico:
 33. `033_content_studio.sql` - Columnas content_format, content_structure, quality_report, matrix_role en posts y humanizer_enabled, banned_phrases en instagram_accounts
 34. `034_trial_reels.sql` - Columnas posts.trial_graduation y post_performance.reels_skip_rate para Trial Reels (AD-10)
 35. `035_account_growth.sql` - Columnas follows, unfollows y profile_links_taps en instagram_account_snapshots (AD-9)
+36. `036_posts_bucket_limits.sql` - Bucket `posts`: límite 300 MB y vídeos MP4/MOV (Reels y Stories)
 
 ## Cómo Ejecutar
 

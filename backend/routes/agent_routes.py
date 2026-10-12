@@ -204,10 +204,10 @@ def approve_proposal(
     if post_ids:
         from services.scheduler.post_scheduler import PostScheduler
         scheduler = PostScheduler()
-        posts_res = admin_supabase.table('posts').select('id, scheduled_at, media_url').in_('id', post_ids).execute()
+        posts_res = admin_supabase.table('posts').select('id, scheduled_at, media_url, drive_file_id').in_('id', post_ids).execute()
         for post in (posts_res.data or []):
             admin_supabase.table('posts').update({'status': 'scheduled'}).eq('id', post['id']).execute()
-            if post.get('media_url'):
+            if post.get('media_url') or post.get('drive_file_id'):
                 try:
                     scheduled_at_raw = post.get('scheduled_at')
                     scheduled_time = datetime.now(timezone.utc)
@@ -704,9 +704,11 @@ def update_slot_image(
     post_id = slots[slot_index].get('post_id')
 
     if post_id:
-        admin_supabase.table('posts').update({'drive_file_id': request.drive_file_id}).eq('id', post_id).execute()
+        # La imagen elegida sustituye a una foto adjuntada antes (media_url manda al publicar)
+        admin_supabase.table('posts').update({'drive_file_id': request.drive_file_id, 'media_url': None}).eq('id', post_id).execute()
 
     slots[slot_index]['image_id'] = request.drive_file_id
+    slots[slot_index]['media_url'] = None
     admin_supabase.table('content_proposals').update({'slots': slots}).eq('id', proposal_id).execute()
     return {"updated": True}
 

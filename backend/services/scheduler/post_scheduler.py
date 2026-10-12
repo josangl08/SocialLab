@@ -330,9 +330,13 @@ class PostScheduler:
                 raise ValueError(f"Post {post_id} not found")
 
             if not post.data.get('media_url'):
-                raise ValueError(
-                    f"Post {post_id} missing media_url"
-                )
+                if not post.data.get('drive_file_id'):
+                    raise ValueError(
+                        f"Post {post_id} missing media_url"
+                    )
+                # Post de Hermes aprobado: se publica el original de Drive
+                from services.post_media import materialize_drive_media
+                materialize_drive_media(post.data)
 
             # Create job ID
             job_id = f"post_{post_id}"

@@ -371,6 +371,21 @@ def test_list_proposals_skips_malformed_rows(mock_agent_supabase, mock_agent_adm
     assert data[0]["id"] == "prop-good"
 
 
+def test_list_proposals_keeps_slot_media_url(mock_agent_supabase, mock_agent_admin_supabase):
+    """La foto adjuntada por Telegram vive en slot.media_url: la API no debe descartarla."""
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+    mock_agent_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.execute.return_value = MagicMock(data=[{
+        "id": "prop-1", "account_id": 7, "week_start": "2026-10-12", "status": "pending_approval",
+        "slots": [{"day": "Thursday", "theme": "t", "caption": "c", "post_id": 1, "image_id": None,
+                   "media_url": "https://storage.test/telegram/prop-1_0.jpg", "post_type": "post"}],
+    }])
+
+    response = client.get("/api/agent/proposals?account_id=7")
+
+    assert response.status_code == 200
+    assert response.json()[0]["slots"][0]["media_url"] == "https://storage.test/telegram/prop-1_0.jpg"
+
+
 # ── /trigger endpoint tests ─────────────────────────────────────────────────
 
 def test_trigger_agent_account_not_found(mock_agent_admin_supabase):
@@ -1016,3 +1031,56 @@ def test_get_agent_config_own_account_200(mock_agent_admin_supabase):
     resp = client.get("/api/agent/config/1")
     assert resp.status_code == 200
     assert resp.json()["sector"] == "Fitness"
+
+
+@patch("services.scheduler.post_scheduler.PostScheduler")
+def test_approve_proposal_schedules_post_with_only_drive_image(mock_scheduler_cls, mock_agent_supabase, mock_agent_admin_supabase):
+    """Los posts de Hermes solo tienen drive_file_id: al aprobar se programan (el original se sube al programar)."""
+    mock_scheduler = MagicMock()
+    mock_scheduler_cls.return_value = mock_scheduler
+    mock_agent_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{
+        "id": "prop-1", "account_id": 7, "status": "pending_approval",
+        "slots": [{"day": "Thursday", "post_id": 53577, "image_id": "drive-1"}],
+    }])
+    posts_exec = MagicMock()
+    posts_exec.execute.return_value = MagicMock(data=[
+        {"id": 53577, "scheduled_at": "2099-10-29T09:00:00+00:00", "media_url": None, "drive_file_id": "drive-1"},
+    ])
+
+    def table(name):
+        t = MagicMock()
+        if name == "instagram_accounts":
+            t.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+        elif name == "posts":
+            t.select.return_value.in_.return_value = posts_exec
+        return t
+    mock_agent_admin_supabase.table.side_effect = table
+
+    response = client.post("/api/agent/proposals/prop-1/approve")
+
+    assert response.status_code == 200
+    assert response.json() == {"updated": True, "scheduled": 1}
+    mock_scheduler.schedule_post.assert_called_once()
+
+
+def test_update_slot_image_from_drive_replaces_attached_photo(mock_agent_supabase, mock_agent_admin_supabase):
+    mock_agent_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{
+        "id": "prop-1", "account_id": 7,
+        "slots": [{"day": "Thursday", "post_id": 53577, "image_id": None, "media_url": "https://storage.test/telegram/x.jpg"}],
+    }])
+    tables = {}
+
+    def table(name):
+        t = tables.setdefault(name, MagicMock())
+        if name == "instagram_accounts":
+            t.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+        return t
+    mock_agent_admin_supabase.table.side_effect = table
+
+    response = client.patch("/api/agent/proposals/prop-1/slots/0/image", json={"drive_file_id": "drive-2"})
+
+    assert response.status_code == 200
+    tables["posts"].update.assert_called_once_with({"drive_file_id": "drive-2", "media_url": None})
+    tables["content_proposals"].update.assert_called_once_with(
+        {"slots": [{"day": "Thursday", "post_id": 53577, "image_id": "drive-2", "media_url": None}]}
+    )

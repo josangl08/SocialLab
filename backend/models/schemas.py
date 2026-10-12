@@ -84,13 +84,22 @@ class TelegramPhotoSize(BaseModel):
     height: int
     file_size: Optional[int] = None
 
+class TelegramDocument(BaseModel):
+    file_id: str
+    file_unique_id: str
+    file_name: Optional[str] = None
+    mime_type: Optional[str] = None
+    file_size: Optional[int] = None
+
 class TelegramMessage(BaseModel):
     message_id: int
     from_user: Optional[TelegramUser] = Field(None, alias="from")
     chat: TelegramChat
     date: int
     text: Optional[str] = None
+    caption: Optional[str] = None
     photo: Optional[list[TelegramPhotoSize]] = None
+    document: Optional[TelegramDocument] = None
     reply_to_message: Optional['TelegramMessage'] = None
 
     class Config:
@@ -167,6 +176,7 @@ class CalendarSlot(BaseModel):
     day: str
     post_id: Optional[int] = None
     image_id: Optional[str] = None
+    media_url: Optional[str] = None  # foto adjuntada por Telegram (sustituye a image_id)
     theme: str
     caption: str
     post_type: Optional[str] = None  # "post" | "reel" | "carousel" | "story"

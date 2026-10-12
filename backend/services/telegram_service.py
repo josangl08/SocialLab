@@ -15,6 +15,14 @@ from database.supabase_client import get_supabase_admin_client
 from models.schemas import TelegramMessage, TelegramCallbackQuery
 from services.scheduler.post_scheduler import PostScheduler
 import config
+from services.post_media import (
+    FEED_FORMATS, STORAGE_BUCKET, feed_crop_target, image_extension, image_size, prepare_image_for_instagram
+)
+
+# Lado mayor de la vista previa enviada a Telegram (es lo máximo que muestra)
+TELEGRAM_PHOTO_MAX_SIDE = 2560
+# Bot API: sendDocument sube archivos de hasta 50 MB
+TELEGRAM_DOCUMENT_MAX_BYTES = 50 * 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +275,7 @@ class TelegramService:
             if parsed > datetime.now(timezone.utc):
                 scheduled_time = parsed
 
-        PostScheduler().schedule_post(post_id, scheduled_time)
+        await asyncio.to_thread(PostScheduler().schedule_post, post_id, scheduled_time)
 
         if message_id:
             await client.post(self._bot_url("editMessageText"), json={
@@ -327,8 +335,8 @@ class TelegramService:
             return
 
         if message.reply_to_message:
-            reply_text = message.reply_to_message.text or ""
-            swap_match    = re.search(r'#slot_swap_(\w+)_(\d+)', reply_text)
+            reply_text = message.reply_to_message.text or message.reply_to_message.caption or ""
+            swap_match    = re.search(r'#slot_swap_([\w-]+)_(\d+)', reply_text)
             timeedit_match = re.search(r'#timeedit_([\w-]+)_(\d+)', reply_text)
             date_match    = re.search(r'#post_(\d+)_date', reply_text)
             text_match    = re.search(r'#post_(\d+)(?!_date)', reply_text)
@@ -336,12 +344,13 @@ class TelegramService:
             imgselect_match = re.search(r'#imgselect_([\w-]+)_(\d+)', reply_text)
             campaignchat_match = re.search(r'#campaignchat_([\w-]+)', reply_text)
 
-            if swap_match and message.photo:
+            attachment = self._image_attachment(message)
+            if swap_match and attachment:
                 proposal_id = swap_match.group(1)
                 slot_index = int(swap_match.group(2))
                 if not await self._verify_proposal_owner(proposal_id, chat_id):
                     return
-                await self._handle_photo_swap_reply(chat_id, proposal_id, slot_index, message.photo)
+                await self._handle_photo_swap_reply(chat_id, proposal_id, slot_index, *attachment)
             elif campaignchat_match:
                 campaign_id = campaignchat_match.group(1)
                 if not await self._verify_campaign_owner(campaign_id, chat_id):
@@ -676,6 +685,23 @@ class TelegramService:
 
         return await asyncio.get_event_loop().run_in_executor(None, _sync)
 
+    @staticmethod
+    def _prepare_telegram_photo(image_bytes: bytes) -> Optional[bytes]:
+        """Copia reducida solo para la vista previa de Telegram (sendPhoto: ≤ 10 MB y
+        ancho + alto ≤ 10000). El original de Drive no se toca: es el que se publica."""
+        import io
+        from services.post_media import open_image
+
+        try:
+            img = open_image(image_bytes)
+            img.thumbnail((TELEGRAM_PHOTO_MAX_SIDE, TELEGRAM_PHOTO_MAX_SIDE))
+            out = io.BytesIO()
+            img.save(out, format="JPEG", quality=85)
+            return out.getvalue()
+        except Exception as e:
+            logger.warning(f"No se pudo preparar la imagen para Telegram: {e}")
+            return None
+
     async def send_proposal_card(self, chat_id: str, proposal_id: str, slots: list, user_id: str = None) -> None:
         supabase = get_supabase_admin_client()
 
@@ -713,6 +739,9 @@ class TelegramService:
                     ],
                     [
                         {"text": "🖼 Change image",    "callback_data": f"slot:{proposal_id}:{i}:change_image"},
+                        {"text": "📎 Adjuntar foto",    "callback_data": f"slot:{proposal_id}:{i}:swap"},
+                    ],
+                    [
                         {"text": "🕐 Change date/time", "callback_data": f"slot:{proposal_id}:{i}:request_time"},
                     ],
                     [
@@ -722,8 +751,11 @@ class TelegramService:
                 ]}
 
                 sent = False
+                original = None
                 if image_id and user_id:
-                    image_bytes = await self._download_drive_image(user_id, image_id)
+                    original = image_bytes = await self._download_drive_image(user_id, image_id)
+                    if image_bytes:
+                        image_bytes = await asyncio.to_thread(self._prepare_telegram_photo, image_bytes)
                     if image_bytes:
                         resp2 = await client.post(
                             self._bot_url("sendPhoto"),
@@ -736,6 +768,11 @@ class TelegramService:
                             files={"photo": ("slot.jpg", image_bytes, "image/jpeg")},
                         )
                         sent = resp2.status_code == 200
+                        if not sent:
+                            logger.warning(
+                                f"Telegram rechazó la foto del slot {i} de la propuesta {proposal_id} "
+                                f"(HTTP {resp2.status_code}): {resp2.text[:200]}"
+                            )
 
                 if not sent:
                     await client.post(self._bot_url("sendMessage"), json={
@@ -744,6 +781,53 @@ class TelegramService:
                         "parse_mode": "Markdown",
                         "reply_markup": slot_keyboard,
                     })
+
+                if original and post_type.lower() in FEED_FORMATS:
+                    await self._request_feed_crop(client, chat_id, proposal_id, i, day, original)
+
+    async def _request_feed_crop(
+        self,
+        client: httpx.AsyncClient,
+        chat_id: str,
+        proposal_id: str,
+        slot_index: int,
+        day: str,
+        original: bytes
+    ) -> None:
+        """Si la foto no cabe en el feed (4:5 a 1.91:1), envía el original y pide al usuario
+        el recorte exacto a máxima resolución; la respuesta la recoge _handle_photo_swap_reply."""
+        try:
+            width, height = image_size(original)
+            target = feed_crop_target(width, height)
+            ext = image_extension(original)
+        except Exception as e:
+            logger.warning(f"No se pudo comprobar la proporción del slot {slot_index} de {proposal_id}: {e}")
+            return
+        if not target:
+            return
+
+        ratio, crop_w, crop_h = target
+        text = (
+            f"✂️ La foto de {day} mide {width}x{height} px y no cabe en el feed de Instagram "
+            f"(admite de 4:5 a 1.91:1).\n"
+            f"Recórtala a {ratio}: {crop_w}x{crop_h} px para conservar la máxima resolución, "
+            "y responde a este mensaje con la foto recortada enviada como archivo.\n"
+            f"#slot_swap_{proposal_id}_{slot_index}"
+        )
+        reply_markup = {"force_reply": True, "selective": True}
+        if len(original) <= TELEGRAM_DOCUMENT_MAX_BYTES:
+            resp = await client.post(
+                self._bot_url("sendDocument"),
+                data={"chat_id": chat_id, "caption": text, "reply_markup": json.dumps(reply_markup)},
+                files={"document": (f"original_{day}.{ext}", original, "application/octet-stream")},
+            )
+            if resp.status_code == 200:
+                return
+            logger.warning(f"Telegram rechazó el original del slot {slot_index} de {proposal_id} (HTTP {resp.status_code}): {resp.text[:200]}")
+        # Sin el archivo adjunto: el usuario recorta la foto desde su carpeta de Drive
+        await client.post(self._bot_url("sendMessage"), json={
+            "chat_id": chat_id, "text": text, "reply_markup": reply_markup,
+        })
 
     async def _handle_proposal_callback(self, callback_query) -> None:
         data = callback_query.data or ""
@@ -772,6 +856,7 @@ class TelegramService:
                 }).eq('id', proposal_id).execute()
 
                 post_ids = [s['post_id'] for s in slots if s.get('post_id')]
+                failed = []
                 if post_ids:
                     posts_res = supabase.table('posts').select('id, scheduled_at').in_('id', post_ids).execute()
                     for post in (posts_res.data or []):
@@ -784,13 +869,22 @@ class TelegramService:
                                 parsed = parsed.replace(tzinfo=timezone.utc)
                             if parsed > datetime.now(timezone.utc):
                                 scheduled_time = parsed
-                        PostScheduler().schedule_post(post['id'], scheduled_time)
+                        try:
+                            await asyncio.to_thread(PostScheduler().schedule_post, post['id'], scheduled_time)
+                        except Exception as e:
+                            logger.error(f"Could not schedule post {post['id']} from proposal {proposal_id}: {e}")
+                            failed.append(f"• Post {post['id']}: {e}")
 
                 if message_id:
                     await client.post(self._bot_url("editMessageText"), json={
                         "chat_id": chat_id,
                         "message_id": message_id,
-                        "text": f"✅ Calendar approved — {len(post_ids)} posts scheduled."
+                        "text": f"✅ Calendar approved — {len(post_ids) - len(failed)} posts scheduled."
+                    })
+                if failed:
+                    await client.post(self._bot_url("sendMessage"), json={
+                        "chat_id": chat_id,
+                        "text": "⚠️ Sin programar (no se publicarán hasta corregirlos):\n" + "\n".join(failed),
                     })
 
             elif action == "reject":
@@ -973,7 +1067,15 @@ class TelegramService:
                         parsed = parsed.replace(tzinfo=timezone.utc)
                     if parsed > datetime.now(timezone.utc):
                         scheduled_time = parsed
-                PostScheduler().schedule_post(post_id, scheduled_time)
+                try:
+                    await asyncio.to_thread(PostScheduler().schedule_post, post_id, scheduled_time)
+                except Exception as e:
+                    logger.error(f"Could not schedule post {post_id} from proposal {proposal_id}: {e}")
+                    await client.post(self._bot_url("sendMessage"), json={
+                        "chat_id": chat_id,
+                        "text": f"⚠️ {slot.get('day', '')} no se ha programado: {e}",
+                    })
+                    return
             day = slot.get('day', '')
             await client.post(self._bot_url("sendMessage"), json={
                 "chat_id": chat_id,
@@ -985,8 +1087,11 @@ class TelegramService:
             day = slot.get('day', '')
             await client.post(self._bot_url("sendMessage"), json={
                 "chat_id": chat_id,
-                "text": f"📸 Send the new photo for *{day}* as a reply to this message.\n#slot_swap_{proposal_id}_{slot_index}",
-                "parse_mode": "Markdown",
+                "text": (
+                    f"📸 Responde a este mensaje con la nueva foto para {day}. "
+                    "Envíala como archivo para conservar la calidad original (máx. 20 MB).\n"
+                    f"#slot_swap_{proposal_id}_{slot_index}"
+                ),
                 "reply_markup": {"force_reply": True, "selective": True}
             })
 
@@ -1019,12 +1124,26 @@ class TelegramService:
             "parse_mode": "Markdown"
         })
 
+    @staticmethod
+    def _image_attachment(message: TelegramMessage) -> Optional[tuple]:
+        """(file_id, mime_type, comprimida) de la imagen adjunta: foto (Telegram la comprime
+        a JPEG y reduce su resolución) o archivo de imagen (original, cualquier formato)."""
+        if message.photo:
+            largest = max(message.photo, key=lambda p: p.file_size or 0)
+            return largest.file_id, "image/jpeg", True
+        doc = message.document
+        if doc and (doc.mime_type or "").startswith("image/"):
+            return doc.file_id, doc.mime_type, False
+        return None
+
     async def _handle_photo_swap_reply(
         self,
         chat_id: str,
         proposal_id: str,
         slot_index: int,
-        photos: list
+        file_id: str,
+        mime_type: str,
+        compressed: bool = False
     ) -> None:
         supabase = get_supabase_admin_client()
         proposal_res = supabase.table('content_proposals').select('*').eq('id', proposal_id).execute()
@@ -1038,53 +1157,71 @@ class TelegramService:
         if not post_id:
             return
 
-        # Get largest photo
-        largest = max(photos, key=lambda p: p.file_size or 0) if photos else None
-        if not largest:
-            return
-
         token = config.TELEGRAM_BOT_TOKEN
         async with httpx.AsyncClient() as client:
-            # Get file path from Telegram
-            file_resp = await client.get(self._bot_url(f"getFile?file_id={largest.file_id}"))
-            if file_resp.status_code != 200:
-                return
-            file_path = file_resp.json().get("result", {}).get("file_path", "")
-            if not file_path:
-                return
+            try:
+                # Get file path from Telegram (la Bot API solo descarga archivos de hasta 20 MB)
+                file_resp = await client.get(self._bot_url(f"getFile?file_id={file_id}"))
+                file_path = file_resp.json().get("result", {}).get("file_path", "") if file_resp.status_code == 200 else ""
+                if not file_path:
+                    raise ValueError(f"getFile HTTP {file_resp.status_code}")
 
-            # Download the file
-            download_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
-            img_resp = await client.get(download_url)
-            if img_resp.status_code != 200:
-                return
-
-        # Upload to Supabase Storage
-        try:
-            from database.supabase_client import get_supabase_admin_client
-            admin = get_supabase_admin_client()
-            ext = file_path.rsplit(".", 1)[-1] if "." in file_path else "jpg"
-            storage_path = f"telegram/{proposal_id}_{slot_index}.{ext}"
-            admin.storage.from_('posts').upload(
-                storage_path,
-                img_resp.content,
-                {"content-type": f"image/{ext}"}
-            )
-            public_url_res = admin.storage.from_('posts').get_public_url(storage_path)
-            media_url = public_url_res if isinstance(public_url_res, str) else public_url_res.get('publicUrl', '')
-            if media_url:
-                supabase.table('posts').update({'media_url': media_url}).eq('id', post_id).execute()
-                slots[slot_index]['image_id'] = storage_path
-                supabase.table('content_proposals').update({'slots': slots}).eq('id', proposal_id).execute()
-
-            async with httpx.AsyncClient() as client:
+                img_resp = await client.get(f"https://api.telegram.org/file/bot{token}/{file_path}")
+                if img_resp.status_code != 200:
+                    raise ValueError(f"download HTTP {img_resp.status_code}")
+                width, height = image_size(img_resp.content)
+            except Exception as e:
+                logger.error(f"Photo swap failed for proposal {proposal_id} slot {slot_index}: {e}")
                 await client.post(self._bot_url("sendMessage"), json={
                     "chat_id": chat_id,
-                    "text": f"📸 Imagen del slot *{slot.get('day', '')}* actualizada.",
-                    "parse_mode": "Markdown"
+                    "text": "❌ No se pudo usar esa imagen. Si pesa más de 20 MB, envíala más pequeña.",
                 })
-        except Exception as e:
-            logger.error(f"Photo swap failed for proposal {proposal_id} slot {slot_index}: {e}")
+                return
+
+            # El feed solo admite de 4:5 a 1.91:1: se pide de nuevo el recorte exacto
+            target = feed_crop_target(width, height) if (slot.get('post_type') or 'post').lower() in FEED_FORMATS else None
+            if target:
+                await client.post(self._bot_url("sendMessage"), json={
+                    "chat_id": chat_id,
+                    "text": (
+                        f"✂️ La foto mide {width}x{height} px y sigue sin caber en el feed. "
+                        f"Recórtala a {target[0]}: {target[1]}x{target[2]} px y responde a este mensaje "
+                        "con la foto enviada como archivo.\n"
+                        f"#slot_swap_{proposal_id}_{slot_index}"
+                    ),
+                    "reply_markup": {"force_reply": True, "selective": True},
+                })
+                return
+
+            try:
+                # Instagram solo publica JPEG ≤ 8 MB: original si ya cumple, si no a máxima resolución
+                data = await asyncio.to_thread(prepare_image_for_instagram, img_resp.content, mime_type)
+                storage_path = f"telegram/{proposal_id}_{slot_index}.jpg"
+                storage = supabase.storage.from_(STORAGE_BUCKET)
+                storage.upload(storage_path, data, {"content-type": "image/jpeg", "upsert": "true"})
+                media_url = storage.get_public_url(storage_path)
+            except Exception as e:
+                logger.error(f"Photo swap upload failed for proposal {proposal_id} slot {slot_index}: {e}")
+                await client.post(self._bot_url("sendMessage"), json={
+                    "chat_id": chat_id,
+                    "text": "❌ No se pudo guardar la imagen. Inténtalo de nuevo.",
+                })
+                return
+
+            # La foto adjunta sustituye a la de Drive: el post se publicará con ella
+            supabase.table('posts').update({'media_url': media_url, 'drive_file_id': None}).eq('id', post_id).execute()
+            slots[slot_index]['image_id'] = None
+            slots[slot_index]['media_url'] = media_url
+            supabase.table('content_proposals').update({'slots': slots}).eq('id', proposal_id).execute()
+
+            note = (
+                f" Telegram la comprimió a {width}x{height} px: para publicarla a máxima resolución "
+                "envíala como archivo." if compressed else ""
+            )
+            await client.post(self._bot_url("sendMessage"), json={
+                "chat_id": chat_id,
+                "text": f"📸 Imagen del slot {slot.get('day', '')} actualizada.{note}",
+            })
 
     async def send_daily_briefing(self, account_id: int, chat_id: str) -> None:
         supabase = get_supabase_admin_client()

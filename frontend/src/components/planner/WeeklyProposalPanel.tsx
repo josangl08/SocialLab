@@ -32,10 +32,18 @@ const MATRIX_ROLE_LABELS: Record<string, string> = {
   teach: 'Teach',
   opinion: 'Opinion',
   offer: 'Offer',
-  story: 'Story',
+  // 'Story' a secas se confunde con el formato Story
+  story: 'Storytelling',
   learning: 'Learning',
   reflection: 'Reflection',
 };
+
+// Foto adjuntada por Telegram (Storage) o imagen de Drive
+function slotImageSrc(slot: CalendarSlot, token: string | null): string | null {
+  if (slot.media_url) return slot.media_url;
+  if (slot.image_id) return apiClient.getUrl(`/api/drive/files/${slot.image_id}/image?token=${token}`);
+  return null;
+}
 
 function slotBadgeLabel(slot: CalendarSlot): string {
   const ptype = slot.post_type ?? 'post';
@@ -266,7 +274,7 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
       await apiClient.patch(`/api/agent/proposals/${proposalId}/slots/${slotIndex}/image`, { drive_file_id: fileId });
       setProposals(prev => prev.map(p => {
         if (p.id !== proposalId) return p;
-        return { ...p, slots: p.slots.map((s, i) => i === slotIndex ? { ...s, image_id: fileId } : s) };
+        return { ...p, slots: p.slots.map((s, i) => i === slotIndex ? { ...s, image_id: fileId, media_url: null } : s) };
       }));
     } finally {
       setSlotLoading(key, false);
@@ -387,9 +395,9 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
 
                   {slot && !isSkipped ? (
                     <div className="wpp-day-content">
-                      {slot.image_id && (
+                      {slotImageSrc(slot, token) && (
                         <img
-                          src={apiClient.getUrl(`/api/drive/files/${slot.image_id}/image?token=${token}`)}
+                          src={slotImageSrc(slot, token) ?? undefined}
                           alt={slot.theme ?? ''}
                           className="wpp-day-thumb"
                           onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
@@ -422,9 +430,9 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
               <div className="wpp-detail-panel" ref={activeSlotRef}>
                 {/* Image zone */}
                 <div className="wpp-detail-img-wrap">
-                  {slot.image_id && (
+                  {slotImageSrc(slot, token) && (
                     <img
-                      src={apiClient.getUrl(`/api/drive/files/${slot.image_id}/image?token=${token}`)}
+                      src={slotImageSrc(slot, token) ?? undefined}
                       alt={slot.theme ?? ''}
                       className="wpp-detail-thumb"
                       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}

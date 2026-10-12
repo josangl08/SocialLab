@@ -49,6 +49,7 @@ export interface CalendarSlot {
   day: string;
   post_id?: number | null;
   image_id?: string | null;
+  media_url?: string | null;
   theme: string;
   caption: string;
   post_type?: string;
