@@ -29,7 +29,7 @@
   box-sizing: border-box;
   border: 2px solid var(--sl-border);
   border-radius: 5px;
-  transition: transform 0.15s ease, filter 0.15s ease;
+  transition: filter 0.15s ease;
 }
 
 .sl-mosaic-tile img {
@@ -41,11 +41,11 @@
   object-fit: contain;
 }
 
+/* Hover sin crecer: la casilla recorta lo que se sale del hueco del día */
 .sl-mosaic-tile:hover img,
 .sl-mosaic-tile:hover .sl-mosaic-placeholder,
 .sl-mosaic-more:hover {
-  filter: brightness(1.15);
-  transform: scale(1.04);
+  filter: brightness(1.25);
 }
 
 .sl-mosaic-placeholder {
