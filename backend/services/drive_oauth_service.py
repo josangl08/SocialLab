@@ -85,6 +85,8 @@ class DriveOAuthService:
         return creds
 
     def save_credentials(self, user_id: str, creds: Credentials) -> None:
+        from services.google_drive_connector import forget_drive_credentials
+        forget_drive_credentials(user_id)
         expiry_iso = (
             creds.expiry.astimezone(timezone.utc).isoformat()
             if creds.expiry
@@ -100,6 +102,8 @@ class DriveOAuthService:
         }).execute()
 
     def delete_credentials(self, user_id: str) -> None:
+        from services.google_drive_connector import forget_drive_credentials
+        forget_drive_credentials(user_id)
         self._supabase.table('drive_tokens').delete().eq('user_id', user_id).execute()
 
     def has_credentials(self, user_id: str) -> bool:

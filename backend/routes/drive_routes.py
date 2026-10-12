@@ -3,7 +3,7 @@ Google Drive API Routes
 Endpoints para gestionar exports de PROJECT 1 desde Google Drive.
 """
 
-import io
+import asyncio
 import os
 import logging
 from typing import List, Optional
@@ -11,12 +11,12 @@ from pydantic import BaseModel
 
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import Response
-from googleapiclient.http import MediaIoBaseDownload
 
 from auth.dependencies import get_current_user, get_current_user_from_query_token, get_user_supabase_client
 from supabase import Client
 from models.schemas import User
 from services.google_drive_connector import get_drive_connector
+from services.media_thumbnails import IMAGE_CACHE_HEADERS, ThumbnailSize, get_thumbnail
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/drive", tags=["Google Drive"])
@@ -197,21 +197,25 @@ async def list_drive_images(
 async def get_drive_file_image(
     file_id: str,
     token: str,
+    size: Optional[ThumbnailSize] = None,
     current_user: User = Depends(get_current_user_from_query_token),
 ):
-    """Streams a Drive file as an image, authenticated via query token."""
+    """Streams a Drive file as an image, authenticated via query token.
+    With ?size= returns a small JPEG thumbnail instead of the original."""
+    user_id = str(current_user.id)
     try:
-        drive = get_drive_connector(str(current_user.id))
+        if size is not None:
+            data = await get_thumbnail("drive", file_id, int(size), user_id=user_id)
+            if data is None:
+                raise HTTPException(status_code=404, detail="Archivo sin miniatura")
+            return Response(content=data, media_type="image/jpeg", headers=IMAGE_CACHE_HEADERS)
+        drive = await asyncio.to_thread(get_drive_connector, user_id)
+        data, mime_type = await asyncio.to_thread(drive.get_image_bytes, file_id)
+        return Response(content=data, media_type=mime_type, headers=IMAGE_CACHE_HEADERS)
+    except HTTPException:
+        raise
     except RuntimeError:
         raise HTTPException(status_code=401, detail="Drive no conectado. Reconecta en Ajustes.")
-    try:
-        meta = drive.service.files().get(fileId=file_id, fields="mimeType").execute()
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, drive.service.files().get_media(fileId=file_id))
-        done = False
-        while not done:
-            _, done = downloader.next_chunk()
-        return Response(content=fh.getvalue(), media_type=meta.get("mimeType", "image/jpeg"))
     except Exception as e:
         logger.error(f"Drive image fetch failed for file {file_id}: {e}")
         raise HTTPException(status_code=502, detail=f"Error de Drive: {str(e)}")

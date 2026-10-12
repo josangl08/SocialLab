@@ -1,3 +1,4 @@
+import asyncio
 import json
 import uuid
 import logging
@@ -5,12 +6,24 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, BackgroundTasks
+from fastapi.responses import Response
 from fastapi import status as http_status
 from pydantic import BaseModel, Field
 
-from auth.dependencies import get_current_user, get_user_supabase_client
+from auth.dependencies import (
+    get_current_user,
+    get_current_user_from_query_token,
+    get_user_supabase_client,
+    get_user_supabase_client_from_query_token,
+)
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import User, Post
+from services.media_thumbnails import (
+    DEFAULT_THUMBNAIL_SIZE,
+    IMAGE_CACHE_HEADERS,
+    ThumbnailSize,
+    get_thumbnail,
+)
 from services.publisher.instagram_publisher import InstagramPublisher, InstagramPublishError, resolve_publish_type
 from supabase import Client
 
@@ -332,6 +345,42 @@ def publish_post_now(
     except Exception as e:
         logger.error(f"Unexpected error publishing post {post_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to publish post: {str(e)}")
+
+
+@router.get("/{post_id}/thumbnail")
+async def get_post_thumbnail(
+    post_id: int,
+    token: str,
+    size: ThumbnailSize = DEFAULT_THUMBNAIL_SIZE,
+    v: Optional[str] = None,  # solo invalida la caché del navegador cuando cambia la imagen
+    current_user: User = Depends(get_current_user_from_query_token),
+    supabase: Client = Depends(get_user_supabase_client_from_query_token),
+):
+    """Miniatura JPEG de la imagen del post (Storage o Drive), autenticada por query token."""
+    result = await asyncio.to_thread(
+        lambda: supabase.table('posts').select('user_id, media_url, drive_file_id')
+        .eq('id', post_id).limit(1).execute()
+    )
+    if not result.data or str(result.data[0]['user_id']) != str(current_user.id):
+        raise HTTPException(status_code=404, detail=f"Post {post_id} not found")
+    post = result.data[0]
+
+    # Misma prioridad que al publicar: media_url antes que drive_file_id
+    if post.get('media_url'):
+        source, source_id = "storage", post['media_url']
+    elif post.get('drive_file_id'):
+        source, source_id = "drive", post['drive_file_id']
+    else:
+        raise HTTPException(status_code=404, detail="El post no tiene imagen")
+
+    try:
+        data = await get_thumbnail(source, source_id, int(size), user_id=str(current_user.id))
+    except Exception as e:
+        logger.error(f"Thumbnail failed for post {post_id} ({source}): {e}")
+        raise HTTPException(status_code=502, detail=f"Error obteniendo la miniatura: {str(e)}")
+    if data is None:
+        raise HTTPException(status_code=404, detail="La media del post no tiene miniatura")
+    return Response(content=data, media_type="image/jpeg", headers=IMAGE_CACHE_HEADERS)
 
 
 @router.get("/{post_id}")

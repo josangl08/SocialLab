@@ -70,3 +70,9 @@ async def get_user_supabase_client(token: str = Depends(oauth2_scheme)) -> Clien
     client.postgrest.auth(token)
     return client
 
+
+
+async def get_user_supabase_client_from_query_token(token: str) -> Client:
+    """Same as get_user_supabase_client but with the JWT from ?token= (for <img> requests,
+    which cannot send an Authorization header)."""
+    return await get_user_supabase_client(token)
