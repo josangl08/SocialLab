@@ -1,6 +1,8 @@
 import { apiClient } from './client';
 
-export type ThumbnailSize = 160 | 320 | 640;
+// Lado mayor en px. Para imágenes recortadas en cuadrado (object-fit: cover), el lado
+// corto (~3/4 del mayor en fotos verticales) debe cubrir el tamaño pintado × devicePixelRatio
+export type ThumbnailSize = 160 | 320 | 480 | 640;
 
 /** Lo mínimo de un post para resolver su imagen. */
 export interface PostMediaRef {

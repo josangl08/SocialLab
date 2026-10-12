@@ -67,11 +67,10 @@ const MosaicTile: React.FC<{
 };
 
 /** Mosaico de miniaturas de un día en la vista de mes: 1 → celda, 2 → mitades,
- *  3–4 → 2×2, más de 4 → 3 miniaturas + "+N". */
+ *  3–4 → 2×2, más de 4 → 3 miniaturas + "+N". Cada foto se ve completa dentro de su hueco. */
 const DayMosaic: React.FC<DayMosaicProps> = ({ items, token, onOpen }) => {
   const overflow = items.length > MAX_TILES;
   const shown = overflow ? items.slice(0, MAX_TILES - 1) : items;
-  const size = items.length === 1 ? 320 : 160;
 
   return (
     <div className={`sl-mosaic ${layoutClass(items.length)}`} data-testid="day-mosaic">
@@ -80,7 +79,7 @@ const DayMosaic: React.FC<DayMosaicProps> = ({ items, token, onOpen }) => {
           key={item.post.id}
           item={item}
           index={i}
-          src={postThumbnailUrl(item.post, token, size)}
+          src={postThumbnailUrl(item.post, token, 160)}
           onOpen={onOpen}
         />
       ))}

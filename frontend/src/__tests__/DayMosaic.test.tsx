@@ -57,10 +57,10 @@ describe('DayMosaic', () => {
     expect(screen.getByTestId('mosaic-tile-2')).toHaveClass('event-status-published');
   });
 
-  test('una publicación ocupa la celda con miniatura de 320 y carga diferida', () => {
+  test('una publicación ocupa la celda con miniatura de 160 y carga diferida', () => {
     const { container } = render(<DayMosaic items={items(1)} token="tok" onOpen={() => {}} />);
     const img = container.querySelector('img')!;
-    expect(img.getAttribute('src')).toContain('/api/posts/1/thumbnail?size=320');
+    expect(img.getAttribute('src')).toContain('/api/posts/1/thumbnail?size=160');
     expect(img).toHaveAttribute('loading', 'lazy');
   });
 

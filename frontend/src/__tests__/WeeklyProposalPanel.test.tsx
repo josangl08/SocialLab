@@ -400,7 +400,7 @@ describe('WeeklyProposalPanel Component', () => {
 
       const thumb = container.querySelector('img.wpp-day-thumb') as HTMLImageElement;
       const src = thumb.getAttribute('src') ?? '';
-      expect(src).toContain('/api/posts/1001/thumbnail?size=160');
+      expect(src).toContain('/api/posts/1001/thumbnail?size=480');
       expect(src).not.toContain('/api/drive/files/');
       expect(thumb).toHaveAttribute('loading', 'lazy');
     } finally {

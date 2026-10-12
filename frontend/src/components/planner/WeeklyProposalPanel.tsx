@@ -398,9 +398,9 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
 
                   {slot && !isSkipped ? (
                     <div className="wpp-day-content">
-                      {slotImageSrc(slot, token, 160) && (
+                      {slotImageSrc(slot, token, 480) && (
                         <img
-                          src={slotImageSrc(slot, token, 160) ?? undefined}
+                          src={slotImageSrc(slot, token, 480) ?? undefined}
                           alt={slot.theme ?? ''}
                           className="wpp-day-thumb"
                           loading="lazy"
@@ -434,9 +434,9 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
               <div className="wpp-detail-panel" ref={activeSlotRef}>
                 {/* Image zone */}
                 <div className="wpp-detail-img-wrap">
-                  {slotImageSrc(slot, token, 640) && (
+                  {slotImageSrc(slot, token, 160) && (
                     <img
-                      src={slotImageSrc(slot, token, 640) ?? undefined}
+                      src={slotImageSrc(slot, token, 160) ?? undefined}
                       alt={slot.theme ?? ''}
                       className="wpp-detail-thumb"
                       loading="lazy"
@@ -473,7 +473,7 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
                             title={img.name}
                           >
                             <img
-                              src={driveThumbnailUrl(img.id, token, 160)}
+                              src={driveThumbnailUrl(img.id, token, 320)}
                               alt={img.name}
                               loading="lazy"
                               onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
