@@ -99,11 +99,11 @@ class TestContentRoutesValidation:
 
 class TestContentRoutesNoGeminiCall:
     def test_deterministic_endpoints_never_invoke_gemini(self, auth_client):
-        with patch("services.gemini_service.generate_gemini_content") as mock_gemini:
-            mock_gemini.side_effect = AssertionError("Gemini MUST NOT be called in deterministic quality endpoints")
-
-            # Route execution checks (once endpoints are implemented by Codex [implementation])
-            # If endpoint is not yet mounted (404), this test safely flags it without invoking Gemini.
+        # Se parchean también los nombres importados en rutas y servicio de formatos
+        guard = AssertionError("Gemini MUST NOT be called in deterministic quality endpoints")
+        with patch("services.gemini_service.generate_gemini_content", side_effect=guard) as mock_gemini, \
+             patch("routes.content_generation.generate_gemini_content", side_effect=guard) as mock_route, \
+             patch("services.content_formats.generate_gemini_content", side_effect=guard) as mock_formats:
             endpoints = [
                 ("POST", "/content/lint", {"caption": "Un caption simple para validar"}),
                 ("POST", "/content/humanize", {"text": "Texto sin slop"}),
@@ -118,8 +118,10 @@ class TestContentRoutesNoGeminiCall:
                 else:
                     resp = auth_client.get(path)
 
-                # Ensure Gemini was never called regardless of 200 or 404
+                assert resp.status_code == 200, path
                 mock_gemini.assert_not_called()
+                mock_route.assert_not_called()
+                mock_formats.assert_not_called()
 
 
 class TestContentRoutesResponses:

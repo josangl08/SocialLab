@@ -27,7 +27,7 @@ describe('MonthlyCampaignSection in AgentStrategyDrawer', () => {
     window.localStorage.setItem('authToken', 'mock-token-abc');
 
     // Mock API fetch response for Agent Strategy config
-    (global.fetch as any).mockImplementation((url: string) => {
+    (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url.includes('/api/agent/config/12')) {
         return Promise.resolve({
           ok: true,
@@ -183,7 +183,7 @@ describe('MonthlyCampaignSection in AgentStrategyDrawer', () => {
     fireEvent.click(screen.getByText(/Generar con Hermes/i));
 
     await waitFor(() => {
-      const triggerCall = (global.fetch as any).mock.calls.find((c: any[]) => c[0].includes('/api/agent/campaign/trigger'));
+      const triggerCall = (globalThis.fetch as any).mock.calls.find((c: any[]) => c[0].includes('/api/agent/campaign/trigger'));
       expect(triggerCall).toBeTruthy();
       const body = JSON.parse(triggerCall[1].body);
       expect(body.account_id).toBe(12);
@@ -227,7 +227,7 @@ describe('MonthlyCampaignSection in AgentStrategyDrawer', () => {
   });
 
   test('offers "Chat con Hermes" for an approved (non-pending) campaign', async () => {
-    (global.fetch as any).mockImplementation((url: string) => {
+    (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url.includes('/api/agent/config/12')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
       }
@@ -297,7 +297,7 @@ describe('MonthlyCampaignSection in AgentStrategyDrawer', () => {
 
   test('renders anti-slop section with toggle and allows adding banned phrases', async () => {
     let savedPayload: any = null;
-    (global.fetch as any).mockImplementation((url: string, options?: any) => {
+    (globalThis.fetch as any).mockImplementation((url: string, options?: any) => {
       if (url.includes('/api/agent/config/12')) {
         if (options?.method === 'PUT') {
           savedPayload = JSON.parse(options.body);
