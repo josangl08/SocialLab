@@ -1,3 +1,4 @@
+import asyncio
 import os
 import logging
 from fastapi import Depends, HTTPException, status
@@ -19,7 +20,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        user_response = supabase.auth.get_user(token)
+        # get_user es una llamada de red síncrona: en un hilo para no bloquear el event loop
+        user_response = await asyncio.to_thread(supabase.auth.get_user, token)
         user_data = user_response.user
 
         if not user_data:
@@ -38,7 +40,8 @@ async def get_current_user_from_query_token(token: str) -> User:
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        user_response = supabase.auth.get_user(token)
+        # get_user es una llamada de red síncrona: en un hilo para no bloquear el event loop
+        user_response = await asyncio.to_thread(supabase.auth.get_user, token)
         user_data = user_response.user
 
         if not user_data:
