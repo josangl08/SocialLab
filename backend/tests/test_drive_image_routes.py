@@ -51,7 +51,7 @@ def test_drive_image_with_size_returns_thumbnail_and_cache_header(user_db):
 
     assert response.status_code == 200
     assert response.content == b"jpeg"
-    assert response.headers["content-type"] == "image/jpeg"
+    assert response.headers["content-type"] == "image/webp"
     assert response.headers["cache-control"] == "private, max-age=86400"
     get_thumbnail.assert_called_once_with("drive", "f1", 160, user_id=USER_ID)
 
@@ -149,3 +149,20 @@ def test_post_thumbnail_source_failure_is_502(user_db):
 
 def test_post_thumbnail_invalid_size_is_422(user_db):
     assert client.get("/api/posts/42/thumbnail?token=t&size=50").status_code == 422
+
+
+def test_post_thumbnail_second_request_with_same_version_skips_db(user_db):
+    _post_rows(user_db, [{"user_id": USER_ID, "media_url": None, "drive_file_id": "f1"}])
+    with patch("routes.posts_routes.get_thumbnail", return_value=b"img"):
+        assert client.get("/api/posts/42/thumbnail?token=t&v=ab12").status_code == 200
+        assert client.get("/api/posts/42/thumbnail?token=t&v=ab12").status_code == 200
+        assert client.get("/api/posts/42/thumbnail?token=t&v=cd34").status_code == 200
+
+    assert user_db.table.call_count == 2  # v nueva → vuelve a consultar
+
+
+def test_post_thumbnail_accepts_480(user_db):
+    _post_rows(user_db, [{"user_id": USER_ID, "media_url": None, "drive_file_id": "f1"}])
+    with patch("routes.posts_routes.get_thumbnail", return_value=b"img") as get_thumbnail:
+        assert client.get("/api/posts/42/thumbnail?token=t&size=480").status_code == 200
+    assert get_thumbnail.call_args.args[2] == 480

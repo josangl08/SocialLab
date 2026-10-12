@@ -16,7 +16,12 @@ from auth.dependencies import get_current_user, get_current_user_from_query_toke
 from supabase import Client
 from models.schemas import User
 from services.google_drive_connector import get_drive_connector
-from services.media_thumbnails import IMAGE_CACHE_HEADERS, ThumbnailSize, get_thumbnail
+from services.media_thumbnails import (
+    IMAGE_CACHE_HEADERS,
+    THUMBNAIL_MEDIA_TYPE,
+    ThumbnailSize,
+    get_thumbnail,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/drive", tags=["Google Drive"])
@@ -208,7 +213,7 @@ async def get_drive_file_image(
             data = await get_thumbnail("drive", file_id, int(size), user_id=user_id)
             if data is None:
                 raise HTTPException(status_code=404, detail="Archivo sin miniatura")
-            return Response(content=data, media_type="image/jpeg", headers=IMAGE_CACHE_HEADERS)
+            return Response(content=data, media_type=THUMBNAIL_MEDIA_TYPE, headers=IMAGE_CACHE_HEADERS)
         drive = await asyncio.to_thread(get_drive_connector, user_id)
         data, mime_type = await asyncio.to_thread(drive.get_image_bytes, file_id)
         return Response(content=data, media_type=mime_type, headers=IMAGE_CACHE_HEADERS)

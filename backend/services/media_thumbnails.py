@@ -2,8 +2,8 @@
 Miniaturas de las imágenes de los posts para el calendario y el planner.
 
 Drive: miniatura que genera Google (sirve también para vídeos); si no hay, el original
-redimensionado. Storage: la URL pública redimensionada. Salida siempre JPEG pequeño, con
-caché LRU en memoria. Las descargas van en hilos para no bloquear el event loop.
+redimensionado. Storage: la URL pública redimensionada. Salida siempre WebP (~30 % menos
+que JPEG con la misma calidad visual), con caché LRU en memoria. Las descargas van en hilos para no bloquear el event loop.
 """
 
 import asyncio
@@ -15,6 +15,7 @@ from enum import IntEnum
 from typing import Literal, Optional, Tuple
 
 import requests
+from PIL import Image
 
 from services.google_drive_connector import get_drive_connector
 from services.post_media import open_image
@@ -29,12 +30,14 @@ class ThumbnailSize(IntEnum):
     """Tamaños permitidos (lado mayor en px); cualquier otro valor en la query da 422."""
     S160 = 160
     S320 = 320
+    S480 = 480
     S640 = 640
 
 
 DEFAULT_THUMBNAIL_SIZE = ThumbnailSize.S320
 IMAGE_CACHE_HEADERS = {"Cache-Control": "private, max-age=86400"}
-JPEG_QUALITY = 80
+THUMBNAIL_QUALITY = 82
+THUMBNAIL_MEDIA_TYPE = "image/webp"
 CACHE_MAX_ENTRIES = 300
 _VIDEO_URL = re.compile(r"\.(mp4|mov|webm|ogg|m4v)(\?.*)?$", re.IGNORECASE)
 
@@ -46,11 +49,11 @@ def is_storage_video(media_url: str) -> bool:
 
 
 def to_thumbnail(data: bytes, size: int) -> bytes:
-    """JPEG con el lado mayor = size (nunca amplía). Admite HEIC."""
+    """WebP con el lado mayor = size (nunca amplía). Admite HEIC."""
     img = open_image(data)
-    img.thumbnail((size, size))
+    img.thumbnail((size, size), Image.LANCZOS)
     out = io.BytesIO()
-    img.save(out, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    img.save(out, format="WEBP", quality=THUMBNAIL_QUALITY, method=6)
     return out.getvalue()
 
 
@@ -76,7 +79,7 @@ def _storage_thumbnail(media_url: str, size: int) -> Optional[bytes]:
 async def get_thumbnail(
     source: ThumbnailSource, source_id: str, size: int, user_id: Optional[str] = None
 ) -> Optional[bytes]:
-    """Miniatura JPEG del origen (drive_file_id o media_url). None si no hay imagen
+    """Miniatura WebP del origen (drive_file_id o media_url). None si no hay imagen
     previsualizable (vídeo de Storage, archivo de Drive sin miniatura que no es imagen).
     Lanza excepción si Drive o Storage fallan."""
     # En Drive el acceso depende de las credenciales del usuario: la clave lo incluye para
@@ -102,5 +105,31 @@ async def get_thumbnail(
     return data
 
 
+# Origen de la imagen de cada post ya comprobado (propiedad por RLS). La clave incluye la
+# versión `v` que manda el cliente, que cambia cuando cambia la imagen del post.
+_post_sources: "OrderedDict[Tuple[int, str, str], Tuple[ThumbnailSource, str]]" = OrderedDict()
+
+
+def cached_post_source(post_id: int, user_id: str, version: Optional[str]) -> Optional[Tuple[ThumbnailSource, str]]:
+    if not version:
+        return None
+    key = (post_id, user_id, version)
+    found = _post_sources.get(key)
+    if found:
+        _post_sources.move_to_end(key)
+    return found
+
+
+def remember_post_source(
+    post_id: int, user_id: str, version: Optional[str], source: Tuple[ThumbnailSource, str]
+) -> None:
+    if not version:
+        return
+    _post_sources[(post_id, user_id, version)] = source
+    while len(_post_sources) > CACHE_MAX_ENTRIES:
+        _post_sources.popitem(last=False)
+
+
 def clear_cache() -> None:
     _cache.clear()
+    _post_sources.clear()

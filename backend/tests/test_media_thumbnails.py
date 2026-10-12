@@ -37,12 +37,12 @@ def _storage_response(data: bytes) -> MagicMock:
     return response
 
 
-def test_storage_thumbnail_is_small_jpeg_with_longest_side_equal_to_size():
+def test_storage_thumbnail_is_small_webp_with_longest_side_equal_to_size():
     with patch("services.media_thumbnails.requests.get", return_value=_storage_response(_noisy_jpeg())):
         data = asyncio.run(get_thumbnail("storage", "https://x.test/a.jpg", 320))
 
     img = Image.open(io.BytesIO(data))
-    assert img.format == "JPEG"
+    assert img.format == "WEBP"
     assert max(img.size) == 320
     assert len(data) <= 80 * 1024
 
@@ -93,7 +93,7 @@ def test_drive_uses_google_thumbnail():
 
     drive.get_thumbnail_bytes.assert_called_once_with("file-1", 320)
     drive.get_image_bytes.assert_not_called()
-    assert Image.open(io.BytesIO(data)).format == "JPEG"
+    assert Image.open(io.BytesIO(data)).format == "WEBP"
 
 
 def test_drive_without_thumbnail_link_falls_back_to_resized_original():
@@ -136,7 +136,7 @@ def test_heic_original_is_converted():
         data = asyncio.run(get_thumbnail("drive", "file-heic", 320, user_id="u1"))
 
     img = Image.open(io.BytesIO(data))
-    assert img.format == "JPEG"
+    assert img.format == "WEBP"
     assert img.size == (240, 320)
 
 
@@ -153,3 +153,13 @@ def test_drive_thumbnail_link_size_is_replaced():
         assert connector.get_thumbnail_bytes("file-1", 640) == b"thumb"
 
     assert session.get.call_args_list[1].args[0] == "https://lh3.googleusercontent.com/abc=s640"
+
+
+def test_post_source_cache_needs_version_and_is_per_user():
+    media_thumbnails.remember_post_source(7, "u1", "v1", ("drive", "file-1"))
+    media_thumbnails.remember_post_source(7, "u1", None, ("drive", "file-x"))
+
+    assert media_thumbnails.cached_post_source(7, "u1", "v1") == ("drive", "file-1")
+    assert media_thumbnails.cached_post_source(7, "u1", "v2") is None
+    assert media_thumbnails.cached_post_source(7, "u2", "v1") is None
+    assert media_thumbnails.cached_post_source(7, "u1", None) is None
