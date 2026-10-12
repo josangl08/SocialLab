@@ -1,0 +1,100 @@
+import React, { useState } from 'react';
+import { postThumbnailUrl } from '../../api/media';
+import type { Post } from '../../types';
+import './DayMosaic.css';
+
+/** Publicación del día con la clase de estado del calendario (event-status-*, event-proposal…). */
+export interface MosaicItem {
+  post: Post;
+  className: string;
+}
+
+interface DayMosaicProps {
+  items: MosaicItem[];
+  token: string | null;
+  onOpen: (index: number) => void;
+}
+
+/** Tipo MIME propio para que solo las miniaturas del calendario sean soltables en un día. */
+export const POST_DRAG_TYPE = 'application/x-sociallab-post';
+
+const MAX_TILES = 4;
+
+const FORMAT_ICONS: Record<string, string> = {
+  reel:     'bi-camera-video',
+  carousel: 'bi-collection',
+  story:    'bi-layers',
+};
+
+export function formatIcon(post: Post): string {
+  return FORMAT_ICONS[post.content_format ?? post.post_type] ?? 'bi-image';
+}
+
+function layoutClass(count: number): string {
+  if (count === 1) return 'sl-mosaic--1';
+  if (count === 2) return 'sl-mosaic--2';
+  return 'sl-mosaic--4';
+}
+
+const MosaicTile: React.FC<{
+  item: MosaicItem;
+  index: number;
+  src: string | null;
+  onOpen: (index: number) => void;
+}> = ({ item, index, src, onOpen }) => {
+  const [failed, setFailed] = useState(false);
+  const { post, className } = item;
+  return (
+    <div
+      className={`sl-mosaic-tile ${className}`}
+      data-testid={`mosaic-tile-${post.id}`}
+      data-post-id={post.id}
+      title={post.content.substring(0, 80)}
+      draggable
+      onDragStart={e => {
+        e.dataTransfer.setData(POST_DRAG_TYPE, String(post.id));
+        e.dataTransfer.effectAllowed = 'move';
+      }}
+      onClick={e => { e.stopPropagation(); onOpen(index); }}
+    >
+      {src && !failed ? (
+        <img src={src} alt="" loading="lazy" draggable={false} onError={() => setFailed(true)} />
+      ) : (
+        <i className={`bi ${formatIcon(post)} sl-mosaic-placeholder`} data-testid={`mosaic-placeholder-${post.id}`} />
+      )}
+    </div>
+  );
+};
+
+/** Mosaico de miniaturas de un día en la vista de mes: 1 → celda, 2 → mitades,
+ *  3–4 → 2×2, más de 4 → 3 miniaturas + "+N". */
+const DayMosaic: React.FC<DayMosaicProps> = ({ items, token, onOpen }) => {
+  const overflow = items.length > MAX_TILES;
+  const shown = overflow ? items.slice(0, MAX_TILES - 1) : items;
+  const size = items.length === 1 ? 320 : 160;
+
+  return (
+    <div className={`sl-mosaic ${layoutClass(items.length)}`} data-testid="day-mosaic">
+      {shown.map((item, i) => (
+        <MosaicTile
+          key={item.post.id}
+          item={item}
+          index={i}
+          src={postThumbnailUrl(item.post, token, size)}
+          onOpen={onOpen}
+        />
+      ))}
+      {overflow && (
+        <button
+          type="button"
+          className="sl-mosaic-tile sl-mosaic-more"
+          onClick={e => { e.stopPropagation(); onOpen(MAX_TILES - 1); }}
+        >
+          +{items.length - (MAX_TILES - 1)}
+        </button>
+      )}
+    </div>
+  );
+};
+
+export default DayMosaic;

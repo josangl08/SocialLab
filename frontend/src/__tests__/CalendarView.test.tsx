@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import CalendarView from '../components/calendar/CalendarView';
 import { useAuth } from '../context/AuthContext';
@@ -29,7 +29,7 @@ vi.mock('react-big-calendar', () => {
               className={props.eventPropGetter ? props.eventPropGetter(e).className : ''}
               onClick={() => props.onSelectEvent(e)}
             >
-              {e.title}
+              <props.components.event event={e} />
             </div>
           ))}
         </div>
@@ -45,6 +45,19 @@ vi.mock('react-big-calendar', () => {
           }}
         >
           Drop Event
+        </button>
+        <button data-testid="btn-view-week" onClick={() => props.onView('week')}>Week</button>
+        <button
+          data-testid="btn-drop-mosaic-future"
+          onClick={() => props.onDropFromOutside({ start: new Date(2030, 6, 2), end: new Date(2030, 6, 3), allDay: false })}
+        >
+          Drop on future day
+        </button>
+        <button
+          data-testid="btn-drop-mosaic-past"
+          onClick={() => props.onDropFromOutside({ start: new Date(2020, 0, 1), end: new Date(2020, 0, 2), allDay: false })}
+        >
+          Drop on past day
         </button>
         <button
           data-testid="btn-trigger-slot"
@@ -110,7 +123,23 @@ describe('CalendarView Component', () => {
       publication_date: null,
       is_ai_generated: true,
     },
+    {
+      id: 4,
+      user_id: 'user-123',
+      content: 'Second post on the same day as post 1',
+      media_url: null,
+      drive_file_id: 'file-4',
+      post_type: 'post',
+      status: 'published',
+      scheduled_at: '2026-06-27T13:00:00Z',
+      created_at: '2026-06-27T10:00:00Z',
+      publication_date: null,
+    },
   ];
+  const dayOf = (iso: string) => {
+    const d = new Date(iso);
+    return `day-${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -137,49 +166,60 @@ describe('CalendarView Component', () => {
     });
   });
 
-  test('renders calendar and loads events from /api/posts', async () => {
+  test('month view groups the posts of each day into one mosaic ordered by time', async () => {
     render(<CalendarView />);
 
-    // Wait for the calendar to render and stop loading
     await waitFor(() => {
       expect(screen.getByTestId('mock-calendar')).toBeInTheDocument();
     });
 
-    // Check that both the regular post and the AI-generated draft post are rendered
-    expect(screen.getByTestId('event-1')).toBeInTheDocument();
-    expect(screen.getByTestId('event-2')).toBeInTheDocument();
+    expect(screen.getAllByTestId('day-mosaic')).toHaveLength(3);
+    const day = screen.getByTestId(`event-${dayOf('2026-06-27T12:00:00Z')}`);
+    const tiles = within(day).getAllByTestId(/^mosaic-tile-/);
+    expect(tiles.map(t => t.dataset.testid)).toEqual(['mosaic-tile-1', 'mosaic-tile-4']);
+    expect(within(day).getByTestId('day-mosaic')).toHaveClass('sl-mosaic--2');
   });
 
-  test('AI-generated draft posts render with distinct proposal class', async () => {
+  test('mosaic tiles carry the status classes of their posts', async () => {
     render(<CalendarView />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('event-2')).toBeInTheDocument();
+      expect(screen.getByTestId('mosaic-tile-2')).toBeInTheDocument();
     });
 
-    const proposalEvent = screen.getByTestId('event-2');
-    expect(proposalEvent.className).toContain('event-proposal');
+    expect(screen.getByTestId('mosaic-tile-1').className).toContain('event-status-draft');
+    expect(screen.getByTestId('mosaic-tile-4').className).toContain('event-status-published');
+    // AI draft → proposal style
+    expect(screen.getByTestId('mosaic-tile-2').className).toContain('event-proposal');
+    // AI post once approved keeps its status colour and an AI marker
+    const scheduledAi = screen.getByTestId('mosaic-tile-3');
+    expect(scheduledAi.className).toContain('event-status-scheduled');
+    expect(scheduledAi.className).toContain('event-ai-scheduled');
+    expect(scheduledAi.className).not.toContain('event-proposal');
   });
 
-  test('AI posts keep an AI marker class once approved (scheduled)', async () => {
+  test('week view shows one event per post with its thumbnail and text', async () => {
     render(<CalendarView />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('event-3')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-calendar')).toBeInTheDocument();
     });
+    fireEvent.click(screen.getByTestId('btn-view-week'));
 
-    const scheduledAiEvent = screen.getByTestId('event-3');
-    expect(scheduledAiEvent.className).toContain('event-status-scheduled');
-    expect(scheduledAiEvent.className).toContain('event-ai-scheduled');
-    expect(scheduledAiEvent.className).not.toContain('event-proposal');
+    expect(screen.queryByTestId('day-mosaic')).not.toBeInTheDocument();
+    expect(screen.getByTestId('event-2').className).toContain('event-proposal');
+    const withImage = screen.getByTestId('event-4');
+    expect(withImage.querySelector('img')?.getAttribute('src')).toContain('/api/posts/4/thumbnail?size=160');
+    expect(withImage).toHaveTextContent('Second post on the same day');
   });
 
-  test('onEventDrop calls reschedule API endpoint', async () => {
+  test('onEventDrop calls reschedule API endpoint (week view)', async () => {
     render(<CalendarView />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('event-1')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-calendar')).toBeInTheDocument();
     });
+    fireEvent.click(screen.getByTestId('btn-view-week'));
 
     // Trigger onEventDrop mock trigger button
     const dropBtn = screen.getByTestId('btn-trigger-drop');
@@ -195,6 +235,86 @@ describe('CalendarView Component', () => {
         })
       );
     });
+  });
+
+  test('dragging a mosaic tile to another day reschedules it keeping its time', async () => {
+    render(<CalendarView />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mosaic-tile-4')).toBeInTheDocument();
+    });
+    fireEvent.dragStart(screen.getByTestId('mosaic-tile-4'), { dataTransfer: { setData: vi.fn() } });
+    fireEvent.click(screen.getByTestId('btn-drop-mosaic-future'));
+
+    const expected = new Date('2026-06-27T13:00:00Z');
+    expected.setFullYear(2030, 6, 2);
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/scheduler/reschedule/4'),
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify({ new_scheduled_time: expected.toISOString() }),
+        })
+      );
+    });
+    // Only that post moved: post 1 stays alone on its day
+    const oldDay = screen.getByTestId(`event-${dayOf('2026-06-27T12:00:00Z')}`);
+    expect(within(oldDay).queryByTestId('mosaic-tile-4')).not.toBeInTheDocument();
+    expect(within(oldDay).getByTestId('mosaic-tile-1')).toBeInTheDocument();
+  });
+
+  test('dropping a mosaic tile on a past day is rejected', async () => {
+    render(<CalendarView />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mosaic-tile-4')).toBeInTheDocument();
+    });
+    fireEvent.dragStart(screen.getByTestId('mosaic-tile-4'), { dataTransfer: { setData: vi.fn() } });
+    fireEvent.click(screen.getByTestId('btn-drop-mosaic-past'));
+
+    expect(screen.getByText('Cannot schedule posts in the past.')).toBeInTheDocument();
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      expect.stringContaining('/api/scheduler/reschedule/'),
+      expect.anything()
+    );
+  });
+
+  test('a failed mosaic drop reverts the post to its original day', async () => {
+    (globalThis.fetch as any).mockImplementation((url: string) => {
+      if (url.includes('/api/scheduler/reschedule/')) {
+        return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ detail: 'boom' }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(url.includes('/api/posts') ? mockPosts : {}) });
+    });
+    render(<CalendarView />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mosaic-tile-4')).toBeInTheDocument();
+    });
+    fireEvent.dragStart(screen.getByTestId('mosaic-tile-4'), { dataTransfer: { setData: vi.fn() } });
+    fireEvent.click(screen.getByTestId('btn-drop-mosaic-future'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Could not reschedule the post.')).toBeInTheDocument();
+    });
+    const oldDay = screen.getByTestId(`event-${dayOf('2026-06-27T12:00:00Z')}`);
+    expect(within(oldDay).getByTestId('mosaic-tile-4')).toBeInTheDocument();
+  });
+
+  test('clicking a tile opens the viewer; "Ver detalles" opens the post modal', async () => {
+    render(<CalendarView />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mosaic-tile-4')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('mosaic-tile-4'));
+
+    const viewer = screen.getByTestId('media-lightbox');
+    expect(within(viewer).getByText('2 / 2')).toBeInTheDocument();
+    fireEvent.click(within(viewer).getByText('Ver detalles'));
+
+    expect(screen.queryByTestId('media-lightbox')).not.toBeInTheDocument();
+    expect(document.querySelector('.pdm-backdrop')).toBeInTheDocument();
   });
 
   test('onSelectSlot navigates to Content Studio with correct date query parameter', async () => {
