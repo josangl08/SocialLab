@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { apiClient, ApiError } from '../../api/client';
+import { driveThumbnailUrl, postThumbnailUrl, type ThumbnailSize } from '../../api/media';
 import type { ContentProposal, CalendarSlot, InstagramAccount } from '../../types';
 import './WeeklyProposalPanel.css';
 
@@ -38,11 +39,13 @@ const MATRIX_ROLE_LABELS: Record<string, string> = {
   reflection: 'Reflection',
 };
 
-// Foto adjuntada por Telegram (Storage) o imagen de Drive
-function slotImageSrc(slot: CalendarSlot, token: string | null): string | null {
-  if (slot.media_url) return slot.media_url;
-  if (slot.image_id) return apiClient.getUrl(`/api/drive/files/${slot.image_id}/image?token=${token}`);
-  return null;
+// Miniatura de la foto adjuntada por Telegram (Storage) o de la imagen de Drive
+function slotImageSrc(slot: CalendarSlot, token: string | null, size: ThumbnailSize): string | null {
+  if (slot.post_id && (slot.media_url || slot.image_id)) {
+    return postThumbnailUrl({ id: slot.post_id, media_url: slot.media_url, drive_file_id: slot.image_id }, token, size);
+  }
+  if (slot.image_id) return driveThumbnailUrl(slot.image_id, token, size);
+  return slot.media_url ?? null;
 }
 
 function slotBadgeLabel(slot: CalendarSlot): string {
@@ -395,11 +398,12 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
 
                   {slot && !isSkipped ? (
                     <div className="wpp-day-content">
-                      {slotImageSrc(slot, token) && (
+                      {slotImageSrc(slot, token, 160) && (
                         <img
-                          src={slotImageSrc(slot, token) ?? undefined}
+                          src={slotImageSrc(slot, token, 160) ?? undefined}
                           alt={slot.theme ?? ''}
                           className="wpp-day-thumb"
+                          loading="lazy"
                           onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                         />
                       )}
@@ -430,11 +434,12 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
               <div className="wpp-detail-panel" ref={activeSlotRef}>
                 {/* Image zone */}
                 <div className="wpp-detail-img-wrap">
-                  {slotImageSrc(slot, token) && (
+                  {slotImageSrc(slot, token, 640) && (
                     <img
-                      src={slotImageSrc(slot, token) ?? undefined}
+                      src={slotImageSrc(slot, token, 640) ?? undefined}
                       alt={slot.theme ?? ''}
                       className="wpp-detail-thumb"
+                      loading="lazy"
                       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                     />
                   )}
@@ -468,8 +473,9 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
                             title={img.name}
                           >
                             <img
-                              src={apiClient.getUrl(`/api/drive/files/${img.id}/image?token=${token}`)}
+                              src={driveThumbnailUrl(img.id, token, 160)}
                               alt={img.name}
+                              loading="lazy"
                               onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                             />
                           </button>

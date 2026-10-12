@@ -1,5 +1,4 @@
 import React from 'react';
-import { apiClient } from '../../../api/client';
 import { ConfidenceRing } from '../shared/ConfidenceRing';
 import { PostImage } from '../shared/PostImage';
 import { SourceChip } from '../shared/SourceChip';
@@ -57,7 +56,7 @@ const Thumb: React.FC<{ decision: DecisionSummary; token: string | null; small?:
   if (decision.related_post_id) {
     // "post" is a square feed image; stories/reels are portrait
     const square = (decision.post_type ?? '').toLowerCase() === 'post';
-    const src = postImageSrc(decision.media_url, decision.drive_file_id, token, apiClient.getUrl(''));
+    const src = postImageSrc(decision.media_url, decision.drive_file_id, token, decision.related_post_id);
     return (
       <div className={`${base}${square ? ' is-square' : ''}`}>
         <PostImage src={src} fallback={ICON_PHOTO} />

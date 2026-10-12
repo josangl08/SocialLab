@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { apiClient, ApiError } from '../../api/client';
+import { postOriginalUrl, postThumbnailUrl } from '../../api/media';
 import type { Post, StrategyMode } from '../../types';
 import { getFirstOfDayOfMonth } from '../../features/agent/AgentStrategyDrawer';
 import type { MonthlyCampaign } from '../../features/agent/AgentStrategyDrawer';
@@ -52,6 +53,9 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError]     = useState('');
   const [strategyMode, setStrategyMode]   = useState<StrategyMode | null>(null);
+  // Vista inicial con la miniatura; el original solo al hacer clic en la imagen
+  const [showOriginal, setShowOriginal]   = useState(false);
+  useEffect(() => setShowOriginal(false), [post?.id, post?.media_url, post?.drive_file_id]);
 
   useEffect(() => {
     setActionStep('idle');
@@ -357,7 +361,13 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
         <div className="pdm-media">
           {post.media_url ? (
             isImage ? (
-              <img src={post.media_url} alt="publicación" className="pdm-media-img" />
+              <img
+                src={showOriginal ? post.media_url : postThumbnailUrl(post, token, 640) ?? post.media_url}
+                alt="publicación"
+                className={`pdm-media-img${showOriginal ? '' : ' pdm-media-zoomable'}`}
+                loading="lazy"
+                onClick={() => setShowOriginal(true)}
+              />
             ) : isVideo ? (
               <video
                 src={post.media_url}
@@ -370,9 +380,11 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
             ) : null
           ) : post.drive_file_id ? (
             <img
-              src={apiClient.getUrl(`/api/drive/files/${post.drive_file_id}/image?token=${token}`)}
+              src={(showOriginal ? postOriginalUrl(post, token) : postThumbnailUrl(post, token, 640)) ?? undefined}
               alt="publicación"
-              className="pdm-media-img"
+              className={`pdm-media-img${showOriginal ? '' : ' pdm-media-zoomable'}`}
+              loading="lazy"
+              onClick={() => setShowOriginal(true)}
               onError={(e) => {
                 const el = e.currentTarget as HTMLImageElement;
                 el.style.display = 'none';

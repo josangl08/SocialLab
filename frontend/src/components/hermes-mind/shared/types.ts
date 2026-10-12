@@ -1,5 +1,7 @@
 // Shared types + small helpers for the Hermes Mind panels.
 
+import { driveThumbnailUrl, postThumbnailUrl } from '../../../api/media';
+
 export type SourceKind = 'strategy' | 'campaign' | 'rule' | 'output';
 
 export interface Source {
@@ -29,21 +31,21 @@ export interface DecisionSummary {
 }
 
 /**
- * The image to show for a decision's post: the published Instagram media if it
- * exists, otherwise the planned Drive image via the app's authenticated proxy
- * (same URL shape the planner uses for draft slots), otherwise null.
+ * The thumbnail to show for a decision's post (Storage photo or planned Drive
+ * image, via the app's authenticated thumbnail endpoint), or null. Without a
+ * post id it falls back to the Drive thumbnail or the raw media URL.
  */
 export function postImageSrc(
   mediaUrl: string | null | undefined,
   driveFileId: string | null | undefined,
   token: string | null,
-  baseUrl: string,
+  postId?: number | null,
 ): string | null {
-  if (mediaUrl) return mediaUrl;
-  if (driveFileId && token) {
-    return `${baseUrl}/api/drive/files/${encodeURIComponent(driveFileId)}/image?token=${encodeURIComponent(token)}`;
+  if (postId && token && (mediaUrl || driveFileId)) {
+    return postThumbnailUrl({ id: postId, media_url: mediaUrl, drive_file_id: driveFileId }, token);
   }
-  return null;
+  if (driveFileId && token) return driveThumbnailUrl(driveFileId, token);
+  return mediaUrl ?? null;
 }
 
 export interface DecisionsResponse {

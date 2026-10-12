@@ -390,7 +390,7 @@ describe('WeeklyProposalPanel Component', () => {
     });
     expect(screen.getByText(hookCandidates[1]).closest('button')).toHaveAttribute('aria-pressed', 'true');
   });
-  test('slot con foto adjuntada por Telegram muestra esa imagen en vez de la de Drive', async () => {
+  test('slot con foto adjuntada por Telegram muestra su miniatura en vez de la de Drive', async () => {
     mockProposals[0].slots[0] = { ...mockProposals[0].slots[0], image_id: null as any, media_url: 'https://storage.test/telegram/p1_0.jpg' } as any;
     try {
       const { container } = render(
@@ -399,10 +399,13 @@ describe('WeeklyProposalPanel Component', () => {
       await waitFor(() => expect(screen.queryByText(/Loading proposals/i)).not.toBeInTheDocument());
 
       const thumb = container.querySelector('img.wpp-day-thumb') as HTMLImageElement;
-      expect(thumb.getAttribute('src')).toBe('https://storage.test/telegram/p1_0.jpg');
+      const src = thumb.getAttribute('src') ?? '';
+      expect(src).toContain('/api/posts/1001/thumbnail?size=160');
+      expect(src).not.toContain('/api/drive/files/');
+      expect(thumb).toHaveAttribute('loading', 'lazy');
     } finally {
       mockProposals[0].slots[0] = { ...mockProposals[0].slots[0], image_id: 'file-abc', media_url: undefined } as any;
     }
   });
-});
 
+});

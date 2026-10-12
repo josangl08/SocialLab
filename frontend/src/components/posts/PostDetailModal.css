@@ -59,6 +59,10 @@
   display: block;
 }
 
+.pdm-media-zoomable {
+  cursor: zoom-in;
+}
+
 .pdm-media-none {
   display: flex;
   align-items: center;

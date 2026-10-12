@@ -456,7 +456,7 @@ const OrbitaResult: React.FC<{
       post?.media_url ?? decision.media_url,
       post?.drive_file_id ?? decision.drive_file_id,
       token,
-      apiClient.getUrl(''),
+      decision.related_post_id,
     );
     return (
       <div className="orbita-post">
