@@ -1,6 +1,14 @@
+import asyncio
 import json
-from typing import List, Dict, Any, Optional
+import logging
+from typing import List, Dict, Any, Optional, Set, Tuple
 from google.genai import types
+
+logger = logging.getLogger(__name__)
+
+# Argumentos de las tools que referencian un archivo de Drive
+_DRIVE_FILE_ARGS = ("drive_file_id", "file_id")
+_OUT_OF_FOLDER_ERROR = "La imagen no está en la carpeta de Drive de la cuenta; usa solo archivos de drive_list_files."
 
 
 def _tool_schema(tool: Any, attr: str) -> Dict[str, Any]:
@@ -94,6 +102,50 @@ class ToolBridge:
         self.mcp_servers = mcp_servers
         self.allowed_tools = set(allowed_tools) if allowed_tools is not None else None
         self.tools_map = {}
+        # Alcance de Drive por cuenta: (user_id, drive_folder_id) e IDs ya verificados en la carpeta
+        self._drive_scope: Dict[int, Tuple[Optional[str], Optional[str]]] = {}
+        self._allowed_file_ids: Dict[int, Set[str]] = {}
+
+    def _get_drive_scope(self, account_id: int) -> Tuple[Optional[str], Optional[str]]:
+        if account_id not in self._drive_scope:
+            from database.supabase_client import get_supabase_admin_client
+            res = get_supabase_admin_client().table('instagram_accounts')\
+                .select('user_id, drive_folder_id').eq('id', account_id).execute()
+            row = res.data[0] if res.data else {}
+            user_id = str(row['user_id']) if row.get('user_id') else None
+            self._drive_scope[account_id] = (user_id, row.get('drive_folder_id'))
+        return self._drive_scope[account_id]
+
+    async def _file_in_folder(self, account_id: int, file_id: str) -> bool:
+        """El archivo debe colgar directamente de la carpeta de Drive de la cuenta."""
+        allowed = self._allowed_file_ids.setdefault(account_id, set())
+        if file_id in allowed:
+            return True
+        user_id, folder_id = self._get_drive_scope(account_id)
+        if not user_id or not folder_id:
+            return False
+
+        def _parents() -> List[str]:
+            from services.google_drive_connector import get_drive_connector
+            meta = get_drive_connector(user_id).service.files()\
+                .get(fileId=file_id, fields="parents, trashed").execute()
+            return [] if meta.get("trashed") else meta.get("parents", [])
+
+        try:
+            in_folder = folder_id in await asyncio.to_thread(_parents)
+        except Exception as e:
+            logger.warning(f"No se pudo verificar la carpeta del archivo de Drive {file_id}: {e}")
+            return False
+        if in_folder:
+            allowed.add(file_id)
+        return in_folder
+
+    def _referenced_file_ids(self, arguments: Dict[str, Any]) -> List[str]:
+        ids = [arguments[k] for k in _DRIVE_FILE_ARGS if arguments.get(k)]
+        for slot in arguments.get("slots") or []:
+            if isinstance(slot, dict) and slot.get("image_id"):
+                ids.append(slot["image_id"])
+        return [str(i) for i in ids]
 
     async def discover_tools(self) -> List[types.FunctionDeclaration]:
         declarations = []
@@ -148,6 +200,26 @@ class ToolBridge:
             actual_args["account_id"] = account_id
         if "instagram_account_id" in properties:
             actual_args["instagram_account_id"] = account_id
-            
+
+        # Drive: solo la carpeta configurada de la cuenta, nunca el Drive completo
+        if name.startswith("drive_"):
+            user_id, folder_id = self._get_drive_scope(account_id)
+            if not user_id or not folder_id:
+                return {"error": "La cuenta no tiene carpeta de Drive configurada."}
+            actual_args["user_id"] = user_id
+            if "folder_id" in properties:
+                actual_args["folder_id"] = folder_id
+
+        for file_id in self._referenced_file_ids(actual_args):
+            if not await self._file_in_folder(account_id, file_id):
+                logger.warning(f"Hermes intentó usar el archivo de Drive {file_id} fuera de la carpeta de la cuenta {account_id}")
+                return {"error": _OUT_OF_FOLDER_ERROR}
+
         result = await server.call_tool(name, actual_args)
-        return _unwrap_mcp_result(result, _tool_schema(tool, "output_schema"))
+        unwrapped = _unwrap_mcp_result(result, _tool_schema(tool, "output_schema"))
+
+        if name == "drive_list_files" and isinstance(unwrapped, list):
+            self._allowed_file_ids.setdefault(account_id, set()).update(
+                str(f["id"]) for f in unwrapped if isinstance(f, dict) and f.get("id")
+            )
+        return unwrapped
