@@ -18,6 +18,7 @@ from utils.timezones import (
     local_to_utc,
     parse_schedule_time,
     to_local,
+    zone_label,
 )
 
 
@@ -134,3 +135,9 @@ def test_parse_schedule_time_with_offset():
     # Con 'Z': 18:00Z -> 18:00 UTC
     parsed_z = parse_schedule_time("2026-10-14T18:00:00Z", "Europe/Madrid")
     assert parsed_z == datetime(2026, 10, 14, 18, 0, 0, tzinfo=timezone.utc)
+
+
+def test_zone_label():
+    assert zone_label("Asia/Kuching") == "Kuching"
+    assert zone_label("America/New_York") == "New York"
+    assert zone_label("UTC") == "UTC"

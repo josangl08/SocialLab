@@ -26,6 +26,8 @@ async def test_send_daily_briefing_no_posts(mock_post_client, mock_service_supab
     mock_select.execute.return_value = MagicMock(data=[])
     
     mock_service_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.gte.return_value.lte.return_value.order.return_value = mock_select
+    # Cuenta sin zonas → UTC
+    mock_service_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
     
     # Mock HTTP response
     mock_response = MagicMock()
@@ -68,6 +70,8 @@ async def test_send_daily_briefing_with_posts(mock_post_client, mock_service_sup
     mock_select.execute.return_value = MagicMock(data=mock_posts)
     
     mock_service_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.gte.return_value.lte.return_value.order.return_value = mock_select
+    # Cuenta sin zonas → UTC
+    mock_service_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
     
     # Mock HTTP response
     mock_response = MagicMock()
@@ -448,3 +452,49 @@ async def test_photo_swap_compressed_photo_warns_about_resolution(mock_service_s
 
     mock_service_supabase.storage.from_.return_value.upload.assert_called_once()
     assert "1280x1024" in mock_post.call_args.kwargs["json"]["text"]
+
+
+@pytest.mark.asyncio
+@patch("httpx.AsyncClient.post")
+async def test_send_daily_briefing_formats_in_account_timezone(mock_post_client, mock_service_supabase):
+    # Mock account con primary_timezone y secondary_timezone
+    mock_acc_exec = MagicMock()
+    mock_acc_exec.execute.return_value = MagicMock(data=[{
+        "id": 123,
+        "primary_timezone": "Europe/Madrid",
+        "secondary_timezone": "Asia/Kuching",
+    }])
+
+    # Post a las 18:00 UTC (20:00 en Madrid CEST, 02:00 en Kuching el día siguiente)
+    mock_posts_exec = MagicMock()
+    mock_posts_exec.execute.return_value = MagicMock(data=[{
+        "id": 53946,
+        "content": "Publicación de la tarde",
+        "post_type": "post",
+        "scheduled_at": "2026-10-14T18:00:00Z",
+    }])
+
+    def table_router(name):
+        t = MagicMock()
+        if name == "instagram_accounts":
+            t.select.return_value.eq.return_value = mock_acc_exec
+        elif name == "posts":
+            t.select.return_value.eq.return_value.eq.return_value.gte.return_value.lte.return_value.order.return_value = mock_posts_exec
+        return t
+
+    mock_service_supabase.table.side_effect = table_router
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"ok": True}
+    mock_post_client.return_value = mock_response
+
+    service = TelegramService()
+    await service.send_daily_briefing(account_id=123, chat_id="chat-999")
+
+    args, kwargs = mock_post_client.call_args
+    text = kwargs["json"]["text"]
+    # AD-12: hora en la zona efectiva (20:00 Madrid) y equivalencia en la secundaria
+    assert "20:00" in text
+    assert "(02:00 Kuching)" in text
+

@@ -152,7 +152,7 @@ def test_supabase_create_proposal():
             "week_start": "2026-07-27",
             "status": "pending_approval",
             "slots": [{
-                "day": "Monday", "post_id": None, "image_id": None,
+                "day": "Monday", "post_id": None, "image_id": None, "media_url": None,
                 "theme": "match highlight", "caption": "cap 1", "post_type": None,
                 "matrix_role": None, "hook_candidates": None
             }]
@@ -682,3 +682,71 @@ def test_supabase_create_post_trial_reel():
 def test_supabase_create_post_trial_ignored_outside_reels():
     assert _create_post_with_trial("post")["trial_graduation"] is None
     assert _create_post_with_trial(None)["trial_graduation"] is None
+
+
+def test_supabase_create_post_normalizes_schedule_time_without_offset():
+    with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{"id": 1}])
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{
+                "user_id": "user-abc",
+                "humanizer_enabled": True,
+                "banned_phrases": [],
+                "primary_timezone": "Europe/Madrid",
+            }]
+        )
+
+        supabase_create_post(
+            instagram_account_id=123,
+            caption="Post sin offset",
+            scheduled_publish_time="2026-10-14T20:00:00",
+        )
+
+        inserted = mock_client.table.return_value.insert.call_args[0][0]
+        # En Europe/Madrid (UTC+2 CEST), 20:00 hora local es 18:00 UTC
+        assert "18:00:00" in inserted["scheduled_at"]
+
+
+def test_supabase_create_post_respects_schedule_time_with_offset():
+    with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{"id": 1}])
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{
+                "user_id": "user-abc",
+                "humanizer_enabled": True,
+                "banned_phrases": [],
+                "primary_timezone": "Europe/Madrid",
+            }]
+        )
+
+        supabase_create_post(
+            instagram_account_id=123,
+            caption="Post con offset +08:00",
+            scheduled_publish_time="2026-10-14T20:00:00+08:00",
+        )
+
+        inserted = mock_client.table.return_value.insert.call_args[0][0]
+        # Con offset explícito +08:00, 20:00 es 12:00 UTC
+        assert "12:00:00" in inserted["scheduled_at"]
+
+
+
+def test_supabase_update_post_schedule_without_offset_uses_account_timezone():
+    with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{"primary_timezone": "Europe/Madrid", "detected_timezone": None}]
+        )
+        mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{"id": 10, "scheduled_at": "2026-10-26T17:00:00Z"}]
+        )
+
+        supabase_update_post_schedule(instagram_account_id=123, post_id=10, scheduled_at="2026-10-26T18:00:00")
+
+        # 26-oct-2026 ya es horario de invierno en Madrid (UTC+1)
+        mock_client.table.return_value.update.assert_called_once_with({"scheduled_at": "2026-10-26T17:00:00Z"})

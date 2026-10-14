@@ -5,6 +5,7 @@ from mcp.server.mcpserver import MCPServer
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import CalendarSlot
 from services.content_quality import humanize, enforce_hashtag_limit, lint_caption
+from utils.timezones import effective_timezone, parse_schedule_time
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,23 @@ def supabase_write_agent_log(
         return response.data[0]
     return {}
 
+def _schedule_to_utc(
+    supabase: Any, instagram_account_id: int, value: str, account: Optional[Dict[str, Any]] = None
+) -> str:
+    """Normaliza la hora que da Hermes a UTC: con offset se respeta; sin offset se
+    interpreta en la zona efectiva de la cuenta (AD-11)."""
+    if datetime.fromisoformat(value.replace("Z", "+00:00")).tzinfo is not None:
+        tz = "UTC"
+    else:
+        if account is None:
+            acc_res = supabase.table("instagram_accounts").select(
+                "primary_timezone, detected_timezone"
+            ).eq("id", instagram_account_id).execute()
+            account = acc_res.data[0] if acc_res.data else None
+        tz = effective_timezone(account)
+    return parse_schedule_time(value, tz).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 @mcp.tool()
 def supabase_create_post(
     instagram_account_id: int,
@@ -75,14 +93,15 @@ def supabase_create_post(
     of 5 hashtags. content_format is the post format; matrix_role is the slot's role
     in the weekly content matrix. trial_graduation publishes a Reel as a Trial Reel
     (shown only to non-followers) to test its hook: MANUAL or SS_PERFORMANCE;
-    ignored unless content_format is "reel"."""
+    ignored unless content_format is "reel". scheduled_publish_time is ISO 8601 with
+    offset; a value without offset is read in the account's time zone."""
     supabase = get_supabase_admin_client()
     # Resolve the owning user_id from the account: this tool runs with the
     # service-role client (bypasses RLS), but /api/posts reads with the user's
     # client (RLS: user_id = auth.uid()), so a post without user_id is invisible
     # in the calendar even though it exists.
     acc_res = supabase.table("instagram_accounts").select(
-        "user_id, humanizer_enabled, banned_phrases"
+        "user_id, humanizer_enabled, banned_phrases, primary_timezone, detected_timezone"
     ).eq("id", instagram_account_id).execute()
     account: Dict[str, Any] = acc_res.data[0] if acc_res.data else {}
     user_id: Optional[str] = account.get("user_id")
@@ -100,7 +119,10 @@ def supabase_create_post(
         "user_id": user_id,
         "content": caption,
         "media_url": media_url,
-        "scheduled_at": scheduled_publish_time,
+        "scheduled_at": (
+            _schedule_to_utc(supabase, instagram_account_id, scheduled_publish_time, account)
+            if scheduled_publish_time else None
+        ),
         "post_type": media_product_type,
         "drive_file_id": drive_file_id,
         "status": "draft",
@@ -289,8 +311,10 @@ def supabase_update_post_schedule(
     scheduled_at: str
 ) -> Dict[str, Any]:
     """Update the scheduled publish time for a specific post and reschedule its
-    APScheduler publish job so it actually fires at the new time."""
+    APScheduler publish job so it actually fires at the new time. scheduled_at is
+    ISO 8601 with offset; a value without offset is read in the account's time zone."""
     supabase = get_supabase_admin_client()
+    scheduled_at = _schedule_to_utc(supabase, instagram_account_id, scheduled_at)
     response = supabase.table("posts")\
         .update({"scheduled_at": scheduled_at})\
         .eq("id", post_id)\

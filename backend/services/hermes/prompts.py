@@ -3,6 +3,8 @@ from typing import Any, Optional
 from database.supabase_client import get_supabase_admin_client
 from services.hermes.memory import get_active_brand_rules
 from services.hermes.playbooks import load_playbook
+from services.analytics.analytics_service import _ACCOUNT_TZ as _ANALYTICS_TZ
+from utils.timezones import effective_timezone, to_local
 
 _SPANISH_WEEKDAYS = [
     "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"
@@ -142,6 +144,24 @@ def _build_brand_rules_context(account_id: int) -> str:
     )
 
 
+def _now_in_zone(tz: str) -> str:
+    now = to_local(datetime.now(timezone.utc), tz)
+    return f"{_SPANISH_WEEKDAYS[now.weekday()]} {now.strftime('%Y-%m-%d')} (hora de {tz}: {now.strftime('%H:%M')})"
+
+
+def _build_timezone_context(account: dict) -> str:
+    """Zona efectiva de la cuenta para "hoy", best_times y scheduled_publish_time (AD-11)."""
+    tz = effective_timezone(account)
+    return (
+        f"\n\nZona horaria de la cuenta: {tz}. Hoy es {_now_in_zone(tz)}. Todas las horas de "
+        f"publicación (incluidos los best_times del perfil) se entienden en hora de {tz}. Las "
+        "horas de analytics_get_empirical_scheduling_data están en hora de "
+        f"{_ANALYTICS_TZ.key}: conviértelas a {tz} si es distinta. Pasa siempre "
+        "scheduled_publish_time en ISO 8601 con el offset de esa zona (p. ej. "
+        "2026-10-14T20:00:00+02:00)."
+    )
+
+
 def get_system_prompt(
     account_id: int,
     niche_brief: Optional[str] = None,
@@ -234,7 +254,7 @@ def get_system_prompt(
         f"para asignar matrix_role a cada post):\n{load_playbook('content-matrix')}"
     )
 
-    return f"{task_instructions}\n\n{strategy_context}{matrix_context}{captions_context}{_build_brand_rules_context(account_id)}".strip()
+    return f"{task_instructions}{_build_timezone_context(account)}\n\n{strategy_context}{matrix_context}{captions_context}{_build_brand_rules_context(account_id)}".strip()
 
 
 def _resolve_edit_post_id(context: dict) -> Any:
@@ -263,8 +283,11 @@ def get_edit_prompt(edit_type: str, context: dict, account_id: int) -> str:
     post_id = _resolve_edit_post_id(context)
 
     if edit_type in ("TIME", "DATE"):
-        now = datetime.now(timezone.utc)
-        today_str = f"{_SPANISH_WEEKDAYS[now.weekday()]} {now.strftime('%Y-%m-%d')} (hora UTC: {now.strftime('%H:%M')})"
+        acc_res = get_supabase_admin_client().table('instagram_accounts').select(
+            'primary_timezone, detected_timezone'
+        ).eq('id', account_id).execute()
+        tz = effective_timezone(acc_res.data[0] if acc_res.data else None)
+        today_str = _now_in_zone(tz)
         return (
             "Eres Hermes, ayudando a un usuario a reprogramar la fecha/hora de un post ya "
             "existente en Instagram a partir de un mensaje de Telegram. El usuario acaba de "
@@ -274,9 +297,9 @@ def get_edit_prompt(edit_type: str, context: dict, account_id: int) -> str:
             "expresiones relativas ('el próximo viernes', 'mañana', 'en dos semanas') — "
             "no asumas ni calcules la fecha actual de ninguna otra forma.\n\n"
             f"El post a editar tiene post_id={post_id}. Interpreta la fecha/hora exacta que "
-            "el usuario quiso decir (asume la zona horaria UTC si no la menciona) y llama a "
+            f"el usuario quiso decir (asume la zona horaria {tz} si no la menciona) y llama a "
             "supabase_update_post_schedule con ese post_id y el resultado en formato ISO "
-            "8601. Si la respuesta es genuinamente ambigua y no puedes resolver una "
+            f"8601 con el offset de {tz} (p. ej. 2026-10-14T20:00:00+02:00). Si la respuesta es genuinamente ambigua y no puedes resolver una "
             "fecha/hora concreta, no llames a ninguna tool — responde solo con texto "
             "explicando que no entendiste."
         )

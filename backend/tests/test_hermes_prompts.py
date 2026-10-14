@@ -214,3 +214,38 @@ def test_get_system_prompt_includes_carousel_structure():
         assert "carrusel" in prompt_lower or "carousel" in prompt_lower
         assert "portada" in prompt_lower or "cover" in prompt_lower
 
+
+def test_get_edit_prompt_uses_account_effective_timezone():
+    from services.hermes.prompts import get_edit_prompt
+
+    with patch("services.hermes.prompts.get_supabase_admin_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{"id": 7, "primary_timezone": "Europe/Madrid"}]
+        )
+
+        prompt = get_edit_prompt("TIME", {"post_id": 123}, account_id=7)
+        # AD-11: dice hoy es ... (hora de Europe/Madrid) y pide ISO 8601 con offset
+        assert "Europe/Madrid" in prompt
+        assert "offset" in prompt or "ISO 8601" in prompt
+
+
+def test_get_system_prompt_specifies_best_times_in_timezone():
+    with patch("services.hermes.prompts.get_supabase_admin_client") as mock_get_client, \
+            patch("services.hermes.prompts.get_active_brand_rules", return_value=[]):
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{
+                "id": 7,
+                "primary_timezone": "Europe/Madrid",
+                "best_times": ["18:00", "20:00"],
+            }]
+        )
+
+        prompt = get_system_prompt(7)
+        # AD-11: mejores horas y planificación en la zona efectiva
+        assert "Europe/Madrid" in prompt or "18:00" in prompt
+
+

@@ -4,7 +4,7 @@ import os
 import re
 import logging
 import tempfile
-from datetime import datetime, date, timezone
+from datetime import datetime, timezone
 from typing import Optional
 import httpx
 
@@ -13,6 +13,7 @@ from services.hermes.orchestrator import run_edit_session
 
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import TelegramMessage, TelegramCallbackQuery
+from utils.timezones import effective_timezone, local_to_utc, to_local, zone_label
 from services.scheduler.post_scheduler import PostScheduler
 import config
 from services.post_media import (
@@ -1225,13 +1226,24 @@ class TelegramService:
 
     async def send_daily_briefing(self, account_id: int, chat_id: str) -> None:
         supabase = get_supabase_admin_client()
-        today = date.today().isoformat()
+        # "Hoy" y las horas en la zona efectiva de la cuenta, + la secundaria (AD-12)
+        acc_res = supabase.table('instagram_accounts')\
+            .select('primary_timezone, secondary_timezone, detected_timezone')\
+            .eq('id', account_id)\
+            .execute()
+        account = acc_res.data[0] if acc_res.data else {}
+        tz = effective_timezone(account)
+        secondary_tz = account.get('secondary_timezone')
+        local_today = to_local(datetime.now(timezone.utc), tz).date()
+        today = local_today.isoformat()
+        day_start = local_to_utc(datetime.combine(local_today, datetime.min.time()), tz)
+        day_end = local_to_utc(datetime.combine(local_today, datetime.max.time()), tz)
         posts_res = supabase.table('posts')\
             .select('id, content, post_type, scheduled_at')\
             .eq('instagram_account_id', account_id)\
             .eq('status', 'scheduled')\
-            .gte('scheduled_at', f"{today}T00:00:00")\
-            .lte('scheduled_at', f"{today}T23:59:59")\
+            .gte('scheduled_at', day_start.isoformat())\
+            .lte('scheduled_at', day_end.isoformat())\
             .order('scheduled_at')\
             .execute()
 
@@ -1244,7 +1256,9 @@ class TelegramService:
                 scheduled_at = p.get('scheduled_at', '')
                 try:
                     dt = datetime.fromisoformat(scheduled_at.replace('Z', '+00:00'))
-                    time_str = dt.strftime('%H:%M')
+                    time_str = to_local(dt, tz).strftime('%H:%M')
+                    if secondary_tz and secondary_tz != tz:
+                        time_str += f" ({to_local(dt, secondary_tz).strftime('%H:%M')} {zone_label(secondary_tz)})"
                 except Exception:
                     time_str = '??:??'
                 ptype = p.get('post_type', 'post')

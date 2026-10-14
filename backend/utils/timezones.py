@@ -47,11 +47,12 @@ def effective_timezone(account: Optional[Any] = None, client_tz: Optional[str] =
             primary = getattr(account, "primary_timezone", None)
             detected = getattr(account, "detected_timezone", None)
 
-        if primary and primary.strip():
+        # Solo cadenas: cualquier otro valor no es una zona configurada
+        if isinstance(primary, str) and primary.strip():
             get_zone_info(primary)
             return primary.strip()
 
-        if detected and detected.strip():
+        if isinstance(detected, str) and detected.strip():
             get_zone_info(detected)
             return detected.strip()
 
@@ -113,3 +114,8 @@ def parse_schedule_time(value: Union[str, datetime], tz: Union[str, ZoneInfo]) -
 
     # Naive: interpretar en la zona indicada
     return dt.replace(tzinfo=zi).astimezone(timezone.utc)
+
+
+def zone_label(tz: str) -> str:
+    """Nombre corto legible de una zona IANA ("Asia/Kuching" -> "Kuching")."""
+    return tz.split("/")[-1].replace("_", " ")
