@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import Dashboard from '../components/dashboard/Dashboard';
 
@@ -120,6 +120,10 @@ describe('Dashboard Component', () => {
               best_posting_times: [
                 { hour: '18:00', avg_engagement: 4.5, posts_count: 10 }
               ],
+              best_times_by_weekday: {
+                '0': [{ hour: '09:00', avg_engagement: 3.0, posts_count: 3 }],
+                '2': [{ hour: '20:00', avg_engagement: 5.0, posts_count: 4 }]
+              },
               timezone: 'Asia/Kuching'
             }
           }),
@@ -176,6 +180,24 @@ describe('Dashboard Component', () => {
 
     expect(screen.getByText('Hora de Kuching')).toBeInTheDocument();
     expect(screen.queryByText('España (Madrid)')).not.toBeInTheDocument();
+  });
+
+  test('selector de días muestra las mejores horas del día elegido', async () => {
+    render(<Dashboard />);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Cargando datos de Instagram...')).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('tab', { name: 'Mar' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Lun' }));
+    expect(screen.getByRole('tab', { name: 'Lun' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('09:00')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Mié' }));
+    expect(screen.getByText('20:00')).toBeInTheDocument();
+    expect(screen.queryByText('09:00')).not.toBeInTheDocument();
   });
 
   test('profile banner shows when connected', async () => {

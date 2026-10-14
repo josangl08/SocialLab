@@ -535,14 +535,23 @@ const Dashboard: React.FC = () => {
                   <div className="sl-panel-body">
                     {Object.keys(bestTimesByWeekday).length > 0 ? (
                       <>
-                        {/* TODO(human): Implementa el selector de días de la semana aquí.
-                            Renderiza una fila de 7 botones usando WEEKDAYS (index 0=Lun..6=Dom).
-                            Cada botón llama a setSelectedWeekday(i).
-                            El botón activo es el que tiene i === selectedWeekday.
-                            Si bestTimesByWeekday[String(i)] es undefined, el día no tiene datos
-                            y puedes marcarlo visualmente (ej. opacidad reducida).
-                            Usa las clases CSS: sl-day-tabs, sl-day-btn, active, no-data */}
-                        <div className="sl-day-tabs mb-3">
+                        <div className="sl-day-tabs mb-3" role="tablist" aria-label="Día de la semana">
+                          {WEEKDAYS.map((label, i) => {
+                            const hasData = (bestTimesByWeekday[String(i)] ?? []).length > 0;
+                            return (
+                              <button
+                                key={label}
+                                type="button"
+                                role="tab"
+                                aria-selected={i === selectedWeekday}
+                                className={`sl-day-btn${i === selectedWeekday ? ' active' : ''}${hasData ? '' : ' no-data'}`}
+                                onClick={() => hasData && setSelectedWeekday(i)}
+                                disabled={!hasData}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
                         </div>
                         {(bestTimesByWeekday[String(selectedWeekday)] ?? []).length > 0 ? (
                           (bestTimesByWeekday[String(selectedWeekday)] ?? []).map((slot, i) => {
