@@ -96,3 +96,32 @@ describe('EditPostForm con estructura', () => {
     expect(sentForm().has('content_structure')).toBe(false);
   });
 });
+
+describe('EditPostForm en la zona de la cuenta', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (apiClient.get as any).mockResolvedValue([
+      { id: 7, username: 'acc', primary_timezone: 'Europe/Madrid', secondary_timezone: 'Asia/Kuching' },
+    ]);
+    (apiClient.putForm as any).mockResolvedValue({});
+  });
+
+  test('muestra la hora en la zona de la cuenta y guarda el instante UTC', async () => {
+    const post: Post = {
+      ...basePost, post_type: 'post', content_format: 'post', content_structure: null,
+      status: 'scheduled', scheduled_at: '2026-10-14T18:00:00Z', instagram_account_id: 7,
+    };
+    const onSave = vi.fn();
+    render(<EditPostForm post={post} onSave={onSave} onCancel={vi.fn()} />);
+
+    const input = await screen.findByDisplayValue('2026-10-14T20:00');
+    expect(screen.getByTestId('schedule-zone-hint')).toHaveTextContent('Hora de Madrid');
+    expect(screen.getByTestId('schedule-zone-hint')).toHaveTextContent('Jue 15 · 02:00 Kuching');
+
+    fireEvent.change(input, { target: { value: '2026-10-15T18:00' } });
+    fireEvent.click(screen.getByRole('button', { name: /Guardar cambios/i }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(sentForm().get('scheduled_at')).toBe('2026-10-15T16:00:00.000Z');
+  });
+});

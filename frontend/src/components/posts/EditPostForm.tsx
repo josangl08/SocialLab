@@ -5,6 +5,8 @@ import { apiClient, ApiError } from '../../api/client';
 import type { Post, InstagramAccount, CarouselSlide } from '../../types';
 import CarouselEditor from '../studio/CarouselEditor';
 import BeatSheet from '../studio/BeatSheet';
+import ScheduleZoneHint from './ScheduleZoneHint';
+import { accountZones, fromDatetimeLocalValue, toDatetimeLocalValue } from '../../utils/timezone';
 import './CreatePost.css';
 
 interface EditPostFormProps {
@@ -29,15 +31,16 @@ const EditPostForm: React.FC<EditPostFormProps> = ({ post, onSave, onCancel }) =
   const [currentMediaUrl]                   = useState<string | null>(post.media_url);
   const [postType, setPostType]             = useState(post.post_type);
   const [status, setStatus]                 = useState(post.status === 'published' || post.status === 'failed' ? 'draft' : post.status);
-  const [scheduledAt, setScheduledAt]       = useState(
-    post.scheduled_at ? new Date(post.scheduled_at).toISOString().slice(0, 16) : ''
-  );
+  // Instante UTC; el input lo muestra y lo lee en la zona de la cuenta elegida (AD-9)
+  const [scheduledAt, setScheduledAt]       = useState(post.scheduled_at ?? '');
   const [selectedAccountId, setSelectedAccountId] = useState(
     post.instagram_account_id ? String(post.instagram_account_id) : ''
   );
   const [instagramAccounts, setInstagramAccounts] = useState<InstagramAccount[]>([]);
   const [slides, setSlides] = useState<CarouselSlide[] | null>(post.content_structure?.slides ?? null);
   const reelBeats = post.content_structure?.beats;
+  const zones = accountZones(instagramAccounts, selectedAccountId ? Number(selectedAccountId) : null);
+  const scheduledLocal = scheduledAt ? toDatetimeLocalValue(scheduledAt, zones.primary) : '';
   const [loading, setLoading]   = useState(false);
   const [message, setMessage]   = useState('');
   const [isError, setIsError]   = useState(false);
@@ -75,7 +78,7 @@ const EditPostForm: React.FC<EditPostFormProps> = ({ post, onSave, onCancel }) =
     formData.append('content', content);
     formData.append('post_type', postType);
     formData.append('status', status);
-    if (scheduledAt) formData.append('scheduled_at', new Date(scheduledAt).toISOString());
+    if (scheduledAt) formData.append('scheduled_at', scheduledAt);
     if (mediaFile) formData.append('media_file', mediaFile);
     if (selectedAccountId) formData.append('instagram_account_id', selectedAccountId);
     // Solo se reenvía la estructura si sigue siendo un carrusel; si no, se conserva la guardada
@@ -220,10 +223,11 @@ const EditPostForm: React.FC<EditPostFormProps> = ({ post, onSave, onCancel }) =
             <input
               type="datetime-local"
               className="cp-input"
-              value={scheduledAt}
-              onChange={e => setScheduledAt(e.target.value)}
+              value={scheduledLocal}
+              onChange={e => setScheduledAt(e.target.value ? fromDatetimeLocalValue(e.target.value, zones.primary) : '')}
               disabled={loading}
             />
+            <ScheduleZoneHint value={scheduledLocal} timezone={zones.primary} secondaryTimezone={zones.secondary} />
           </div>
         )}
 

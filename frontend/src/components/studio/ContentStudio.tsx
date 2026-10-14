@@ -13,6 +13,7 @@ import RepurposePanel, { type RepurposePiece } from './RepurposePanel';
 import CarouselEditor from './CarouselEditor';
 import IdeaGenerator from './IdeaGenerator';
 import ProspectComments from './ProspectComments';
+import { accountZones, browserTimezone, toDatetimeLocalValue } from '../../utils/timezone';
 import './ContentStudio.css';
 
 export interface ContentStudioProps {
@@ -49,8 +50,7 @@ export const ContentStudio: React.FC<ContentStudioProps> = ({ onPostGenerated })
     }
     const parsed = new Date(rawDate);
     if (isNaN(parsed.getTime())) return '';
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}T${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
+    return toDatetimeLocalValue(parsed, browserTimezone());
   });
 
   const [loading, setLoading] = useState<boolean>(false);
@@ -65,12 +65,19 @@ export const ContentStudio: React.FC<ContentStudioProps> = ({ onPostGenerated })
         setAccounts(data || []);
         if (data && data.length > 0) {
           setSelectedAccountId((curr) => curr || String(data[0].id));
+          // El instante de ?date= se muestra en la zona de la cuenta (AD-9)
+          const rawDate = searchParams.get('date');
+          const parsed = rawDate ? new Date(rawDate) : null;
+          if (rawDate && parsed && !isNaN(parsed.getTime()) && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(rawDate)) {
+            setScheduledAt(toDatetimeLocalValue(parsed, accountZones(data, data[0].id).primary));
+          }
         }
       })
       .catch(() => {});
   }, [token]);
 
   const selectedAccount = accounts.find((acc) => String(acc.id) === selectedAccountId);
+  const selectedZones = accountZones(accounts, selectedAccount?.id);
   // `sector` es texto libre ("Contenido Visual Deportivo y Viajes"): se compara sin acentos por raíz
   const normalizedSector = (selectedAccount?.sector ?? '')
     .normalize('NFD')
@@ -345,6 +352,8 @@ export const ContentStudio: React.FC<ContentStudioProps> = ({ onPostGenerated })
             mediaUrl={mediaUrl}
             scheduledAt={scheduledAt}
             onScheduledAtChange={setScheduledAt}
+            timezone={selectedZones.primary}
+            secondaryTimezone={selectedZones.secondary}
             strategyMode={strategyMode}
             hasTelegram={hasTelegram}
             onSave={handleSavePost}

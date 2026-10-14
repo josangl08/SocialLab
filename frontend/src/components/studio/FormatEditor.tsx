@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { contentApi } from '../../api/content';
 import type { HookFormula, StrategyMode, ContentFormat } from '../../types';
+import ScheduleZoneHint from '../posts/ScheduleZoneHint';
+import { browserTimezone, fromDatetimeLocalValue } from '../../utils/timezone';
 import './FormatEditor.css';
 
 export interface SavePostPayload {
@@ -23,6 +25,9 @@ export interface FormatEditorProps {
   mediaUrl: string | null;
   scheduledAt: string;
   onScheduledAtChange: (date: string) => void;
+  /** Zona en la que se lee el campo de fecha (la de la cuenta; por defecto, la del navegador) */
+  timezone?: string;
+  secondaryTimezone?: string | null;
   strategyMode: StrategyMode;
   hasTelegram: boolean;
   onSave: (payload: SavePostPayload) => Promise<void>;
@@ -39,11 +44,14 @@ export const FormatEditor: React.FC<FormatEditorProps> = ({
   mediaUrl,
   scheduledAt,
   onScheduledAtChange,
+  timezone,
+  secondaryTimezone,
   strategyMode,
   hasTelegram,
   onSave,
   loading = false,
 }) => {
+  const tz = timezone ?? browserTimezone();
   const [formulas, setFormulas] = useState<HookFormula[]>([]);
   const [selectedFormulaId, setSelectedFormulaId] = useState<string>('');
   const [mediaPreview, setMediaPreview] = useState<string | null>(mediaUrl);
@@ -90,7 +98,7 @@ export const FormatEditor: React.FC<FormatEditorProps> = ({
       setScheduleError('Por favor selecciona una fecha y hora futura para programar.');
       return;
     }
-    const schedDate = new Date(scheduledAt);
+    const schedDate = new Date(fromDatetimeLocalValue(scheduledAt, tz));
     if (isNaN(schedDate.getTime()) || schedDate <= new Date()) {
       setScheduleError('La fecha programada debe ser en el futuro.');
       return;
@@ -112,7 +120,7 @@ export const FormatEditor: React.FC<FormatEditorProps> = ({
     setScheduleError(null);
     onSave({
       status: 'draft',
-      scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+      scheduledAt: scheduledAt ? fromDatetimeLocalValue(scheduledAt, tz) : null,
       notifyTelegram: false,
       trialGraduation: trialPayload,
     });
@@ -122,7 +130,7 @@ export const FormatEditor: React.FC<FormatEditorProps> = ({
     setScheduleError(null);
     onSave({
       status: 'draft',
-      scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+      scheduledAt: scheduledAt ? fromDatetimeLocalValue(scheduledAt, tz) : null,
       notifyTelegram: true,
       trialGraduation: trialPayload,
     });
@@ -274,6 +282,7 @@ export const FormatEditor: React.FC<FormatEditorProps> = ({
             onScheduledAtChange(e.target.value);
           }}
         />
+        <ScheduleZoneHint value={scheduledAt} timezone={tz} secondaryTimezone={secondaryTimezone} />
         {scheduleError && (
           <div className="text-danger small mt-1">
             <i className="bi bi-exclamation-triangle me-1"></i>
