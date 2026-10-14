@@ -332,4 +332,111 @@ describe('CalendarView Component', () => {
       `/generate?date=${encodeURIComponent('2026-06-30T15:00:00.000Z')}`
     );
   });
+
+  test('con timezone Europe/Madrid, el post 2026-10-14T18:00Z cae el miercoles 14 a las 20:00', async () => {
+    // Post 53946 programado a las 18:00 UTC
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (url.includes('/api/posts')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([
+            {
+              id: 53946,
+              user_id: 'user-1',
+              content: 'Post con timezone Madrid',
+              media_url: null,
+              post_type: 'post',
+              status: 'scheduled',
+              scheduled_at: '2026-10-14T18:00:00Z',
+              created_at: '2026-10-01T10:00:00Z',
+              instagram_account_id: 7,
+            },
+          ]),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    render(<CalendarView timezone="Europe/Madrid" secondaryTimezone="Asia/Kuching" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-calendar')).toBeInTheDocument();
+    });
+
+    // Cambiar a vista de semana para ver el evento
+    fireEvent.click(screen.getByTestId('btn-view-week'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('event-53946')).toBeInTheDocument();
+    });
+    // Hora secundaria junto al evento: jueves 02:00 en Kuching
+    expect(screen.getByTestId('event-53946')).toHaveTextContent('02:00 Kuching');
+  });
+
+  test('vista de mes marca la miniatura cuando el día cambia en la zona secundaria', async () => {
+    (global.fetch as any).mockImplementation((url: string) => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(url.includes('/api/posts') ? [{
+        id: 53946, user_id: 'user-1', content: 'Post', media_url: null, post_type: 'post', status: 'scheduled',
+        scheduled_at: '2026-10-14T18:00:00Z', created_at: '2026-10-01T10:00:00Z', instagram_account_id: 7,
+      }] : {}),
+    }));
+
+    render(<CalendarView timezone="Europe/Madrid" secondaryTimezone="Asia/Kuching" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mosaic-tz-mark-53946')).toHaveAttribute('title', 'Jue 15 · 02:00 Kuching');
+    });
+  });
+
+  test('con timezone, soltar un evento convierte la hora de pared de la zona a UTC', async () => {
+    render(<CalendarView timezone="Europe/Madrid" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-calendar')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('btn-view-week'));
+    fireEvent.click(screen.getByTestId('btn-trigger-drop'));
+
+    // El mock suelta en una Date cuyo reloj de pared se lee en Madrid (CEST, UTC+2)
+    const dropped = new Date('2030-06-28T10:00:00Z');
+    const expected = new Date(Date.UTC(
+      dropped.getFullYear(), dropped.getMonth(), dropped.getDate(), dropped.getHours() - 2, dropped.getMinutes()
+    )).toISOString();
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/scheduler/reschedule/1'),
+        expect.objectContaining({ body: JSON.stringify({ new_scheduled_time: expected }) })
+      );
+    });
+  });
+
+  test('sin timezone principal usa la zona del navegador', async () => {
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (url.includes('/api/posts')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([
+            {
+              id: 53947,
+              user_id: 'user-1',
+              content: 'Post fallback navegador',
+              media_url: null,
+              post_type: 'post',
+              status: 'scheduled',
+              scheduled_at: '2026-10-14T18:00:00Z',
+              created_at: '2026-10-01T10:00:00Z',
+            },
+          ]),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    render(<CalendarView />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-calendar')).toBeInTheDocument();
+    });
+  });
 });

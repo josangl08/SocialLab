@@ -1,13 +1,15 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { apiClient, ApiError } from '../../api/client';
-import type { Post } from '../../types';
+import type { InstagramAccount, Post } from '../../types';
+import { accountZones } from '../../utils/timezone';
 import EditPostForm from './EditPostForm';
 import PostDetailModal from './PostDetailModal';
 import './PostList.css';
 
 interface PostListProps {
   refresh?: boolean;
+  accounts?: InstagramAccount[];
 }
 
 const TYPE_ICONS: Record<string, string> = {
@@ -55,7 +57,7 @@ const VideoCell: React.FC<{ src: string }> = ({ src }) => {
   );
 };
 
-const PostList: React.FC<PostListProps> = ({ refresh }) => {
+const PostList: React.FC<PostListProps> = ({ refresh, accounts }) => {
   const { token } = useAuth();
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
@@ -177,6 +179,7 @@ const PostList: React.FC<PostListProps> = ({ refresh }) => {
         show={selectedPost !== null}
         onHide={() => setSelectedPost(null)}
         post={selectedPost}
+        zones={accountZones(accounts, selectedPost?.instagram_account_id)}
         onEdit={() => {
           const post = selectedPost;
           setSelectedPost(null);

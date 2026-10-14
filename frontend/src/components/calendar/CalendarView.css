@@ -518,6 +518,12 @@
   white-space: nowrap;
 }
 
+.sl-event-secondary-time {
+  flex-shrink: 0;
+  font-size: 0.7em;
+  color: var(--sl-text-muted);
+}
+
 /* ── Drag error toast ────────────────────────────────── */
 .sl-drag-error {
   position: absolute;

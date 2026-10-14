@@ -7,6 +7,8 @@ import { getFirstOfDayOfMonth } from '../../features/agent/AgentStrategyDrawer';
 import type { MonthlyCampaign } from '../../features/agent/AgentStrategyDrawer';
 import CommentTriage from '../studio/CommentTriage';
 import DmFunnel from '../studio/DmFunnel';
+import ScheduleZoneHint from './ScheduleZoneHint';
+import { browserTimezone, formatInZones, fromDatetimeLocalValue } from '../../utils/timezone';
 import './PostDetailModal.css';
 
 interface PostDetailModalProps {
@@ -16,6 +18,8 @@ interface PostDetailModalProps {
   onEdit?: () => void;
   onActionSuccess?: () => void;
   onViewProposal?: () => void;
+  /** Zonas de la cuenta del post (AD-6); sin ellas, la del navegador */
+  zones?: { primary?: string | null; secondary?: string | null };
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -45,8 +49,9 @@ const formatDate = (d: string) =>
   });
 
 const PostDetailModal: React.FC<PostDetailModalProps> = ({
-  show, onHide, post, onEdit, onActionSuccess, onViewProposal,
+  show, onHide, post, onEdit, onActionSuccess, onViewProposal, zones,
 }) => {
+  const tz = zones?.primary || browserTimezone();
   const { token } = useAuth();
   const [actionStep, setActionStep]       = useState<'idle' | 'scheduling' | 'deleting'>('idle');
   const [scheduleDate, setScheduleDate]   = useState('');
@@ -132,7 +137,7 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
 
   const confirmSchedule = () => {
     if (!scheduleDate) return;
-    changeStatus('scheduled', new Date(scheduleDate).toISOString());
+    changeStatus('scheduled', fromDatetimeLocalValue(scheduleDate, tz));
   };
 
   if (!show || !post) return null;
@@ -229,6 +234,7 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
               <i className="bi bi-x-lg"></i>
             </button>
           </div>
+          <ScheduleZoneHint value={scheduleDate} timezone={tz} secondaryTimezone={zones?.secondary} />
         </div>
       );
     }
@@ -428,7 +434,7 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
               <div className="pdm-meta-row">
                 <i className="bi bi-calendar-event"></i>
                 <span className="pdm-meta-label">Scheduled</span>
-                <span className="pdm-meta-value">{formatDate(post.scheduled_at)}</span>
+                <span className="pdm-meta-value">{formatInZones(post.scheduled_at, zones ?? {})}</span>
               </div>
             )}
             {post.publication_date && (

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { isStorageVideo, postOriginalUrl, postThumbnailUrl } from '../../api/media';
 import type { Post } from '../../types';
 import { formatIcon } from '../calendar/DayMosaic';
+import { formatInZones } from '../../utils/timezone';
 import './MediaLightbox.css';
 
 interface MediaLightboxProps {
@@ -10,6 +11,8 @@ interface MediaLightboxProps {
   token: string | null;
   onClose: () => void;
   onDetails: (post: Post) => void;
+  /** Zonas de la cuenta de cada post (AD-6); sin ellas, la del navegador */
+  zonesFor?: (post: Post) => { primary?: string | null; secondary?: string | null };
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -36,7 +39,7 @@ function statusLabel(post: Post): string {
 }
 
 /** Visor ampliado: imagen original de las publicaciones de un día, con navegación ←/→. */
-const MediaLightbox: React.FC<MediaLightboxProps> = ({ posts, startIndex, token, onClose, onDetails }) => {
+const MediaLightbox: React.FC<MediaLightboxProps> = ({ posts, startIndex, token, onClose, onDetails, zonesFor }) => {
   const [index, setIndex] = useState(startIndex);
   // 0 = original, 1 = miniatura grande (el original no carga, p. ej. vídeo de Drive), 2 = icono
   const [fallback, setFallback] = useState(0);
@@ -111,10 +114,7 @@ const MediaLightbox: React.FC<MediaLightboxProps> = ({ posts, startIndex, token,
             <span className={`sl-lightbox-status sl-lightbox-status--${post.is_ai_generated && post.status === 'draft' ? 'proposal' : post.status}`}>
               {statusLabel(post)}
             </span>
-            <span>
-              {date.toLocaleDateString('es-ES', { day: 'numeric', month: 'long' })} ·{' '}
-              {date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-            </span>
+            <span data-testid="lightbox-date">{formatInZones(date, zonesFor?.(post) ?? {})}</span>
             <span><i className={`bi ${formatIcon(post)}`} /> {FORMAT_LABELS[format] ?? format}</span>
             {multiple && <span className="sl-lightbox-count">{index + 1} / {posts.length}</span>}
           </div>

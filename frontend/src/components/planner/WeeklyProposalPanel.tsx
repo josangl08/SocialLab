@@ -3,6 +3,10 @@ import { useAuth } from '../../context/AuthContext';
 import { apiClient, ApiError } from '../../api/client';
 import { driveThumbnailUrl, postThumbnailUrl, type ThumbnailSize } from '../../api/media';
 import type { ContentProposal, CalendarSlot, InstagramAccount } from '../../types';
+import ScheduleZoneHint from '../posts/ScheduleZoneHint';
+import {
+  browserTimezone, formatInZones, fromDatetimeLocalValue, fromWallClock, toDatetimeLocalValue, toWallClock,
+} from '../../utils/timezone';
 import './WeeklyProposalPanel.css';
 
 interface WeeklyProposalPanelProps {
@@ -12,6 +16,8 @@ interface WeeklyProposalPanelProps {
   onProposalsFound?: () => void;
   focusPostId?: number | null;
   onFocusHandled?: () => void;
+  timezone?: string;
+  secondaryTimezone?: string;
 }
 
 interface DriveImage {
@@ -74,6 +80,21 @@ function getDefaultDatetime(weekStart: string, dayName: string): string {
   return `${base.getFullYear()}-${pad(base.getMonth() + 1)}-${pad(base.getDate())}T09:00`;
 }
 
+// Día en que cae el slot: el del instante real de su post en la zona de la cuenta,
+// igual que en el calendario; sin post, el día guardado (AD-7)
+function slotDay(slot: CalendarSlot, tz: string): string {
+  if (!slot.scheduled_at) return slot.day;
+  return WEEKDAYS[(toWallClock(slot.scheduled_at, tz).getDay() + 6) % 7];
+}
+
+// Mueve el slot a otra columna conservando su hora de pared en la zona (AD-8)
+function moveSlot(slot: CalendarSlot, storedDay: string, toColumn: string, tz: string): CalendarSlot {
+  if (!slot.scheduled_at) return { ...slot, day: storedDay };
+  const wall = toWallClock(slot.scheduled_at, tz);
+  wall.setDate(wall.getDate() + WEEKDAYS.indexOf(toColumn) - WEEKDAYS.indexOf(slotDay(slot, tz)));
+  return { ...slot, day: storedDay, scheduled_at: fromWallClock(wall, tz) };
+}
+
 const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
   accountId,
   refreshSignal,
@@ -81,8 +102,11 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
   onProposalsFound,
   focusPostId,
   onFocusHandled,
+  timezone,
+  secondaryTimezone,
 }) => {
   const { token } = useAuth();
+  const tz = timezone ?? browserTimezone();
   const [proposals, setProposals] = useState<ContentProposal[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -246,14 +270,18 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
     const key = `${proposalId}-${slotIndex}-time`;
     setSlotLoading(key, true);
     try {
-      const isoTime = new Date(datetime).toISOString();
+      const isoTime = fromDatetimeLocalValue(datetime, tz);
       await apiClient.put(`/api/scheduler/reschedule/${slot.post_id}`, { new_scheduled_time: isoTime });
+      setProposals(prev => prev.map(p => {
+        if (p.id !== proposalId) return p;
+        return { ...p, slots: p.slots.map((s, i) => i === slotIndex ? { ...s, scheduled_at: isoTime } : s) };
+      }));
     } catch {
       // Silent — the visual update already reflects the input
     } finally {
       setSlotLoading(key, false);
     }
-  }, []);
+  }, [tz]);
 
   const openImagePicker = useCallback(async (slotKey: string) => {
     if (!accountId) return;
@@ -284,23 +312,32 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
     }
   }, []);
 
-  const handleSlotReorder = useCallback(async (proposalId: string, fromDay: string, toDay: string) => {
+  // fromColumn/toColumn son columnas visibles; el backend busca los slots por su día guardado
+  const handleSlotReorder = useCallback(async (proposalId: string, fromColumn: string, toColumn: string) => {
+    const proposal = proposals.find(p => p.id === proposalId);
+    const fromSlot = proposal?.slots.find(s => slotDay(s, tz) === fromColumn);
+    if (!proposal || !fromSlot) return;
+    const toSlot = proposal.slots.find(s => slotDay(s, tz) === toColumn);
+    const fromDay = fromSlot.day;
+    const toDay = toSlot ? toSlot.day : toColumn;
     setProposals(prev => prev.map(p => {
       if (p.id !== proposalId) return p;
       const newSlots = p.slots.map(s => {
-        if (s.day === fromDay) return { ...s, day: toDay };
-        if (s.day === toDay) return { ...s, day: fromDay };
+        if (s === fromSlot) return moveSlot(s, toDay, toColumn, tz);
+        if (s === toSlot) return moveSlot(s, fromDay, fromColumn, tz);
         return s;
       });
       return { ...p, slots: newSlots };
     }));
     try {
-      await apiClient.patch(`/api/agent/proposals/${proposalId}/slots/reorder`, { from_day: fromDay, to_day: toDay });
+      await apiClient.patch(`/api/agent/proposals/${proposalId}/slots/reorder`, {
+        from_day: fromDay, to_day: toDay, timezone: tz,
+      });
       onProposalAction();
     } catch {
       // Silent — onProposalAction triggers a calendar re-fetch
     }
-  }, [onProposalAction]);
+  }, [onProposalAction, proposals, tz]);
 
   if (loading) {
     return (
@@ -347,7 +384,7 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
           {/* 7-day grid */}
           <div className="wpp-week-row">
             {WEEKDAYS.map(day => {
-              const slotIndex = proposal.slots.findIndex((s: CalendarSlot) => s.day === day);
+              const slotIndex = proposal.slots.findIndex((s: CalendarSlot) => slotDay(s, tz) === day);
               const slot = slotIndex >= 0 ? proposal.slots[slotIndex] : undefined;
               const slotKey = `${proposal.id}-${slotIndex}`;
               const dayNum = getDayNumber(proposal.week_start, day);
@@ -427,7 +464,9 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
             const caption = slotCaptions[activeSlot] ?? slot.caption;
             const ptype = slot.post_type ?? 'post';
             const slotTimeKey = `${proposal.id}-${idx}`;
-            const defaultDt = getDefaultDatetime(proposal.week_start, slot.day);
+            const defaultDt = slot.scheduled_at
+              ? toDatetimeLocalValue(slot.scheduled_at, tz)
+              : getDefaultDatetime(proposal.week_start, slotDay(slot, tz));
             const currentDt = slotTimes[slotTimeKey] ?? defaultDt;
 
             return (
@@ -487,7 +526,11 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
 
                 <div className="wpp-detail-body">
                   <div className="wpp-detail-meta">
-                    <span className="wpp-detail-day">{slot.day}</span>
+                    <span className="wpp-detail-day">
+                      {slot.scheduled_at
+                        ? formatInZones(slot.scheduled_at, { primary: tz, secondary: secondaryTimezone })
+                        : slot.day}
+                    </span>
                     <span className={`wpp-badge wpp-badge--${ptype}`}>{slotBadgeLabel(slot)}</span>
                     {slot.theme && <span className="wpp-detail-theme">{slot.theme}</span>}
                   </div>
@@ -531,6 +574,7 @@ const WeeklyProposalPanel: React.FC<WeeklyProposalPanelProps> = ({
                       {actionLoading[slotTimeKey + '-time'] ? '...' : 'Save time'}
                     </button>
                   </div>
+                  <ScheduleZoneHint value={currentDt} timezone={tz} secondaryTimezone={secondaryTimezone} />
 
                   <div className="wpp-actions">
                     <button

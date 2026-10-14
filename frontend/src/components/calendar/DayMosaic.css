@@ -78,3 +78,20 @@
 .sl-mosaic-tile.event-proposal         :is(img, .sl-mosaic-placeholder) { border: 2px dashed #c084fc; }
 /* IA ya aprobada: color del estado con borde discontinuo */
 .sl-mosaic-tile.event-ai-scheduled     :is(img, .sl-mosaic-placeholder) { border-style: dashed; }
+
+/* Marca de día distinto en la zona secundaria */
+.sl-mosaic-tz-mark {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 0.6rem;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.6);
+  pointer-events: auto;
+}

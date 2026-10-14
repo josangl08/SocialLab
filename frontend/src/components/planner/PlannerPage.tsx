@@ -9,6 +9,7 @@ import { MonthlyFocusBanner } from './MonthlyFocusBanner';
 import { useAuth } from '../../context/AuthContext';
 import { apiClient, ApiError } from '../../api/client';
 import type { Post, InstagramAccount, ContentProposal, AgentLog } from '../../types';
+import { accountZones, browserTimezone } from '../../utils/timezone';
 import './PlannerPage.css';
 
 const PlannerPage: React.FC = () => {
@@ -21,11 +22,14 @@ const PlannerPage: React.FC = () => {
   const [aiTriggering, setAiTriggering] = useState(false);
   const [aiStatus, setAiStatus] = useState<string | null>(null);
   const [primaryAccountId, setPrimaryAccountId] = useState<number | null>(null);
+  const [accounts, setAccounts] = useState<InstagramAccount[]>([]);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [agentStartedAt, setAgentStartedAt] = useState<number | null>(null);
   const [isDriveError, setIsDriveError] = useState(false);
   const [focusPostId, setFocusPostId] = useState<number | null>(null);
   const plannerViewDate = useMemo(() => new Date(), []);
+  // Rejilla del calendario y propuesta en la zona de la cuenta activa (AD-6)
+  const plannerZones = accountZones(accounts, primaryAccountId);
   const proposalPanelRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const proposalCountRef = useRef<number>(0);
@@ -105,7 +109,15 @@ const PlannerPage: React.FC = () => {
     if (!token) return;
     apiClient.get<InstagramAccount[]>('/instagram/accounts')
       .then(accounts => {
+        setAccounts(accounts);
         if (accounts.length > 0) setPrimaryAccountId(accounts[0].id);
+        // Hermes y Telegram (sin navegador) usan esta zona si la cuenta no tiene principal (AD-1)
+        const browserTz = browserTimezone();
+        accounts
+          .filter(acc => acc.detected_timezone !== browserTz)
+          .forEach(acc => {
+            apiClient.put(`/instagram/accounts/${acc.id}/config`, { detected_timezone: browserTz }).catch(() => {});
+          });
       })
       .catch(() => {});
   }, [token]);
@@ -243,6 +255,9 @@ const PlannerPage: React.FC = () => {
                 refreshSignal={calendarSignal}
                 onFocusProposalPost={handleFocusProposalPost}
                 onDragSuccess={() => setCalendarSignal(k => k + 1)}
+                timezone={plannerZones.primary}
+                secondaryTimezone={plannerZones.secondary ?? undefined}
+                accounts={accounts}
               />
               <div ref={proposalPanelRef}>
                 <WeeklyProposalPanel
@@ -252,12 +267,14 @@ const PlannerPage: React.FC = () => {
                   onProposalsFound={isAgentRunning ? handleProposalsFound : undefined}
                   focusPostId={focusPostId}
                   onFocusHandled={() => setFocusPostId(null)}
+                  timezone={plannerZones.primary}
+                  secondaryTimezone={plannerZones.secondary ?? undefined}
                 />
               </div>
             </>
           )
           : view === 'list'
-            ? <PostList />
+            ? <PostList accounts={accounts} />
             : <StorySequence accountId={primaryAccountId} />
         }
       </div>

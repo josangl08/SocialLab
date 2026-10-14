@@ -13,7 +13,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { apiClient, ApiError } from '../../api/client';
 import { postThumbnailUrl } from '../../api/media';
-import type { Post } from '../../types';
+import type { InstagramAccount, Post } from '../../types';
+import { accountZones, browserTimezone, formatInZones, fromWallClock, toWallClock, zoneLabel } from '../../utils/timezone';
 import PostDetailModal from '../posts/PostDetailModal';
 import MediaLightbox from '../media/MediaLightbox';
 import DayMosaic, { type MosaicItem } from './DayMosaic';
@@ -24,6 +25,9 @@ interface CalendarViewProps {
   refreshSignal?: number;
   onFocusProposalPost?: (postId: number) => void;
   onDragSuccess?: () => void;
+  timezone?: string;
+  secondaryTimezone?: string;
+  accounts?: InstagramAccount[];
 }
 
 const locales = { 'en-US': enUS };
@@ -60,16 +64,37 @@ function groupEventsByDay(events: any[]): any[] {
       end: start,
       allDay: true,
       type: 'day' as const,
-      items: dayEvents.map((e): MosaicItem => ({ post: e.resource, className: e.className })),
+      items: dayEvents.map((e): MosaicItem => ({ post: e.resource, className: e.className, secondaryNote: e.secondaryNote })),
       className: 'event-day-mosaic',
     };
   });
 }
 
-const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshSignal, onFocusProposalPost, onDragSuccess }) => {
+function postEventClassName(post: Post): string {
+  // AI draft → dashed purple "proposal" style. Once approved the post
+  // becomes 'scheduled' and takes its status colour, but keeps a purple
+  // AI hint (event-ai-scheduled) so it stays distinguishable from a
+  // manually scheduled post.
+  const base = `event-${post.post_type}`;
+  if (post.is_ai_generated && post.status === 'draft') return `${base} event-proposal`;
+  let className = `${base} event-status-${post.status}`;
+  if (post.is_ai_generated) className += ' event-ai-scheduled';
+  return className;
+}
+
+function hhmm(date: Date): string {
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+const CalendarView: React.FC<CalendarViewProps> = ({
+  onNewPost, onEdit, refreshSignal, onFocusProposalPost, onDragSuccess, timezone, secondaryTimezone, accounts,
+}) => {
   const { token, syncCompleted } = useAuth();
   const navigate = useNavigate();
-  const [events, setEvents] = useState<any[]>([]);
+  // react-big-calendar solo entiende fechas locales: los eventos van en "reloj de pared"
+  // de la zona de la cuenta y se convierten de vuelta al soltar (AD-5)
+  const tz = timezone ?? browserTimezone();
+  const [posts, setPosts] = useState<Post[]>([]);
   const rescheduleInProgress = React.useRef<Set<number>>(new Set());
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +113,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
 
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const [currentDate, setCurrentDate] = useState<Date>(new Date());
+  const [currentDate, setCurrentDate] = useState<Date>(() => toWallClock(new Date(), tz));
   const [currentView, setCurrentView] = useState<string>('month');
   const [showPostModal, setShowPostModal] = useState<boolean>(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
@@ -102,38 +127,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
 
       if (!hasLoaded.current) setLoading(true);
       try {
-        const posts = await apiClient.get<Post[]>('/api/posts');
-        const postEvents = posts.map(post => {
-          const start = post.publication_date
-            ? new Date(post.publication_date)
-            : post.scheduled_at
-            ? new Date(post.scheduled_at)
-            : new Date(post.created_at);
-          // AI draft → dashed purple "proposal" style. Once approved the post
-          // becomes 'scheduled' and takes its status colour, but keeps a purple
-          // AI hint (event-ai-scheduled) so it stays distinguishable from a
-          // manually scheduled post.
-          const base = `event-${post.post_type}`;
-          let className: string;
-          if (post.is_ai_generated && post.status === 'draft') {
-            className = `${base} event-proposal`;
-          } else {
-            className = `${base} event-status-${post.status}`;
-            if (post.is_ai_generated) className += ' event-ai-scheduled';
-          }
-          return {
-            id: post.id,
-            title: post.content.substring(0, 40),
-            start,
-            end: start,
-            allDay: false,
-            type: 'post' as const,
-            resource: post,
-            className,
-          };
-        });
-
-        setEvents(postEvents);
+        setPosts(await apiClient.get<Post[]>('/api/posts'));
       } catch (err) {
         setError(err instanceof ApiError ? 'Error loading posts: ' + err.detail : 'Network or server error');
       } finally {
@@ -145,13 +139,37 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
     fetchCalendarData();
   }, [token, syncCompleted, refreshKey, refreshSignal]);
 
+  const events = useMemo(() => posts.map(post => {
+    const iso = post.publication_date ?? post.scheduled_at ?? post.created_at;
+    const start = toWallClock(iso, tz);
+    let secondaryTime: string | undefined;
+    let secondaryNote: string | undefined;
+    if (secondaryTimezone && secondaryTimezone !== tz) {
+      const secondary = toWallClock(iso, secondaryTimezone);
+      secondaryTime = `${hhmm(secondary)} ${zoneLabel(secondaryTimezone)}`;
+      if (dayKey(secondary) !== dayKey(start)) secondaryNote = formatInZones(iso, { primary: secondaryTimezone });
+    }
+    return {
+      id: post.id,
+      title: post.content.substring(0, 40),
+      start,
+      end: start,
+      allDay: false,
+      type: 'post' as const,
+      resource: post,
+      className: postEventClassName(post),
+      secondaryTime,
+      secondaryNote,
+    };
+  }), [posts, tz, secondaryTimezone]);
+
   const handleEventDrop = useCallback(
     async ({ event, start }: { event: any; start: Date | string }) => {
       if (event.type !== 'post') return;
       if (rescheduleInProgress.current.has(event.id)) return;
 
       const targetDate = new Date(start);
-      const today = new Date();
+      const today = toWallClock(new Date(), tz);
       today.setHours(0, 0, 0, 0);
       if (targetDate < today) {
         showDragError('Cannot schedule posts in the past.');
@@ -159,24 +177,23 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
       }
 
       rescheduleInProgress.current.add(event.id);
-      const prevEvents = events;
-      setEvents(prev =>
-        prev.map(e => (e.id === event.id ? { ...e, start: new Date(start), end: new Date(start) } : e))
-      );
+      const newIso = fromWallClock(targetDate, tz);
+      const prevPosts = posts;
+      setPosts(prev => prev.map(p => (p.id === event.id ? { ...p, scheduled_at: newIso } : p)));
 
       try {
         await apiClient.put(`/api/scheduler/reschedule/${event.id}`, {
-          new_scheduled_time: new Date(start).toISOString(),
+          new_scheduled_time: newIso,
         });
         onDragSuccess?.();
       } catch {
-        setEvents(prevEvents);
+        setPosts(prevPosts);
         showDragError('Could not reschedule the post.');
       } finally {
         rescheduleInProgress.current.delete(event.id);
       }
     },
-    [events]
+    [posts, tz]
   );
 
   const handleMosaicDrop = useCallback(({ start }: { start: Date | string }) => {
@@ -193,10 +210,10 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
   }, [events, handleEventDrop]);
 
   const handleSelectSlot = useCallback(({ start }: { start: Date | string }) => {
-    const isoDate = new Date(start).toISOString();
+    const isoDate = fromWallClock(new Date(start), tz);
     if (onNewPost) onNewPost(isoDate);
     else navigate(`/generate?date=${encodeURIComponent(isoDate)}`);
-  }, [navigate, onNewPost]);
+  }, [navigate, onNewPost, tz]);
 
   const handleSelectEvent = useCallback((event: any) => {
     if (event.type === 'day') return; // el mosaico gestiona sus propios clics
@@ -236,6 +253,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
         <span className="sl-event-with-thumb">
           {src && <img src={src} alt="" loading="lazy" className="sl-event-thumb" />}
           <span className="sl-event-title">{event.title}</span>
+          {event.secondaryTime && <span className="sl-event-secondary-time">{event.secondaryTime}</span>}
         </span>
       );
     };
@@ -289,6 +307,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
           onNavigate={setCurrentDate}
           view={currentView}
           onView={setCurrentView}
+          getNow={() => toWallClock(new Date(), tz)}
           messages={{
             allDay: 'All day',
             previous: 'Previous',
@@ -331,6 +350,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
           posts={lightbox.posts}
           startIndex={lightbox.index}
           token={token}
+          zonesFor={post => accountZones(accounts, post.instagram_account_id)}
           onClose={() => setLightbox(null)}
           onDetails={post => { setLightbox(null); setSelectedPost(post); setShowPostModal(true); }}
         />
@@ -340,6 +360,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({ onNewPost, onEdit, refreshS
         show={showPostModal}
         onHide={() => { setShowPostModal(false); setSelectedPost(null); }}
         post={selectedPost}
+        zones={accountZones(accounts, selectedPost?.instagram_account_id)}
         onEdit={onEdit && selectedPost ? () => { setShowPostModal(false); onEdit(selectedPost); } : undefined}
         onActionSuccess={() => setRefreshKey(k => k + 1)}
         onViewProposal={selectedPost?.is_ai_generated && onFocusProposalPost

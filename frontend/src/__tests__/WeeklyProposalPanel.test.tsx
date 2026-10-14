@@ -408,4 +408,119 @@ describe('WeeklyProposalPanel Component', () => {
     }
   });
 
+  test('el post 2026-10-14T18:00Z con Europe/Madrid cae el miercoles 14 a las 20:00', async () => {
+    const tzProposals = [
+      {
+        id: 'prop-tz-1',
+        account_id: '123',
+        week_start: '2026-10-12',
+        status: 'pending_approval',
+        slots: [
+          {
+            day: 'Wednesday',
+            theme: 'Consejo semanal',
+            caption: 'Contenido del miércoles',
+            post_id: 53946,
+            scheduled_at: '2026-10-14T18:00:00Z',
+          },
+        ],
+      },
+    ];
+
+    (globalThis.fetch as any).mockImplementation((url: string) => {
+      if (url.includes('/api/agent/proposals?account_id=')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(tzProposals),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    render(
+      <WeeklyProposalPanel
+        accountId={123}
+        refreshSignal={1}
+        onProposalAction={mockOnProposalAction}
+        timezone="Europe/Madrid"
+        secondaryTimezone="Asia/Kuching"
+      />
+    );
+
+    await waitFor(() => expect(screen.queryByText(/Loading proposals/i)).not.toBeInTheDocument());
+    expect(screen.getByText('Wed')).toBeInTheDocument();
+    expect(screen.getByText('14')).toBeInTheDocument();
+  });
+
+  test('coloca el slot por el instante de su post en la zona, no por el día guardado', async () => {
+    // Guardado como Thursday, pero el post es el miércoles 14 a las 20:00 en Madrid
+    const tzProposals = [{
+      id: 'prop-tz-2', account_id: '123', week_start: '2026-10-12', status: 'pending_approval',
+      slots: [{ day: 'Thursday', theme: 'Tema', caption: 'Caption del slot', post_id: 53946, scheduled_at: '2026-10-14T18:00:00Z' }],
+    }];
+    (globalThis.fetch as any).mockImplementation((url: string) => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(url.includes('/api/agent/proposals?account_id=') ? tzProposals : {}),
+    }));
+
+    const { container } = render(
+      <WeeklyProposalPanel
+        accountId={123}
+        refreshSignal={1}
+        onProposalAction={mockOnProposalAction}
+        timezone="Europe/Madrid"
+        secondaryTimezone="Asia/Kuching"
+      />
+    );
+
+    await waitFor(() => expect(screen.queryByText(/Loading proposals/i)).not.toBeInTheDocument());
+    const boxes = container.querySelectorAll('.wpp-day-box');
+    expect(boxes[2].className).toContain('wpp-day-box--slot');
+    expect(boxes[3].className).not.toContain('wpp-day-box--slot');
+
+    fireEvent.click(boxes[2]);
+    const timeInput = container.querySelector('.wpp-time-input') as HTMLInputElement;
+    expect(timeInput.value).toBe('2026-10-14T20:00');
+    expect(screen.getByText(/Mié 14 · 20:00 Madrid · Jue 15 · 02:00 Kuching/)).toBeInTheDocument();
+  });
+
+  test('reorder envia timezone en el cuerpo de la peticion', async () => {
+    let reorderBody: any = null;
+    (globalThis.fetch as any).mockImplementation((url: string, options: any) => {
+      if (url.includes('/slots/reorder')) {
+        reorderBody = JSON.parse(options.body);
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
+      }
+      if (url.includes('/api/agent/proposals?account_id=')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockProposals),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    render(
+      <WeeklyProposalPanel
+        accountId={123}
+        refreshSignal={1}
+        onProposalAction={mockOnProposalAction}
+        timezone="Europe/Madrid"
+      />
+    );
+
+    await waitFor(() => expect(screen.queryByText(/Loading proposals/i)).not.toBeInTheDocument());
+
+    // Arrastra el primer slot con post a una columna vacía
+    const boxes = Array.from(document.querySelectorAll('.wpp-day-box'));
+    const from = boxes.find(b => b.getAttribute('draggable') === 'true') as HTMLElement;
+    const to = boxes.find(b => b.querySelector('.wpp-day-empty')) as HTMLElement;
+    const dataTransfer = { effectAllowed: '', setData: () => {} };
+    fireEvent.dragStart(from, { dataTransfer });
+    fireEvent.dragOver(to, { dataTransfer });
+    fireEvent.drop(to, { dataTransfer });
+
+    await waitFor(() => expect(reorderBody).not.toBeNull());
+    expect(reorderBody.timezone).toBe('Europe/Madrid');
+  });
 });

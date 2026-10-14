@@ -7,6 +7,8 @@ import './DayMosaic.css';
 export interface MosaicItem {
   post: Post;
   className: string;
+  /** Fecha en la zona secundaria cuando cae en otro día (AD-10) */
+  secondaryNote?: string;
 }
 
 interface DayMosaicProps {
@@ -43,7 +45,7 @@ const MosaicTile: React.FC<{
   onOpen: (index: number) => void;
 }> = ({ item, index, src, onOpen }) => {
   const [failed, setFailed] = useState(false);
-  const { post, className } = item;
+  const { post, className, secondaryNote } = item;
   return (
     <div
       className={`sl-mosaic-tile ${className}`}
@@ -61,6 +63,11 @@ const MosaicTile: React.FC<{
         <img src={src} alt="" loading="lazy" draggable={false} onError={() => setFailed(true)} />
       ) : (
         <i className={`bi ${formatIcon(post)} sl-mosaic-placeholder`} data-testid={`mosaic-placeholder-${post.id}`} />
+      )}
+      {secondaryNote && (
+        <span className="sl-mosaic-tz-mark" title={secondaryNote} data-testid={`mosaic-tz-mark-${post.id}`}>
+          <i className="bi bi-globe2" />
+        </span>
       )}
     </div>
   );
