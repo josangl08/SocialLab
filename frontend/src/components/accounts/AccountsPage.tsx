@@ -3,6 +3,7 @@ import 'bootstrap-icons/font/bootstrap-icons.css';
 import { AgentStrategyDrawer } from '../../features/agent/AgentStrategyDrawer';
 import { apiClient, ApiError } from '../../api/client';
 import type { InstagramAccount } from '../../types';
+import { AccountTimezoneSettings } from './AccountTimezoneSettings';
 
 type TokenStatus = 'valid' | 'expiring' | 'expired';
 
@@ -394,6 +395,14 @@ const AccountsPage: React.FC = () => {
                       )}
                     </div>
                   )}
+                </div>
+
+                {/* Time zones */}
+                <div className="st-card-row">
+                  <AccountTimezoneSettings
+                    account={account}
+                    onUpdate={zones => setAccounts(prev => prev.map(a => a.id === account.id ? { ...a, ...zones } : a))}
+                  />
                 </div>
 
                 {/* Strategy */}

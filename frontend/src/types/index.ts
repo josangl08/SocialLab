@@ -43,11 +43,15 @@ export interface InstagramAccount {
   last_agent_sync?: string | null;
   humanizer_enabled?: boolean;
   banned_phrases?: string[];
+  primary_timezone?: string | null;
+  secondary_timezone?: string | null;
+  detected_timezone?: string | null;
 }
 
 export interface CalendarSlot {
   day: string;
   post_id?: number | null;
+  scheduled_at?: string | null;
   image_id?: string | null;
   media_url?: string | null;
   theme: string;
