@@ -119,7 +119,8 @@ describe('Dashboard Component', () => {
               ],
               best_posting_times: [
                 { hour: '18:00', avg_engagement: 4.5, posts_count: 10 }
-              ]
+              ],
+              timezone: 'Asia/Kuching'
             }
           }),
         });
@@ -164,6 +165,17 @@ describe('Dashboard Component', () => {
     expect(screen.getByText('8.5K')).toBeInTheDocument(); // reach formatted
     expect(screen.getByText('3.5%')).toBeInTheDocument(); // engagement_rate
     expect(screen.getByText('1.8K')).toBeInTheDocument(); // 45 * 40 = 1800 formatted
+  });
+
+  test('mejores horarios indican la zona de la cuenta, no una fija', async () => {
+    render(<Dashboard />);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Cargando datos de Instagram...')).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Hora de Kuching')).toBeInTheDocument();
+    expect(screen.queryByText('España (Madrid)')).not.toBeInTheDocument();
   });
 
   test('profile banner shows when connected', async () => {

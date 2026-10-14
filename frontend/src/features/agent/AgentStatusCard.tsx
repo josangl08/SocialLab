@@ -11,9 +11,11 @@ interface AgentStatus {
 
 interface AgentStatusCardProps {
   accountId: number;
+  /** Zona de la cuenta para mostrar fechas (por defecto, la del navegador) */
+  timezone?: string;
 }
 
-export const AgentStatusCard: React.FC<AgentStatusCardProps> = ({ accountId }) => {
+export const AgentStatusCard: React.FC<AgentStatusCardProps> = ({ accountId, timezone }) => {
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [countdown, setCountdown] = useState<string>('');
@@ -114,7 +116,8 @@ export const AgentStatusCard: React.FC<AgentStatusCardProps> = ({ accountId }) =
               day: 'numeric',
               month: 'short',
               hour: '2-digit',
-              minute: '2-digit'
+              minute: '2-digit',
+              timeZone: timezone
             })}
           </div>
         )}

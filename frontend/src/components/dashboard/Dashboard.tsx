@@ -8,6 +8,7 @@ import './Dashboard.css';
 import { KPICard } from '../analytics/cards/KPICard';
 import { AgentStatusCard } from '../../features/agent/AgentStatusCard';
 import { CalendarProposalView } from '../../features/agent/CalendarProposalView';
+import { toWallClock, zoneLabel } from '../../utils/timezone';
 
 interface DashboardStats {
   follower_count: number;
@@ -99,6 +100,8 @@ const Dashboard: React.FC = () => {
   const [engagementTrend, setEngagementTrend] = useState<EngagementTrendItem[]>([]);
   const [bestTimes, setBestTimes] = useState<BestTimeSlot[]>([]);
   const [bestTimesByWeekday, setBestTimesByWeekday] = useState<BestTimesByWeekday>({});
+  // Zona de la cuenta en la que la analítica calcula horas y días (AD-16)
+  const [analyticsTz, setAnalyticsTz] = useState<string | undefined>(undefined);
   const [selectedWeekday, setSelectedWeekday] = useState<number>(() => {
     const jsDay = new Date().getDay();
     return jsDay === 0 ? 6 : jsDay - 1; // JS Sunday(0) → Python 6, JS Mon(1) → Python 0
@@ -171,6 +174,9 @@ const Dashboard: React.FC = () => {
             setEngagementTrend(data.data.engagement_trend || []);
             setBestTimes(data.data.best_posting_times || []);
             setBestTimesByWeekday(data.data.best_times_by_weekday || {});
+            const tz: string | undefined = data.data.timezone;
+            setAnalyticsTz(tz);
+            if (tz) setSelectedWeekday((toWallClock(new Date(), tz).getDay() + 6) % 7);
           }
         } catch (error) {
           console.error('Error cargando analytics de Instagram:', error);
@@ -265,7 +271,7 @@ const Dashboard: React.FC = () => {
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
-    return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: analyticsTz });
   };
 
   const formatNumber = (num: number | null | undefined): string => {
@@ -446,7 +452,7 @@ const Dashboard: React.FC = () => {
                 {instagramAccountId !== null && (
                   <>
                     <div className="mb-4">
-                      <AgentStatusCard accountId={instagramAccountId} />
+                      <AgentStatusCard accountId={instagramAccountId} timezone={analyticsTz} />
                     </div>
                     <div className="mb-4">
                       <CalendarProposalView accountId={instagramAccountId} />
@@ -524,7 +530,7 @@ const Dashboard: React.FC = () => {
                   <div className="sl-panel-header">
                     <i className="bi bi-clock-history"></i>
                     Mejores Horarios para Publicar
-                    <span className="sl-panel-header-sub">España (Madrid)</span>
+                    {analyticsTz && <span className="sl-panel-header-sub">Hora de {zoneLabel(analyticsTz)}</span>}
                   </div>
                   <div className="sl-panel-body">
                     {Object.keys(bestTimesByWeekday).length > 0 ? (

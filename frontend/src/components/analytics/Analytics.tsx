@@ -22,6 +22,7 @@ import { TopLocations } from './charts/TopLocations';
 import { KPIStrip } from './cards/KPIStrip';
 import { AnalyticsPostDetailModal } from './panels/AnalyticsPostDetailModal';
 import { DraftOptimizerPanel } from './panels/DraftOptimizerPanel';
+import { zoneLabel } from '../../utils/timezone';
 
 interface FollowerGrowthData {
   date: string;
@@ -112,6 +113,8 @@ interface AnalyticsData {
   best_posting_times_raw?: BestPostingTimeRaw[];
   insights?: Array<{ type: string; title: string; description: string; icon: string }>;
   audience?: AudienceData;
+  /** Zona de la cuenta en la que el backend calcula horas y días (AD-14) */
+  timezone?: string;
 }
 
 type InnerTab = 'rendimiento' | 'audiencia' | 'contenido';
@@ -212,6 +215,7 @@ const Analytics: React.FC = () => {
           })),
           best_posting_times_raw: raw.best_posting_times ?? [],
           insights: raw.insights ?? [],
+          timezone: raw.timezone,
           audience: raw.audience ? {
             follower_growth: raw.audience.follower_growth ?? [],
             demographics: raw.audience.demographics ?? { audience_gender_age: {} },
@@ -381,7 +385,7 @@ const Analytics: React.FC = () => {
                   />
                   <Tooltip
                     contentStyle={TOOLTIP_STYLE}
-                    labelFormatter={(v) => new Date(v).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
+                    labelFormatter={(v) => new Date(`${v}T12:00:00`).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
                   />
                   <Legend />
                   <Line type="monotone" dataKey="likes"      stroke="#fd1d1d" strokeWidth={2} name="Likes"        dot={false} activeDot={{ r: 5 }} />
@@ -593,6 +597,9 @@ const Analytics: React.FC = () => {
               <div className="an-section-title">
                 <i className="bi bi-alarm"></i>
                 Mejores Horarios para Publicar
+                {analytics.timezone && (
+                  <span className="an-tz-label" data-testid="analytics-tz-label">Hora de {zoneLabel(analytics.timezone)}</span>
+                )}
               </div>
               <div className="an-chart-body">
                 <ResponsiveContainer width="100%" height={200}>

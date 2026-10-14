@@ -774,3 +774,13 @@
     font-size: 0.65rem;
   }
 }
+
+/* Zona horaria de las horas mostradas */
+.an-tz-label {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--sl-text-muted);
+}
