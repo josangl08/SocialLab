@@ -914,6 +914,30 @@ def test_context_graph_includes_current_month_pending_campaign(mock_agent_admin_
     assert any(n["data"].get("status") == "pending_approval" for n in campaign_nodes)
 
 
+class _KuchingMidnight(datetime):
+    """1-nov 00:30 en Asia/Kuching, todavía 31-oct en UTC."""
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 10, 31, 16, 30, tzinfo=timezone.utc)
+
+
+def test_context_graph_current_month_uses_account_local_date(mock_agent_admin_supabase):
+    tables = {name: MagicMock() for name in ("instagram_accounts", "monthly_campaigns")}
+    tables["instagram_accounts"].select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{"user_id": USER_ID, "username": "acc", "primary_timezone": "Asia/Kuching"}]
+    )
+    month_eq = tables["monthly_campaigns"].select.return_value.eq.return_value.eq
+    month_eq.return_value.execute.return_value = MagicMock(data=[])
+    tables["monthly_campaigns"].select.return_value.in_.return_value.execute.return_value = MagicMock(data=[])
+    mock_agent_admin_supabase.table.side_effect = lambda name: tables.get(name, MagicMock())
+
+    with patch("utils.timezones.datetime", _KuchingMidnight):
+        response = client.get("/api/agent/context-graph?account_id=456")
+
+    assert response.status_code == 200
+    month_eq.assert_any_call("month_date", "2026-11-01")
+
+
 
 
 

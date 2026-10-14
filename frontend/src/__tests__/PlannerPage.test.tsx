@@ -12,7 +12,7 @@ vi.mock('../context/AuthContext', () => ({
 }));
 
 vi.mock('../api/client', () => ({
-  apiClient: { get: vi.fn(), post: vi.fn() },
+  apiClient: { get: vi.fn(), post: vi.fn(), put: vi.fn() },
   ApiError: class ApiError extends Error {},
 }));
 
@@ -46,5 +46,26 @@ describe('PlannerPage', () => {
     expect(await screen.findByRole('list', { name: /Secuencia de Stories/i })).toBeInTheDocument();
     expect(contentApi.generateStory).toHaveBeenCalledWith(expect.objectContaining({ account_id: 5 }));
     expect(screen.queryByText('calendar')).not.toBeInTheDocument();
+  });
+
+  test('reporta la zona del navegador como detected_timezone solo en las cuentas donde difiere', async () => {
+    const spy = vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockReturnValue({ timeZone: 'America/New_York' } as Intl.ResolvedDateTimeFormatOptions);
+    (apiClient.get as any).mockResolvedValue([
+      { id: 5, username: 'desfasada', detected_timezone: 'Asia/Kuching' },
+      { id: 6, username: 'al-dia', detected_timezone: 'America/New_York' },
+    ]);
+    (apiClient.put as any).mockResolvedValue({});
+
+    render(
+      <MemoryRouter>
+        <PlannerPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(apiClient.put).toHaveBeenCalled());
+    expect(apiClient.put).toHaveBeenCalledTimes(1);
+    expect(apiClient.put).toHaveBeenCalledWith('/instagram/accounts/5/config', { detected_timezone: 'America/New_York' });
+    spy.mockRestore();
   });
 });

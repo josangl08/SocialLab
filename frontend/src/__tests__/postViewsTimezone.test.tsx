@@ -1,9 +1,18 @@
-import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, test, expect, vi, beforeEach } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { describe, test, expect, vi } from 'vitest';
 import MediaLightbox from '../components/media/MediaLightbox';
+import PostDetailModal from '../components/posts/PostDetailModal';
 import type { Post } from '../types';
 import { toDatetimeLocalValue, fromWallClock, formatInZones } from '../utils/timezone';
+
+vi.mock('../context/AuthContext', () => ({
+  useAuth: () => ({ token: 'test-token' }),
+}));
+
+vi.mock('../api/client', () => ({
+  apiClient: { get: vi.fn().mockResolvedValue(null), post: vi.fn(), putForm: vi.fn(), delete: vi.fn(), getUrl: (p: string) => p },
+  ApiError: class ApiError extends Error {},
+}));
 
 describe('Vistas secundarias con zonas horarias (AD-6, AD-9, AD-10)', () => {
   const sampleIso = '2026-10-14T18:00:00Z';
@@ -65,5 +74,29 @@ describe('Vistas secundarias con zonas horarias (AD-6, AD-9, AD-10)', () => {
 
     expect(screen.getByTestId('media-lightbox')).toBeInTheDocument();
     expect(screen.getByTestId('lightbox-date')).toHaveTextContent('Mié 14 · 20:00 Madrid · Jue 15 · 02:00 Kuching');
+  });
+
+  test('PostDetailModal muestra la fecha en la zona principal y la secundaria de la cuenta', () => {
+    const testPost: Post = {
+      id: 53946,
+      user_id: 'u1',
+      content: 'Contenido test',
+      media_url: null,
+      post_type: 'post',
+      status: 'scheduled',
+      scheduled_at: sampleIso,
+      created_at: '2026-10-01T10:00:00Z',
+    };
+
+    render(
+      <PostDetailModal
+        show
+        onHide={vi.fn()}
+        post={testPost}
+        zones={{ primary: 'Europe/Madrid', secondary: 'Asia/Kuching' }}
+      />
+    );
+
+    expect(screen.getByText('Mié 14 · 20:00 Madrid · Jue 15 · 02:00 Kuching')).toBeInTheDocument();
   });
 });

@@ -14,7 +14,6 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from collections import defaultdict
 
-# Zona horaria de la cuenta — Instagram guarda timestamps en UTC
 from database.supabase_client import retry_on_network_error
 from utils.timezones import effective_timezone, local_today, to_local
 from services.content_quality import score_hook

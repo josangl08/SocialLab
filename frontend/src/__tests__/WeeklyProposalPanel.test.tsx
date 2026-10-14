@@ -484,6 +484,32 @@ describe('WeeklyProposalPanel Component', () => {
     expect(screen.getByText(/Mié 14 · 20:00 Madrid · Jue 15 · 02:00 Kuching/)).toBeInTheDocument();
   });
 
+  test('sin zona principal coloca el slot en el día y la hora de la zona del navegador', async () => {
+    const spy = vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockReturnValue({ timeZone: 'America/New_York' } as Intl.ResolvedDateTimeFormatOptions);
+    const tzProposals = [{
+      id: 'prop-tz-3', account_id: '123', week_start: '2026-10-12', status: 'pending_approval',
+      slots: [{ day: 'Wednesday', theme: 'Tema', caption: 'Caption del slot', post_id: 53946, scheduled_at: '2026-10-14T18:00:00Z' }],
+    }];
+    (globalThis.fetch as any).mockImplementation((url: string) => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(url.includes('/api/agent/proposals?account_id=') ? tzProposals : {}),
+    }));
+
+    const { container } = render(
+      <WeeklyProposalPanel accountId={123} refreshSignal={1} onProposalAction={mockOnProposalAction} />
+    );
+
+    await waitFor(() => expect(screen.queryByText(/Loading proposals/i)).not.toBeInTheDocument());
+    // Guardado como Wednesday; 18:00 UTC es el miércoles 14 a las 14:00 en Nueva York
+    const boxes = container.querySelectorAll('.wpp-day-box');
+    expect(boxes[2].className).toContain('wpp-day-box--slot');
+    fireEvent.click(boxes[2]);
+    const timeInput = container.querySelector('.wpp-time-input') as HTMLInputElement;
+    expect(timeInput.value).toBe('2026-10-14T14:00');
+    spy.mockRestore();
+  });
+
   test('reorder envia timezone en el cuerpo de la peticion', async () => {
     let reorderBody: any = null;
     (globalThis.fetch as any).mockImplementation((url: string, options: any) => {

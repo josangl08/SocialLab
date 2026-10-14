@@ -335,7 +335,7 @@ describe('CalendarView Component', () => {
 
   test('con timezone Europe/Madrid, el post 2026-10-14T18:00Z cae el miercoles 14 a las 20:00', async () => {
     // Post 53946 programado a las 18:00 UTC
-    (global.fetch as any).mockImplementation((url: string) => {
+    (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url.includes('/api/posts')) {
         return Promise.resolve({
           ok: true,
@@ -374,7 +374,7 @@ describe('CalendarView Component', () => {
   });
 
   test('vista de mes marca la miniatura cuando el día cambia en la zona secundaria', async () => {
-    (global.fetch as any).mockImplementation((url: string) => Promise.resolve({
+    (globalThis.fetch as any).mockImplementation((url: string) => Promise.resolve({
       ok: true,
       json: () => Promise.resolve(url.includes('/api/posts') ? [{
         id: 53946, user_id: 'user-1', content: 'Post', media_url: null, post_type: 'post', status: 'scheduled',
@@ -404,7 +404,7 @@ describe('CalendarView Component', () => {
       dropped.getFullYear(), dropped.getMonth(), dropped.getDate(), dropped.getHours() - 2, dropped.getMinutes()
     )).toISOString();
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(globalThis.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/api/scheduler/reschedule/1'),
         expect.objectContaining({ body: JSON.stringify({ new_scheduled_time: expected }) })
       );
@@ -412,7 +412,7 @@ describe('CalendarView Component', () => {
   });
 
   test('sin timezone principal usa la zona del navegador', async () => {
-    (global.fetch as any).mockImplementation((url: string) => {
+    (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url.includes('/api/posts')) {
         return Promise.resolve({
           ok: true,

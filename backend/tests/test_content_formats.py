@@ -412,6 +412,30 @@ async def test_resolve_strategy_mode_defaults_to_personal_when_no_active_campaig
         assert mode == "personal_storyline"
 
 
+from datetime import datetime, timezone
+
+
+class _KuchingMidnight(datetime):
+    """1-nov 00:30 en Asia/Kuching, todavía 31-oct en UTC."""
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 10, 31, 16, 30, tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_resolve_strategy_mode_uses_current_month_in_account_timezone():
+    mock_supabase = MagicMock()
+    month_eq = mock_supabase.table.return_value.select.return_value.eq.return_value.eq
+    month_eq.return_value.execute.return_value = MagicMock(data=[])
+
+    with patch("services.content_formats.get_supabase_admin_client", return_value=mock_supabase), \
+            patch("services.content_formats.get_account_timezone", return_value="Asia/Kuching"), \
+            patch("utils.timezones.datetime", _KuchingMidnight):
+        await resolve_strategy_mode(account_id=42)
+
+    month_eq.assert_called_once_with("month_date", "2026-11-01")
+
+
 # --- Revisión (Claude) ---
 
 def test_cache_key_includes_language():
