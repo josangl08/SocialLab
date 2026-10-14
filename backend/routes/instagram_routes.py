@@ -573,7 +573,7 @@ def get_instagram_accounts(current_user: User = Depends(get_current_user)):
     """
     try:
         response = admin_supabase.table('instagram_accounts')\
-            .select('id, instagram_business_account_id, username, account_name, followers_count, profile_picture_url, expires_at, is_active, telegram_chat_id, drive_folder_id, token_invalid, sector')\
+            .select('id, instagram_business_account_id, username, account_name, followers_count, profile_picture_url, expires_at, is_active, telegram_chat_id, drive_folder_id, token_invalid, sector, primary_timezone, secondary_timezone, detected_timezone')\
             .eq('user_id', current_user.id)\
             .execute()
         return response.data
@@ -592,6 +592,10 @@ def update_account_config(
         raise HTTPException(status_code=404, detail="Cuenta no encontrada")
 
     update_data = {k: v for k, v in config.model_dump().items() if v is not None}
+    # Las zonas aceptan null explícito para volver a "navegador" / quitar la secundaria
+    for field in ('primary_timezone', 'secondary_timezone', 'detected_timezone'):
+        if field in config.model_fields_set:
+            update_data[field] = getattr(config, field)
     if update_data:
         admin_supabase.table('instagram_accounts').update(update_data).eq('id', account_id).execute()
 

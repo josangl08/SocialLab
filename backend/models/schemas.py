@@ -1,6 +1,8 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from typing import Literal, Optional, Any, Union
+
+from utils.timezones import get_zone_info
 
 # --- Modelos de Usuario ---
 class UserRegister(BaseModel):
@@ -46,6 +48,17 @@ class Post(PostBase):
 class InstagramAccountConfigUpdate(BaseModel):
     telegram_chat_id: Optional[str] = None
     drive_folder_id: Optional[str] = None
+    # Zonas IANA; un null explícito restablece el valor por defecto (AD-4)
+    primary_timezone: Optional[str] = None
+    secondary_timezone: Optional[str] = None
+    detected_timezone: Optional[str] = None
+
+    @field_validator('primary_timezone', 'secondary_timezone', 'detected_timezone')
+    @classmethod
+    def _validate_timezone(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return get_zone_info(value).key
 
 class AIPostRequest(BaseModel):
     topic: str
@@ -183,11 +196,14 @@ class CalendarSlot(BaseModel):
     matrix_role: Optional[str] = None
     hook_candidates: Optional[list[str]] = None
 
+class ProposalSlot(CalendarSlot):
+    scheduled_at: Optional[str] = None  # instante del post enlazado; solo en respuestas (AD-7)
+
 class ContentProposal(BaseModel):
     id: str
     account_id: str
     week_start: str
-    slots: list[CalendarSlot]
+    slots: list[ProposalSlot]
     status: Literal["pending_approval", "approved", "rejected"] = "pending_approval"
 
 class AgentLog(BaseModel):

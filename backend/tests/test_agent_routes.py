@@ -1084,3 +1084,138 @@ def test_update_slot_image_from_drive_replaces_attached_photo(mock_agent_supabas
     tables["content_proposals"].update.assert_called_once_with(
         {"slots": [{"day": "Thursday", "post_id": 53577, "image_id": "drive-2", "media_url": None}]}
     )
+
+
+def test_list_proposals_includes_scheduled_at_in_slots(mock_agent_supabase, mock_agent_admin_supabase):
+    mock_agent_admin_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{"user_id": USER_ID}]
+    )
+
+    mock_agent_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.execute.return_value = MagicMock(
+        data=[{
+            "id": "prop-tz-1",
+            "account_id": "7",
+            "week_start": "2026-10-12",
+            "status": "pending_approval",
+            "slots": [
+                {"day": "Wednesday", "theme": "tip", "caption": "cap 1", "post_id": 53946},
+                {"day": "Friday", "theme": "reels", "caption": "cap 2", "post_id": None},
+            ]
+        }]
+    )
+
+    posts_exec = MagicMock()
+    posts_exec.execute.return_value = MagicMock(data=[
+        {"id": 53946, "scheduled_at": "2026-10-14T18:00:00Z"}
+    ])
+
+    def table(name):
+        t = MagicMock()
+        if name == "instagram_accounts":
+            t.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+        elif name == "posts":
+            t.select.return_value.in_.return_value = posts_exec
+        return t
+    mock_agent_admin_supabase.table.side_effect = table
+
+    response = client.get("/api/agent/proposals?account_id=7")
+    assert response.status_code == 200
+    proposals = response.json()
+    assert len(proposals) == 1
+    slots = proposals[0]["slots"]
+    assert slots[0]["post_id"] == 53946
+    assert slots[0]["scheduled_at"] == "2026-10-14T18:00:00Z"
+    assert slots[1]["post_id"] is None
+    assert slots[1]["scheduled_at"] is None
+
+
+def test_reorder_slots_with_timezone_preserves_wall_clock_time(mock_agent_supabase, mock_agent_admin_supabase):
+    mock_agent_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{
+            "id": "prop-tz-2",
+            "account_id": 7,
+            "week_start": "2026-10-12",
+            "slots": [
+                {"day": "Monday", "theme": "intro", "caption": "c1", "post_id": 101},
+                {"day": "Wednesday", "theme": "outro", "caption": "c2", "post_id": 102},
+            ]
+        }]
+    )
+
+    tables = {}
+    def table(name):
+        t = tables.setdefault(name, MagicMock())
+        if name == "instagram_accounts":
+            t.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+        return t
+    mock_agent_admin_supabase.table.side_effect = table
+
+    # Post 101 (Monday): 2026-10-12T18:00:00Z -> 20:00 en Europe/Madrid (UTC+2)
+    # Post 102 (Wednesday): 2026-10-14T08:00:00Z -> 10:00 en Europe/Madrid (UTC+2)
+    def posts_select(cols):
+        q = MagicMock()
+        def eq_call(col, val):
+            res = MagicMock()
+            if val == 101:
+                res.execute.return_value = MagicMock(data=[{"scheduled_at": "2026-10-12T18:00:00Z"}])
+            elif val == 102:
+                res.execute.return_value = MagicMock(data=[{"scheduled_at": "2026-10-14T08:00:00Z"}])
+            return res
+        q.eq.side_effect = eq_call
+        return q
+    tables.setdefault("posts", MagicMock()).select.side_effect = posts_select
+
+    response = client.patch(
+        "/api/agent/proposals/prop-tz-2/slots/reorder",
+        json={"from_day": "Monday", "to_day": "Wednesday", "timezone": "Europe/Madrid"}
+    )
+
+    assert response.status_code == 200
+    # Post 101 se movió a Wednesday conservando su hora de pared 20:00 en Madrid -> 18:00 UTC
+    # Post 102 se movió a Monday conservando su hora de pared 10:00 en Madrid -> 08:00 UTC
+    updates = tables["posts"].update.call_args_list
+    assert len(updates) == 2
+    assert updates[0][0][0]["scheduled_at"] == "2026-10-14T18:00:00+00:00"
+    assert updates[1][0][0]["scheduled_at"] == "2026-10-12T08:00:00+00:00"
+
+
+def test_reorder_slots_crossing_dst_change_preserves_wall_clock_time(mock_agent_supabase, mock_agent_admin_supabase):
+    # Semana del 19-oct-2026.
+    # Sábado 24-oct: CEST (UTC+2). Hora de pared 20:00 -> UTC 18:00.
+    # Domingo 25-oct: cambio de horario a las 03:00 (CET, UTC+1).
+    # Lunes 26-oct: CET (UTC+1). Hora de pared 20:00 -> UTC 19:00.
+    mock_agent_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{
+            "id": "prop-tz-dst",
+            "account_id": 7,
+            "week_start": "2026-10-19",
+            "slots": [
+                {"day": "Saturday", "theme": "weekend", "caption": "c1", "post_id": 201},
+                {"day": "Sunday", "theme": "recap", "caption": "c2", "post_id": None},
+            ]
+        }]
+    )
+
+    tables = {}
+    def table(name):
+        t = tables.setdefault(name, MagicMock())
+        if name == "instagram_accounts":
+            t.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"user_id": USER_ID}])
+        return t
+    mock_agent_admin_supabase.table.side_effect = table
+
+    post_query = MagicMock()
+    post_query.eq.return_value.execute.return_value = MagicMock(data=[{"scheduled_at": "2026-10-24T18:00:00Z"}])
+    tables.setdefault("posts", MagicMock()).select.return_value = post_query
+
+    response = client.patch(
+        "/api/agent/proposals/prop-tz-dst/slots/reorder",
+        json={"from_day": "Saturday", "to_day": "Sunday", "timezone": "Europe/Madrid"}
+    )
+
+    assert response.status_code == 200
+    # Al pasar al domingo cruzando el DST, 20:00 hora de pared en CET (+1) debe ser 19:00 UTC (+00:00)
+    update_arg = tables["posts"].update.call_args[0][0]
+    scheduled = update_arg["scheduled_at"]
+    assert "19:00:00" in scheduled
+

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Literal, Optional
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import User, AgentConfig, ContentProposal, MonthlyCampaign
@@ -11,6 +11,7 @@ import asyncio
 import uuid
 import json
 import logging
+from utils.timezones import effective_timezone, get_zone_info, local_to_utc, to_local
 from services.gemini_service import generate_gemini_content, clean_and_parse_json, regenerate_slot_caption
 from services.analytics.analytics_service import AnalyticsService
 from services.hermes.orchestrator import run_edit_session
@@ -155,6 +156,17 @@ def list_proposals(
             .order('created_at', desc=True)\
             .execute()
 
+        # Instante real de cada post enlazado: el panel coloca el slot por esta
+        # fecha (en la zona de la cuenta), igual que el calendario (AD-7)
+        post_ids = list({
+            slot['post_id'] for row in proposals_res.data for slot in (row.get('slots') or [])
+            if isinstance(slot, dict) and slot.get('post_id')
+        })
+        scheduled_by_post: dict = {}
+        if post_ids:
+            posts_res = admin_supabase.table('posts').select('id, scheduled_at').in_('id', post_ids).execute()
+            scheduled_by_post = {p['id']: p.get('scheduled_at') for p in (posts_res.data or [])}
+
         proposals = []
         for row in proposals_res.data:
             try:
@@ -162,7 +174,10 @@ def list_proposals(
                     id=str(row['id']),
                     account_id=str(row['account_id']),
                     week_start=str(row['week_start']),
-                    slots=row['slots'],
+                    slots=[
+                        {**slot, 'scheduled_at': scheduled_by_post.get(slot.get('post_id'))}
+                        for slot in row['slots']
+                    ],
                     status=row['status']
                 ))
             except Exception as e:
@@ -615,6 +630,12 @@ _WEEKDAY_OFFSET: dict = {
 class SlotReorderRequest(BaseModel):
     from_day: str
     to_day: str
+    timezone: Optional[str] = None  # zona en la que el usuario ve la propuesta (AD-8)
+
+    @field_validator('timezone')
+    @classmethod
+    def _validate_timezone(cls, value: Optional[str]) -> Optional[str]:
+        return get_zone_info(value).key if value else None
 
 
 @router.patch("/proposals/{proposal_id}/slots/reorder")
@@ -629,9 +650,12 @@ def reorder_proposal_slot(
     if not proposal_res.data:
         raise HTTPException(status_code=404, detail="Proposal not found")
     proposal = proposal_res.data[0]
-    acc_res = admin_supabase.table('instagram_accounts').select('user_id').eq('id', proposal['account_id']).execute()
+    acc_res = admin_supabase.table('instagram_accounts').select(
+        'user_id, primary_timezone, detected_timezone'
+    ).eq('id', proposal['account_id']).execute()
     if not acc_res.data or str(acc_res.data[0]['user_id']) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Access denied")
+    tz = effective_timezone(acc_res.data[0], request.timezone)
 
     slots = list(proposal.get('slots', []))
     week_start = str(proposal['week_start'])  # e.g. "2026-06-29"
@@ -643,15 +667,17 @@ def reorder_proposal_slot(
         raise HTTPException(status_code=404, detail=f"Slot for {request.from_day} not found")
 
     def _calc_scheduled_at(day: str, existing_iso: str) -> str:
+        # Día de la semana en la zona de la cuenta conservando la hora de pared del
+        # post en esa zona, también si se cruza un cambio de horario (AD-8)
         base = datetime.fromisoformat(week_start + 'T09:00:00')
         base += timedelta(days=_WEEKDAY_OFFSET.get(day, 0))
         if existing_iso:
             try:
-                parsed = datetime.fromisoformat(str(existing_iso).replace('Z', '+00:00'))
+                parsed = to_local(datetime.fromisoformat(str(existing_iso).replace('Z', '+00:00')), tz)
                 base = base.replace(hour=parsed.hour, minute=parsed.minute)
             except ValueError:
                 pass
-        return base.replace(tzinfo=timezone.utc).isoformat()
+        return local_to_utc(base, tz).isoformat()
 
     from_slot = slots[from_idx]
 
