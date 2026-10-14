@@ -7,6 +7,8 @@ from services.hermes.tool_bridge import ToolBridge
 from services.hermes.orchestrator import _dispatch_turn, _FallbackGenerativeModel
 from services.hermes.prompts import get_monthly_strategy_prompt
 from mcp.supabase_server import mcp as supabase_mcp
+from services.account_timezone import get_account_timezone
+from utils.timezones import local_today
 
 
 class MonthlyStrategyResult(BaseModel):
@@ -40,7 +42,8 @@ async def run_monthly_strategy_session(account_id: int, target_month: Optional[s
     counterpart passes an explicit month so the user can generate for whichever
     month the drawer has open."""
     max_turns = int(os.environ.get("HERMES_MONTHLY_MAX_TURNS", "5"))
-    target_month = target_month or next_month_date()
+    # Mes siguiente según la fecha local de la cuenta (AD-15)
+    target_month = target_month or next_month_date(local_today(get_account_timezone(account_id)))
 
     bridge = ToolBridge([supabase_mcp], allowed_tools=_MONTHLY_TOOLS)
     declarations = await bridge.discover_tools()

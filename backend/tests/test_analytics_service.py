@@ -295,3 +295,39 @@ def test_swipe_file_insufficient_data(mock_db):
     assert len(result['items']) == 1
     assert result['items'][0]['outlier_multiple'] is None
     assert result['items'][0]['sends_per_reach'] is None
+
+
+def _post(pub_date: str, likes: int = 10) -> dict:
+    return {'publication_date': pub_date, 'post_performance': {'likes': likes, 'comments': 0, 'reach': 100}}
+
+
+def test_best_times_by_weekday_uses_account_timezone(mock_db):
+    # 12:00 UTC del miércoles 14-oct es 20:00 del miércoles en Asia/Kuching (AD-14)
+    service = AnalyticsService(db_client=mock_db)
+    posts = [_post('2026-10-14T12:00:00Z'), _post('2026-10-07T12:00:00Z'), _post('2026-09-30T12:00:00Z')]
+
+    result = service._calculate_best_times_by_weekday(posts, 'Asia/Kuching')
+
+    assert result[2][0]['hour'] == '20:00'
+
+
+def test_trends_group_days_in_account_timezone(mock_db):
+    # 18:00 UTC del 14-oct ya es el 15 en Kuching: la tendencia lo cuenta el día 15
+    service = AnalyticsService(db_client=mock_db)
+
+    trend = service._calculate_trends([_post('2026-10-14T18:00:00Z')], 365, 'Asia/Kuching')
+
+    days_with_posts = [d['date'] for d in trend if d['posts_count']]
+    assert days_with_posts == ['2026-10-15']
+
+
+def test_empirical_scheduling_data_reports_account_timezone(mock_db):
+    service = AnalyticsService(db_client=mock_db)
+    mock_db.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{'primary_timezone': 'Asia/Kuching', 'detected_timezone': None}]
+    )
+    with patch.object(service, '_get_posts_from_db', return_value=[]):
+        result = service.get_empirical_scheduling_data(7)
+
+    assert result['timezone'] == 'Asia/Kuching'
+    assert result['has_data'] is False

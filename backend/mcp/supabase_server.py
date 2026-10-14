@@ -5,7 +5,8 @@ from mcp.server.mcpserver import MCPServer
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import CalendarSlot
 from services.content_quality import humanize, enforce_hashtag_limit, lint_caption
-from utils.timezones import effective_timezone, parse_schedule_time
+from utils.timezones import effective_timezone, local_today, parse_schedule_time
+from services.account_timezone import get_account_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -283,7 +284,8 @@ def supabase_get_next_planning_week(instagram_account_id: int) -> str:
     value as-is when choosing which week to plan — do not recompute it."""
     supabase = get_supabase_admin_client()
     planned = set(_fetch_planned_weeks(supabase, instagram_account_id))
-    today = date.today()
+    # "Hoy" en la zona de la cuenta, no en la del servidor (AD-15)
+    today = local_today(get_account_timezone(instagram_account_id))
     candidate = today + timedelta(days=(7 - today.weekday()) % 7)
     while candidate.isoformat() in planned:
         candidate += timedelta(days=7)

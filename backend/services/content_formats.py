@@ -8,10 +8,11 @@ import asyncio
 import hashlib
 import logging
 import time
-from datetime import date
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from database.supabase_client import get_supabase_admin_client
+from services.account_timezone import get_account_timezone
+from utils.timezones import local_today
 from models.schemas import (
     BeatsResponse,
     CarouselOut,
@@ -69,7 +70,7 @@ def set_in_cache(cache_key: str, value: Any) -> None:
 
 def _fetch_month_campaign(account_id: int) -> List[Dict[str, Any]]:
     supabase = get_supabase_admin_client()
-    current_month = date.today().replace(day=1).isoformat()
+    current_month = local_today(get_account_timezone(account_id)).replace(day=1).isoformat()
     res = (
         supabase.table("monthly_campaigns")
         .select("strategy_mode, status")

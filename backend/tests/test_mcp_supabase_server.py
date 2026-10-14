@@ -309,7 +309,7 @@ def test_supabase_get_planned_weeks():
 
 def test_supabase_get_next_planning_week_no_planned_weeks():
     with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client, \
-         patch("mcp.supabase_server.date") as mock_date:
+         patch("mcp.supabase_server.local_today") as mock_local_today:
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
 
@@ -317,7 +317,7 @@ def test_supabase_get_next_planning_week_no_planned_weeks():
         mock_response.data = []
         mock_client.table.return_value.select.return_value.eq.return_value.neq.return_value.execute.return_value = mock_response
 
-        mock_date.today.return_value = date(2026, 7, 22)  # Wednesday
+        mock_local_today.return_value = date(2026, 7, 22)  # Wednesday
 
         result = supabase_get_next_planning_week(instagram_account_id=123)
 
@@ -326,7 +326,7 @@ def test_supabase_get_next_planning_week_no_planned_weeks():
 
 def test_supabase_get_next_planning_week_skips_covered_weeks():
     with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client, \
-         patch("mcp.supabase_server.date") as mock_date:
+         patch("mcp.supabase_server.local_today") as mock_local_today:
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
 
@@ -334,7 +334,7 @@ def test_supabase_get_next_planning_week_skips_covered_weeks():
         mock_response.data = [{"week_start": "2026-07-27"}, {"week_start": "2026-08-03"}]
         mock_client.table.return_value.select.return_value.eq.return_value.neq.return_value.execute.return_value = mock_response
 
-        mock_date.today.return_value = date(2026, 7, 22)  # Wednesday
+        mock_local_today.return_value = date(2026, 7, 22)  # Wednesday
 
         result = supabase_get_next_planning_week(instagram_account_id=123)
 
@@ -343,7 +343,7 @@ def test_supabase_get_next_planning_week_skips_covered_weeks():
 
 def test_supabase_get_next_planning_week_today_is_monday():
     with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client, \
-         patch("mcp.supabase_server.date") as mock_date:
+         patch("mcp.supabase_server.local_today") as mock_local_today:
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
 
@@ -351,7 +351,7 @@ def test_supabase_get_next_planning_week_today_is_monday():
         mock_response.data = []
         mock_client.table.return_value.select.return_value.eq.return_value.neq.return_value.execute.return_value = mock_response
 
-        mock_date.today.return_value = date(2026, 7, 20)  # Monday
+        mock_local_today.return_value = date(2026, 7, 20)  # Monday
 
         result = supabase_get_next_planning_week(instagram_account_id=123)
 
@@ -750,3 +750,22 @@ def test_supabase_update_post_schedule_without_offset_uses_account_timezone():
 
         # 26-oct-2026 ya es horario de invierno en Madrid (UTC+1)
         mock_client.table.return_value.update.assert_called_once_with({"scheduled_at": "2026-10-26T17:00:00Z"})
+
+
+def test_supabase_get_next_planning_week_uses_account_local_date():
+    # 2026-10-18 20:00 UTC ya es lunes 19 en Asia/Kuching: la semana a planificar es la que empieza hoy
+    from datetime import datetime, timezone
+    with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client, \
+         patch("services.account_timezone.get_supabase_admin_client") as mock_tz_client, \
+         patch("utils.timezones.datetime") as mock_dt:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.table.return_value.select.return_value.eq.return_value.neq.return_value.execute.return_value = MagicMock(data=[])
+        mock_tz_client.return_value.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{"primary_timezone": "Asia/Kuching", "detected_timezone": None}]
+        )
+        mock_dt.now.return_value = datetime(2026, 10, 18, 20, 0, tzinfo=timezone.utc)
+
+        result = supabase_get_next_planning_week(instagram_account_id=123)
+
+        assert result == "2026-10-19"

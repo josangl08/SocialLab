@@ -19,6 +19,7 @@ from utils.timezones import (
     parse_schedule_time,
     to_local,
     zone_label,
+    local_today,
 )
 
 
@@ -141,3 +142,13 @@ def test_zone_label():
     assert zone_label("Asia/Kuching") == "Kuching"
     assert zone_label("America/New_York") == "New York"
     assert zone_label("UTC") == "UTC"
+
+
+def test_local_today_uses_zone_date():
+    from datetime import date
+    from unittest.mock import patch
+    with patch("utils.timezones.datetime") as mock_dt:
+        # 31-oct 17:00 UTC ya es 1-nov en Kuching (UTC+8), sigue siendo 31-oct en Madrid
+        mock_dt.now.return_value = datetime(2026, 10, 31, 17, 0, tzinfo=timezone.utc)
+        assert local_today("Asia/Kuching") == date(2026, 11, 1)
+        assert local_today("Europe/Madrid") == date(2026, 10, 31)

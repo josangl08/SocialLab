@@ -4,7 +4,7 @@ Utilidades de zonas horarias para SocialLab (AD-2, AD-3, AD-11).
 Maneja zona efectiva de cuentas, conversiones UTC ↔ hora de pared local,
 y normalización de fechas con o sin offset.
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Optional, Union
 import zoneinfo
 from zoneinfo import ZoneInfo
@@ -114,6 +114,11 @@ def parse_schedule_time(value: Union[str, datetime], tz: Union[str, ZoneInfo]) -
 
     # Naive: interpretar en la zona indicada
     return dt.replace(tzinfo=zi).astimezone(timezone.utc)
+
+
+def local_today(tz: Union[str, ZoneInfo]) -> date:
+    """Fecha de hoy en la zona indicada."""
+    return to_local(datetime.now(timezone.utc), tz).date()
 
 
 def zone_label(tz: str) -> str:

@@ -11,7 +11,7 @@ import asyncio
 import uuid
 import json
 import logging
-from utils.timezones import effective_timezone, get_zone_info, local_to_utc, to_local
+from utils.timezones import effective_timezone, get_zone_info, local_today, local_to_utc, to_local
 from services.gemini_service import generate_gemini_content, clean_and_parse_json, regenerate_slot_caption
 from services.analytics.analytics_service import AnalyticsService
 from services.hermes.orchestrator import run_edit_session
@@ -1293,8 +1293,7 @@ async def get_context_graph(
     # Always surface the current month's campaign as strategy context, even when no
     # decision links it yet (e.g. it's still pending_approval) — otherwise Hermes
     # Mind can't say which campaign is in play.
-    from datetime import date
-    current_month = date.today().replace(day=1).isoformat()
+    current_month = local_today(effective_timezone(account)).replace(day=1).isoformat()
     cur_res = admin_supabase.table('monthly_campaigns')\
         .select('id, title, description, strategy_mode, weekly_focus, milestones, status')\
         .eq('account_id', account_id).eq('month_date', current_month).execute()

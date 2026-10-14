@@ -3,7 +3,6 @@ from typing import Any, Optional
 from database.supabase_client import get_supabase_admin_client
 from services.hermes.memory import get_active_brand_rules
 from services.hermes.playbooks import load_playbook
-from services.analytics.analytics_service import _ACCOUNT_TZ as _ANALYTICS_TZ
 from utils.timezones import effective_timezone, to_local
 
 _SPANISH_WEEKDAYS = [
@@ -154,9 +153,9 @@ def _build_timezone_context(account: dict) -> str:
     tz = effective_timezone(account)
     return (
         f"\n\nZona horaria de la cuenta: {tz}. Hoy es {_now_in_zone(tz)}. Todas las horas de "
-        f"publicación (incluidos los best_times del perfil) se entienden en hora de {tz}. Las "
-        "horas de analytics_get_empirical_scheduling_data están en hora de "
-        f"{_ANALYTICS_TZ.key}: conviértelas a {tz} si es distinta. Pasa siempre "
+        "publicación (incluidos los best_times del perfil y los de "
+        "analytics_get_empirical_scheduling_data) se entienden en hora de "
+        f"{tz}. Pasa siempre "
         "scheduled_publish_time en ISO 8601 con el offset de esa zona (p. ej. "
         "2026-10-14T20:00:00+02:00)."
     )

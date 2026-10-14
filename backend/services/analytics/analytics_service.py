@@ -11,13 +11,12 @@ import logging
 import json
 import statistics
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 from typing import Dict, List, Optional
 from collections import defaultdict
 
 # Zona horaria de la cuenta — Instagram guarda timestamps en UTC
-_ACCOUNT_TZ = ZoneInfo('Europe/Madrid')
 from database.supabase_client import retry_on_network_error
+from utils.timezones import effective_timezone, local_today, to_local
 from services.content_quality import score_hook
 from services.content_formats import get_strategy_mode
 
@@ -244,6 +243,7 @@ class AnalyticsService:
 
         # Usar el ID de la cuenta obtenida
         instagram_account_id = account_info['id']
+        tz = account_info['timezone']
 
         # 2. Obtener posts desde BD
         posts = self._get_posts_from_db(instagram_account_id, days)
@@ -253,6 +253,7 @@ class AnalyticsService:
             audience = self._analyze_audience(instagram_account_id, days)
             result = self._get_empty_analytics(account_info)
             result['data']['audience'] = audience
+            result['data']['timezone'] = tz
             # Altas/bajas y toques de contacto son de cuenta: se muestran aunque no haya posts
             result['data']['overview'].update(
                 self._get_follower_growth(instagram_account_id, days)
@@ -285,10 +286,10 @@ class AnalyticsService:
             posts, limit=3, median_views=median_views, sort_by='outlier'
         )
         recent_posts = self._get_recent_posts(posts, limit=5, median_views=median_views)
-        best_times_by_weekday = self._calculate_best_times_by_weekday(posts)
+        best_times_by_weekday = self._calculate_best_times_by_weekday(posts, tz)
 
         # 7. Tendencias temporales
-        engagement_trend = self._calculate_trends(posts, days)
+        engagement_trend = self._calculate_trends(posts, days, tz)
 
         # 8. Analizar datos de audiencia (PRIMERO para obtener online_hours)
         audience = self._analyze_audience(instagram_account_id, days)
@@ -298,14 +299,16 @@ class AnalyticsService:
         best_posting_times = self._calculate_best_posting_times(
             instagram_account_id,
             audience.get('online_hours', {}),
-            days
+            days,
+            tz
         )
 
         # 10. Insights y recomendaciones
         insights = self._generate_insights(
             posts,
             best_posting_times,
-            by_content_type
+            by_content_type,
+            tz
         )
 
         return {
@@ -322,7 +325,8 @@ class AnalyticsService:
                 'best_times_by_weekday': best_times_by_weekday,
                 'engagement_trend': engagement_trend,
                 'best_posting_times': best_posting_times,
-                'insights': insights
+                'insights': insights,
+                'timezone': tz
             }
         }
 
@@ -344,7 +348,8 @@ class AnalyticsService:
         def _execute_query():
             query = self.db.table('instagram_accounts').select(
                 'id, instagram_business_account_id, last_sync_at, '
-                'followers_count, username, account_name, reach, profile_views'
+                'followers_count, username, account_name, reach, profile_views, '
+                'primary_timezone, detected_timezone'
             ).eq('user_id', user_id).eq('is_active', True)
 
             # Si se proporciona instagram_account_id, filtrar por él
@@ -368,7 +373,9 @@ class AnalyticsService:
             'username': result.data.get('username'),
             'account_name': result.data.get('account_name'),
             'reach': result.data.get('reach', 0),
-            'profile_views': result.data.get('profile_views', 0)
+            'profile_views': result.data.get('profile_views', 0),
+            # Zona en la que se calculan horas, días y tendencias (AD-14)
+            'timezone': effective_timezone(result.data),
         }
 
     def _get_posts_from_db(
@@ -757,21 +764,33 @@ class AnalyticsService:
         audience = self._analyze_audience(instagram_account_id, days)
 
         # Calcular mejores horarios (combinando actividad + performance histórico)
+        tz = self._account_timezone(instagram_account_id)
         best_times = self._calculate_best_posting_times(
             instagram_account_id,
             audience.get('online_hours', {}),
-            days
+            days,
+            tz
         )
 
         audience['best_posting_times'] = best_times
+        audience['timezone'] = tz
 
         return audience
+
+    def _account_timezone(self, instagram_account_id: int) -> str:
+        """Zona efectiva de la cuenta: primary ?? detected ?? UTC (AD-14)."""
+        res = self.db.table('instagram_accounts')\
+            .select('primary_timezone, detected_timezone')\
+            .eq('id', instagram_account_id)\
+            .execute()
+        return effective_timezone(res.data[0] if res.data else None)
 
     def _calculate_best_posting_times(
         self,
         instagram_account_id: int,
         online_hours: Dict,
-        days: int
+        days: int,
+        tz: str
     ) -> list:
         """
         Calcula los mejores momentos para publicar combinando:
@@ -805,9 +824,9 @@ class AnalyticsService:
                     if not pub_date:
                         continue
 
-                    post_date = datetime.fromisoformat(
+                    post_date = to_local(datetime.fromisoformat(
                         pub_date.replace('Z', '+00:00')
-                    ).astimezone(_ACCOUNT_TZ)
+                    ), tz)
                     hour = post_date.hour
 
                     perf = post.get('post_performance') or {}
@@ -1064,7 +1083,7 @@ class AnalyticsService:
 
         return recent
 
-    def _calculate_best_times_by_weekday(self, posts: List[Dict]) -> Dict:
+    def _calculate_best_times_by_weekday(self, posts: List[Dict], tz: str) -> Dict:
         """
         Calcula los mejores horarios de publicación por día de semana.
 
@@ -1082,9 +1101,9 @@ class AnalyticsService:
             if not pub_date:
                 continue
             try:
-                dt = datetime.fromisoformat(
+                dt = to_local(datetime.fromisoformat(
                     pub_date.replace('Z', '+00:00')
-                ).astimezone(_ACCOUNT_TZ)
+                ), tz)
                 weekday = dt.weekday()   # 0=lunes … 6=domingo
                 hour = dt.hour
 
@@ -1145,8 +1164,10 @@ class AnalyticsService:
             'summary_text' (resumen de 1 línea para el prompt).
         """
         posts = self._get_posts_from_db(instagram_account_id, days)
+        tz = self._account_timezone(instagram_account_id)
         if not posts:
             return {
+                'timezone': tz,
                 'has_data': False,
                 'top_times': [],
                 'best_times_by_weekday': {},
@@ -1155,9 +1176,9 @@ class AnalyticsService:
 
         audience = self._analyze_audience(instagram_account_id, days)
         best_posting_times = self._calculate_best_posting_times(
-            instagram_account_id, audience.get('online_hours', {}), days
+            instagram_account_id, audience.get('online_hours', {}), days, tz
         )
-        weekday_slots = self._calculate_best_times_by_weekday(posts)
+        weekday_slots = self._calculate_best_times_by_weekday(posts, tz)
 
         def _slot_count(slot: Dict) -> int:
             return slot.get('posts_count', slot.get('count', 0))
@@ -1181,6 +1202,7 @@ class AnalyticsService:
             summary_text = ", ".join(parts) + " — basado en tu histórico real"
 
         return {
+            'timezone': tz,
             'has_data': has_data,
             'top_times': top_times,
             'best_times_by_weekday': best_times_by_weekday,
@@ -1247,7 +1269,7 @@ class AnalyticsService:
             })
         return rows
 
-    def _calculate_trends(self, posts: List[Dict], days: int) -> List[Dict]:
+    def _calculate_trends(self, posts: List[Dict], days: int, tz: str) -> List[Dict]:
         """
         Calcula tendencia de engagement por día.
 
@@ -1266,9 +1288,9 @@ class AnalyticsService:
                 if not pub_date:
                     continue
 
-                post_date = datetime.fromisoformat(
+                post_date = to_local(datetime.fromisoformat(
                     pub_date.replace('Z', '+00:00')
-                )
+                ), tz)
                 date_key = post_date.strftime('%Y-%m-%d')
 
                 perf = post.get('post_performance') or {}
@@ -1295,7 +1317,7 @@ class AnalyticsService:
 
         # Zero-pad solo para rangos cortos/medios (<=180 días) para no generar payloads enormes
         if days <= 180:
-            today = datetime.utcnow().date()
+            today = local_today(tz)
             start_date = today - timedelta(days=days)
             for i in range(days):
                 dk = (start_date + timedelta(days=i + 1)).isoformat()
@@ -1367,7 +1389,8 @@ class AnalyticsService:
         self,
         posts: List[Dict],
         best_posting_times: List[Dict],
-        by_content_type: Dict
+        by_content_type: Dict,
+        tz: str
     ) -> List[Dict]:
         """
         Genera insights y recomendaciones basados en datos.
@@ -1395,9 +1418,9 @@ class AnalyticsService:
                 if not pub_date:
                     continue
 
-                date_obj = datetime.fromisoformat(
+                date_obj = to_local(datetime.fromisoformat(
                     pub_date.replace('Z', '+00:00')
-                )
+                ), tz)
                 day_of_week = date_obj.weekday()
 
                 perf = post.get('post_performance') or {}
