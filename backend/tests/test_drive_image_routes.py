@@ -122,7 +122,7 @@ BASE = "https://p.supabase.co/storage/v1/object/public/thumbnails/u/42/abc"
 def _render_and_save(sizes=SIZES, save_error=None):
     """Simula la generación (render_all_sizes) y el guardado en Storage (save_thumbnails)."""
     render = patch("routes.posts_routes.render_all_sizes", AsyncMock(return_value=sizes))
-    save = patch("routes.posts_routes.save_thumbnails", AsyncMock(return_value=BASE, side_effect=save_error))
+    save = patch("services.thumbnail_store.save_thumbnails", AsyncMock(return_value=BASE, side_effect=save_error))
     return render, save
 
 
@@ -174,7 +174,7 @@ def test_post_thumbnail_upload_failure_still_returns_image(user_db):
 def test_post_thumbnail_storage_video_is_404(user_db):
     _post_rows(user_db, [{"user_id": USER_ID, "media_url": "https://x.test/reel.mp4", "drive_file_id": None}])
     with patch("services.media_thumbnails.requests.get") as get, \
-            patch("routes.posts_routes.save_thumbnails", AsyncMock()) as save:
+            patch("routes.posts_routes.save_in_background", AsyncMock()) as save:
         assert client.get("/api/posts/42/thumbnail?token=t").status_code == 404
     get.assert_not_called()
     save.assert_not_called()

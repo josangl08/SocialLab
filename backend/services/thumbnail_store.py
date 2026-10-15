@@ -28,6 +28,8 @@ _LIST_PAGE = 100
 
 # post_id → [lock, peticiones que lo usan]; se quita al quedar libre
 _locks: dict[int, list] = {}
+# Posts con un guardado en segundo plano en curso en este proceso
+_saving: set[int] = set()
 
 
 def _storage() -> Any:
@@ -122,6 +124,22 @@ async def save_thumbnails(
     """Sube los tamaños, guarda `thumbnail_url_base` si la imagen no cambió entretanto y borra
     las versiones anteriores. Devuelve la base guardada o None. Lanza si falla Storage."""
     return await asyncio.to_thread(_save, user_id, post_id, sizes, expected_source)
+
+
+async def save_in_background(
+    user_id: str, post_id: int, sizes: dict[int, bytes], expected_source: dict
+) -> None:
+    """Guardado tras enviar la respuesta: no se repite si ya hay uno en curso para el post y un
+    fallo solo se registra (la siguiente petición lo reintenta; los tamaños siguen en la LRU)."""
+    if post_id in _saving:
+        return
+    _saving.add(post_id)
+    try:
+        await save_thumbnails(user_id, post_id, sizes, expected_source)
+    except Exception as e:
+        logger.error(f"Saving thumbnails failed for post {post_id}: {e}")
+    finally:
+        _saving.discard(post_id)
 
 
 async def generate_once(

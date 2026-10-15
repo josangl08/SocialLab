@@ -225,3 +225,25 @@ def test_waiting_request_generates_if_first_could_not_save(admin):
     asyncio.run(two_requests())
 
     assert calls == 2
+
+
+def test_background_save_skips_if_another_is_in_progress_and_swallows_errors(admin):
+    calls = 0
+
+    async def slow_failing_save(*_):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.01)
+        raise RuntimeError("Storage caído")
+
+    async def two_saves():
+        await asyncio.gather(
+            thumbnail_store.save_in_background(USER, 42, SIZES, {}),
+            thumbnail_store.save_in_background(USER, 42, SIZES, {}),
+        )
+
+    with patch("services.thumbnail_store.save_thumbnails", slow_failing_save):
+        asyncio.run(two_saves())
+        asyncio.run(thumbnail_store.save_in_background(USER, 42, SIZES, {}))  # el fallo no deja el post bloqueado
+
+    assert calls == 2

@@ -25,7 +25,7 @@ from services.media_thumbnails import (
     ThumbnailSize,
     render_all_sizes,
 )
-from services.thumbnail_store import generate_once, save_thumbnails
+from services.thumbnail_store import generate_once, save_in_background
 from services.publisher.instagram_publisher import InstagramPublisher, InstagramPublishError, resolve_publish_type
 from supabase import Client
 
@@ -353,14 +353,15 @@ def publish_post_now(
 async def get_post_thumbnail(
     post_id: int,
     token: str,
+    background_tasks: BackgroundTasks,
     size: ThumbnailSize = DEFAULT_THUMBNAIL_SIZE,
     v: Optional[str] = None,  # versión de la imagen: invalida las cachés cuando cambia
     current_user: User = Depends(get_current_user_from_query_token),
     supabase: Client = Depends(get_user_supabase_client_from_query_token),
 ):
     """Miniatura de la imagen del post (Storage o Drive), autenticada por query token.
-    Si ya está guardada en Storage, redirige; si no, genera los 4 tamaños, los guarda y
-    devuelve el pedido."""
+    Si ya está guardada en Storage, redirige; si no, genera los 4 tamaños, devuelve el pedido
+    y los guarda después de responder."""
     user_id = str(current_user.id)
     result = await asyncio.to_thread(
         lambda: supabase.table('posts').select('user_id, media_url, drive_file_id, thumbnail_url_base')
@@ -384,20 +385,10 @@ async def get_post_thumbnail(
     else:
         raise HTTPException(status_code=404, detail="El post no tiene imagen")
 
-    async def render_and_save() -> Optional[dict]:
-        sizes = await render_all_sizes(source, source_id, user_id=user_id)
-        if sizes is not None:
-            try:
-                await save_thumbnails(user_id, post_id, sizes, {
-                    'media_url': post.get('media_url'), 'drive_file_id': post.get('drive_file_id'),
-                })
-            except Exception as e:
-                # La imagen se sirve igualmente; la siguiente petición reintenta guardarla
-                logger.error(f"Saving thumbnails failed for post {post_id}: {e}")
-        return sizes
-
     try:
-        base, sizes = await generate_once(post_id, render_and_save)
+        base, sizes = await generate_once(
+            post_id, lambda: render_all_sizes(source, source_id, user_id=user_id)
+        )
     except Exception as e:
         logger.error(f"Thumbnail failed for post {post_id} ({source}): {e}")
         raise HTTPException(status_code=502, detail=f"Error obteniendo la miniatura: {str(e)}")
@@ -405,6 +396,10 @@ async def get_post_thumbnail(
         return stored(base)
     if sizes is None:
         raise HTTPException(status_code=404, detail="La media del post no tiene miniatura")
+    # Subir a Storage tarda segundos: se hace después de enviar la imagen
+    background_tasks.add_task(save_in_background, user_id, post_id, sizes, {
+        'media_url': post.get('media_url'), 'drive_file_id': post.get('drive_file_id'),
+    })
     return Response(content=sizes[int(size)], media_type=THUMBNAIL_MEDIA_TYPE, headers=IMAGE_CACHE_HEADERS)
 
 
