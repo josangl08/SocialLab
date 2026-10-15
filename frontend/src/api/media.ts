@@ -9,6 +9,7 @@ export interface PostMediaRef {
   id: number;
   media_url?: string | null;
   drive_file_id?: string | null;
+  thumbnail_url_base?: string | null;
 }
 
 const VIDEO_URL = /\.(mp4|mov|webm|ogg|m4v)(\?.*)?$/i;
@@ -25,12 +26,14 @@ function sourceVersion(source: string): string {
   return (hash >>> 0).toString(36);
 }
 
-/** Miniatura JPEG del post (Storage o Drive); null si no hay imagen previsualizable. */
+/** Miniatura WebP del post; null si no hay imagen previsualizable. Si ya está guardada en
+ * Storage sale de allí directamente; si no, la genera (y guarda) el backend. */
 export function postThumbnailUrl(
   post: PostMediaRef,
   token: string | null,
   size: ThumbnailSize = 320,
 ): string | null {
+  if (post.thumbnail_url_base) return `${post.thumbnail_url_base}_${size}.webp`;
   const source = post.media_url || post.drive_file_id;
   if (!source || !token || isStorageVideo(post.media_url)) return null;
   const params = new URLSearchParams({ size: String(size), v: sourceVersion(source), token });

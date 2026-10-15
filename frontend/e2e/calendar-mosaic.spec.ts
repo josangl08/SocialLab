@@ -43,12 +43,12 @@ const POSTS = [
 const PORTRAIT_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="160"><rect width="120" height="160" fill="#9a9a9a"/></svg>';
 
-async function mockApi(page: Page, opts: { rescheduleStatus?: number } = {}) {
+async function mockApi(page: Page, opts: { rescheduleStatus?: number; posts?: unknown[] } = {}) {
   const reschedules: { id: string; body: unknown }[] = [];
   await page.route(`${API}/**`, async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
-    if (path === '/api/posts') return route.fulfill({ json: POSTS });
+    if (path === '/api/posts') return route.fulfill({ json: opts.posts ?? POSTS });
     if (/^\/api\/posts\/\d+\/thumbnail$/.test(path)) {
       return route.fulfill({ contentType: 'image/svg+xml', body: PORTRAIT_SVG });
     }
@@ -217,6 +217,27 @@ test.describe('Calendario: mosaico de miniaturas', () => {
     const cell = await box(dayCell(page, index20));
     expect(tile.x).toBeGreaterThanOrEqual(cell.x - 1);
     expect(tile.x).toBeLessThanOrEqual(cell.x + cell.width);
+  });
+
+  test('con miniatura guardada, la imagen sale de Storage sin pedir nada al backend', async ({ page }) => {
+    const storage = 'https://p.supabase.test/storage/v1/object/public/thumbnails/u1';
+    const stored = POSTS.map(p => (p.media_url ? { ...p, thumbnail_url_base: `${storage}/${p.id}/k${p.id}` } : p));
+    await mockApi(page, { posts: stored });
+    const storageRequests: string[] = [];
+    await page.route(`${storage}/**`, route => {
+      storageRequests.push(route.request().url());
+      return route.fulfill({ contentType: 'image/svg+xml', body: PORTRAIT_SVG });
+    });
+    const backendThumbnails: string[] = [];
+    page.on('request', request => {
+      if (/\/api\/posts\/\d+\/thumbnail/.test(request.url())) backendThumbnails.push(request.url());
+    });
+
+    await openCalendar(page);
+
+    await expect(page.getByTestId('mosaic-tile-1').locator('img')).toHaveAttribute('src', `${storage}/1/k1_160.webp`);
+    await expect.poll(() => storageRequests.length).toBeGreaterThan(0);
+    expect(backendThumbnails).toHaveLength(0);
   });
 
   test('soltar en un día pasado no la mueve', async ({ page }) => {

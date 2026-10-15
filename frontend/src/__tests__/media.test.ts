@@ -23,6 +23,18 @@ describe('api/media', () => {
     expect(isStorageVideo('https://s.test/a.mov?x=1')).toBe(true);
   });
 
+  test('con miniatura guardada usa Storage directamente, sin token ni backend', () => {
+    const base = 'https://p.supabase.co/storage/v1/object/public/thumbnails/u1/42/abc';
+    const post = { id: 42, drive_file_id: 'file-1', thumbnail_url_base: base };
+    expect(postThumbnailUrl(post, token, 160)).toBe(`${base}_160.webp`);
+    expect(postThumbnailUrl(post, null, 640)).toBe(`${base}_640.webp`);
+  });
+
+  test('sin miniatura guardada pide el endpoint, que la genera', () => {
+    const url = postThumbnailUrl({ id: 42, drive_file_id: 'file-1', thumbnail_url_base: null }, token, 320)!;
+    expect(url).toContain('/api/posts/42/thumbnail?size=320');
+  });
+
   test('driveThumbnailUrl pide el tamaño indicado', () => {
     expect(driveThumbnailUrl('file-abc', token, 160)).toContain('/api/drive/files/file-abc/image?size=160&token=tok');
   });
