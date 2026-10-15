@@ -17,6 +17,7 @@ Las migraciones deben ejecutarse en orden cronológico:
 35. `035_account_growth.sql` - Columnas follows, unfollows y profile_links_taps en instagram_account_snapshots (AD-9)
 36. `036_posts_bucket_limits.sql` - Bucket `posts`: límite 300 MB y vídeos MP4/MOV (Reels y Stories)
 37. `037_account_timezones.sql` - Opciones de zona horaria por cuenta (primary, secondary, detected) (AD-1)
+38. `038_persistent_thumbnails.sql` - Bucket público `thumbnails`, columna posts.thumbnail_url_base y trigger que la anula al cambiar la imagen
 
 ## Cómo Ejecutar
 
