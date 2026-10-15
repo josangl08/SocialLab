@@ -253,7 +253,7 @@ def test_top_posts_sorted_by_outlier(mock_db):
 
 def _swipe_db(mock_db, rows):
     mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value \
-        .gte.return_value.execute.return_value.data = rows
+        .eq.return_value.gte.return_value.execute.return_value.data = rows
     return AnalyticsService(db_client=mock_db)
 
 
@@ -331,3 +331,17 @@ def test_empirical_scheduling_data_reports_account_timezone(mock_db):
 
     assert result['timezone'] == 'Asia/Kuching'
     assert result['has_data'] is False
+
+
+@pytest.mark.parametrize("run", [
+    lambda s: s._get_posts_from_db(instagram_account_id=1, days=30),
+    lambda s: s._get_median_views_90d(1),
+    lambda s: s.get_swipe_file(1),
+])
+def test_collaborations_are_excluded_from_analytics(mock_db, run):
+    """Las publicaciones en colaboración son de otros autores: no cuentan como propias (AD-10)."""
+    service = AnalyticsService(db_client=mock_db)
+
+    run(service)
+
+    assert "eq('is_collaboration', False)" in str(mock_db.mock_calls)

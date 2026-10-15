@@ -107,7 +107,7 @@ class AnalyticsService:
             'id, post_performance(impressions)'
         ).eq('instagram_account_id', instagram_account_id).eq(
             'status', 'published'
-        ).gte('publication_date', cutoff.isoformat()).execute()
+        ).eq('is_collaboration', False).gte('publication_date', cutoff.isoformat()).execute()
         views = [
             int((p.get('post_performance') or {}).get('impressions') or 0)
             for p in (result.data or []) if p
@@ -147,7 +147,7 @@ class AnalyticsService:
             'post_performance(impressions, reach, shares, reels_skip_rate)'
         ).eq('instagram_account_id', instagram_account_id).eq(
             'status', 'published'
-        ).gte('publication_date', cutoff.isoformat()).execute()
+        ).eq('is_collaboration', False).gte('publication_date', cutoff.isoformat()).execute()
         posts = [p for p in (result.data or []) if p]
 
         def _perf(post: Dict) -> Dict:
@@ -399,7 +399,7 @@ class AnalyticsService:
             'total_interactions, reels_skip_rate)'
         ).eq('instagram_account_id', instagram_account_id).eq(
             'status', 'published'
-        )
+        ).eq('is_collaboration', False)
 
         # Solo aplicar filtro de fecha si NO es "all time"
         if days < 3650:
@@ -549,7 +549,7 @@ class AnalyticsService:
             'id, post_performance(likes, comments, saves, reach, impressions)'
         ).eq('instagram_account_id', instagram_account_id).eq(
             'status', 'published'
-        ).gte('publication_date', previous_start.isoformat()).lt(
+        ).eq('is_collaboration', False).gte('publication_date', previous_start.isoformat()).lt(
             'publication_date', previous_end.isoformat()
         ).execute()
 
@@ -1225,7 +1225,7 @@ class AnalyticsService:
             'total_interactions, reels_skip_rate)'
         ).eq('instagram_account_id', instagram_account_id).eq(
             'status', 'published'
-        ).not_.is_('drive_file_id', 'null')
+        ).eq('is_collaboration', False).not_.is_('drive_file_id', 'null')
 
         if days < 3650:
             cutoff_date = datetime.utcnow() - timedelta(days=days)
