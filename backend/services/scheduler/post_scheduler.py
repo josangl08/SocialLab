@@ -129,6 +129,18 @@ def publish_post_job(post_id: int) -> None:
 
         post_data = post_result.data
 
+        # Defense in depth: never publish a post that is not approved
+        if post_data.get('status') != 'scheduled':
+            supabase.table('scheduled_jobs').update({
+                'status': 'cancelled',
+                'completed_at': datetime.now().isoformat()
+            }).eq('post_id', post_id).execute()
+            logger.warning(
+                f"Post {post_id} is '{post_data.get('status')}', not scheduled "
+                f"— publish job cancelled"
+            )
+            return
+
         # Get Instagram account ID
         instagram_result = supabase.table('instagram_accounts')\
             .select('id, telegram_chat_id, drive_folder_id')\
@@ -517,20 +529,39 @@ class PostScheduler:
         self,
         post_id: int,
         new_scheduled_time: datetime
-    ) -> str:
+    ) -> Optional[str]:
         """
         Reschedules a post to a new time.
+
+        Only approved posts (status='scheduled') get a publish job. Any other
+        post only has its scheduled_at updated, so rescheduling never approves.
 
         Args:
             post_id: ID of the post
             new_scheduled_time: New publication time
 
         Returns:
-            New job ID
+            New job ID, or None if the post is not approved
         """
         logger.info(
             f"Rescheduling post {post_id} to {new_scheduled_time}"
         )
+
+        post = self.supabase.table('posts')\
+            .select('status')\
+            .eq('id', post_id)\
+            .single()\
+            .execute()
+
+        if not post.data or post.data.get('status') != 'scheduled':
+            self.supabase.table('posts').update({
+                'scheduled_at': new_scheduled_time.isoformat()
+            }).eq('id', post_id).execute()
+            logger.info(
+                f"Post {post_id} not approved — updated scheduled_at "
+                f"without publish job"
+            )
+            return None
 
         # Cancel existing schedule
         self.cancel_scheduled_post(post_id)

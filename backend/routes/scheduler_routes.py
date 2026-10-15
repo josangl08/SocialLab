@@ -252,6 +252,15 @@ async def reschedule_post(
             new_scheduled_time=request.new_scheduled_time
         )
 
+        if job_id is None:
+            return {
+                "success": True,
+                "job_id": None,
+                "post_id": post_id,
+                "new_scheduled_time": request.new_scheduled_time,
+                "message": "Scheduled time updated (post not approved — no publish job)"
+            }
+
         return {
             "success": True,
             "job_id": job_id,

@@ -19,7 +19,7 @@ STUDIO_REEL = {
 def test_scheduled_job_publishes_studio_reel_as_reels():
     db = MagicMock()
     db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = \
-        MagicMock(data=STUDIO_REEL)
+        MagicMock(data={**STUDIO_REEL, "status": "scheduled"})
     db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = \
         MagicMock(data={"id": 3, "telegram_chat_id": None, "drive_folder_id": None})
     publisher = MagicMock()
