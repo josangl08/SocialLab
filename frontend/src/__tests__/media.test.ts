@@ -16,6 +16,12 @@ describe('api/media', () => {
     expect(new Set([a, b, c]).size).toBe(3);
   });
 
+  test('la versión no cambia si solo cambia la firma de la URL de Instagram', () => {
+    const a = postThumbnailUrl({ id: 42, media_url: 'https://cdn.test/v/1_n.jpg?oh=a&oe=1' }, token);
+    const b = postThumbnailUrl({ id: 42, media_url: 'https://cdn.test/v/1_n.jpg?oh=b&oe=2' }, token);
+    expect(a).toBe(b);
+  });
+
   test('sin imagen, sin token o vídeo de Storage no hay miniatura', () => {
     expect(postThumbnailUrl({ id: 1 }, token)).toBeNull();
     expect(postThumbnailUrl({ id: 1, drive_file_id: 'f' }, null)).toBeNull();

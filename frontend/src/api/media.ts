@@ -19,8 +19,10 @@ export function isStorageVideo(mediaUrl: string | null | undefined): boolean {
 }
 
 // Hash corto del origen de la imagen: cambia la URL (y salta la caché del navegador)
-// cuando el post cambia de imagen
-function sourceVersion(source: string): string {
+// cuando el post cambia de imagen. Sin la query: la firma de las URLs de Instagram cambia
+// en cada sync aunque la imagen sea la misma
+function sourceVersion(url: string): string {
+  const source = url.split('?')[0];
   let hash = 5381;
   for (let i = 0; i < source.length; i++) hash = ((hash << 5) + hash + source.charCodeAt(i)) | 0;
   return (hash >>> 0).toString(36);
