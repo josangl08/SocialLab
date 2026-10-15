@@ -353,6 +353,16 @@ async def startup_event():
             max_instances=1
         )
         logger.info("✅ Cron job de refresco de insights de nicho configurado (día 1 de cada mes, 06:00)")
+
+        from services.thumbnail_store import cleanup_orphan_thumbnails
+        scheduler.scheduler.add_job(
+            cleanup_orphan_thumbnails,
+            trigger=CronTrigger(hour=4),
+            id='cleanup_orphan_thumbnails',
+            replace_existing=True,
+            max_instances=1
+        )
+        logger.info("✅ Cron job de limpieza de miniaturas huérfanas configurado (diario 04:00)")
     except Exception as e:
         logger.error(f"❌ Error configurando cron job de métricas: {e}")
 

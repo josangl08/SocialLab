@@ -6,7 +6,7 @@ import pytest
 from PIL import Image
 
 from services import media_thumbnails
-from services.media_thumbnails import get_thumbnail
+from services.media_thumbnails import get_thumbnail, render_all_sizes
 
 
 def _image_bytes(fmt: str = "JPEG", size=(3024, 4032)) -> bytes:
@@ -155,11 +155,43 @@ def test_drive_thumbnail_link_size_is_replaced():
     assert session.get.call_args_list[1].args[0] == "https://lh3.googleusercontent.com/abc=s640"
 
 
-def test_post_source_cache_needs_version_and_is_per_user():
-    media_thumbnails.remember_post_source(7, "u1", "v1", ("drive", "file-1"))
-    media_thumbnails.remember_post_source(7, "u1", None, ("drive", "file-x"))
+def test_render_all_sizes_makes_four_webps_with_one_drive_call():
+    drive = MagicMock()
+    drive.get_thumbnail_bytes.return_value = _image_bytes(size=(480, 640))
+    with patch("services.media_thumbnails.get_drive_connector", return_value=drive):
+        sizes = asyncio.run(render_all_sizes("drive", "file-1", user_id="u1"))
 
-    assert media_thumbnails.cached_post_source(7, "u1", "v1") == ("drive", "file-1")
-    assert media_thumbnails.cached_post_source(7, "u1", "v2") is None
-    assert media_thumbnails.cached_post_source(7, "u2", "v1") is None
-    assert media_thumbnails.cached_post_source(7, "u1", None) is None
+    drive.get_thumbnail_bytes.assert_called_once_with("file-1", 640)
+    drive.get_image_bytes.assert_not_called()
+    assert sorted(sizes) == [160, 320, 480, 640]
+    for size, data in sizes.items():
+        img = Image.open(io.BytesIO(data))
+        assert img.format == "WEBP"
+        assert max(img.size) == size
+
+
+def test_render_all_sizes_downloads_storage_original_once_and_weighs_as_today():
+    original = _noisy_jpeg()
+    with patch("services.media_thumbnails.requests.get", return_value=_storage_response(original)) as get:
+        sizes = asyncio.run(render_all_sizes("storage", "https://x.test/a.jpg"))
+
+    get.assert_called_once()
+    for size in (160, 320, 480, 640):  # reducir en cadena no pesa más que reducir desde el original
+        assert len(sizes[size]) <= len(media_thumbnails.to_thumbnail(original, size)) * 1.05
+
+
+def test_render_all_sizes_is_cached_and_shared_with_get_thumbnail():
+    with patch("services.media_thumbnails.requests.get", return_value=_storage_response(_image_bytes())) as get:
+        first = asyncio.run(render_all_sizes("storage", "https://x.test/a.jpg"))
+        second = asyncio.run(render_all_sizes("storage", "https://x.test/a.jpg"))
+        single = asyncio.run(get_thumbnail("storage", "https://x.test/a.jpg", 320))
+
+    assert get.call_count == 1
+    assert first == second
+    assert single == first[320]
+
+
+def test_render_all_sizes_of_storage_video_is_none():
+    with patch("services.media_thumbnails.requests.get") as get:
+        assert asyncio.run(render_all_sizes("storage", "https://x.test/reel.mp4")) is None
+    get.assert_not_called()

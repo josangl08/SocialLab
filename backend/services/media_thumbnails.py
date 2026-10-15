@@ -3,7 +3,8 @@ Miniaturas de las imágenes de los posts para el calendario y el planner.
 
 Drive: miniatura que genera Google (sirve también para vídeos); si no hay, el original
 redimensionado. Storage: la URL pública redimensionada. Salida siempre WebP (~30 % menos
-que JPEG con la misma calidad visual), con caché LRU en memoria. Las descargas van en hilos para no bloquear el event loop.
+que JPEG con la misma calidad visual), con caché LRU en memoria. Para los posts se generan
+los 4 tamaños de una descarga (`render_all_sizes`) y se guardan en Storage (thumbnail_store). Las descargas van en hilos para no bloquear el event loop.
 """
 
 import asyncio
@@ -105,31 +106,66 @@ async def get_thumbnail(
     return data
 
 
-# Origen de la imagen de cada post ya comprobado (propiedad por RLS). La clave incluye la
-# versión `v` que manda el cliente, que cambia cuando cambia la imagen del post.
-_post_sources: "OrderedDict[Tuple[int, str, str], Tuple[ThumbnailSource, str]]" = OrderedDict()
+ALL_SIZES = sorted((int(size) for size in ThumbnailSize), reverse=True)  # 640 → 160
 
 
-def cached_post_source(post_id: int, user_id: str, version: Optional[str]) -> Optional[Tuple[ThumbnailSource, str]]:
-    if not version:
+def _render_all(data: bytes) -> dict[int, bytes]:
+    """Los 4 tamaños reduciendo desde la misma imagen abierta (de mayor a menor)."""
+    img = open_image(data)
+    sizes: dict[int, bytes] = {}
+    for size in ALL_SIZES:
+        img.thumbnail((size, size), Image.LANCZOS)
+        out = io.BytesIO()
+        img.save(out, format="WEBP", quality=THUMBNAIL_QUALITY, method=6)
+        sizes[size] = out.getvalue()
+    return sizes
+
+
+def _drive_all_sizes(user_id: str, file_id: str) -> Optional[dict[int, bytes]]:
+    drive = get_drive_connector(user_id)
+    data = drive.get_thumbnail_bytes(file_id, max(ALL_SIZES))
+    if data is None:
+        original, mime_type = drive.get_image_bytes(file_id)
+        if not mime_type.startswith("image/"):
+            return None
+        data = original
+    return _render_all(data)
+
+
+def _storage_all_sizes(media_url: str) -> Optional[dict[int, bytes]]:
+    if is_storage_video(media_url):
         return None
-    key = (post_id, user_id, version)
-    found = _post_sources.get(key)
-    if found:
-        _post_sources.move_to_end(key)
-    return found
+    response = requests.get(media_url, timeout=30)
+    response.raise_for_status()
+    return _render_all(response.content)
 
 
-def remember_post_source(
-    post_id: int, user_id: str, version: Optional[str], source: Tuple[ThumbnailSource, str]
-) -> None:
-    if not version:
-        return
-    _post_sources[(post_id, user_id, version)] = source
-    while len(_post_sources) > CACHE_MAX_ENTRIES:
-        _post_sources.popitem(last=False)
+async def render_all_sizes(
+    source: ThumbnailSource, source_id: str, user_id: Optional[str] = None
+) -> Optional[dict[int, bytes]]:
+    """Los 4 tamaños WebP con una sola descarga del origen (Drive a 640, Storage original).
+    Quedan en la LRU: si no se pueden guardar en Storage, no se vuelve a descargar.
+    None si no hay imagen previsualizable; lanza excepción si Drive o Storage fallan."""
+    if source == "drive" and not user_id:
+        raise ValueError("user_id es obligatorio para miniaturas de Drive")
+    owner = user_id if source == "drive" else None
+    cached = {size: _cache.get((source, source_id, size, owner)) for size in ALL_SIZES}
+    if all(data is not None for data in cached.values()):
+        return cached  # type: ignore[return-value]
+
+    if source == "drive":
+        sizes = await asyncio.to_thread(_drive_all_sizes, user_id, source_id)
+    else:
+        sizes = await asyncio.to_thread(_storage_all_sizes, source_id)
+
+    if sizes is not None:
+        for size, data in sizes.items():
+            _cache[(source, source_id, size, owner)] = data
+            _cache.move_to_end((source, source_id, size, owner))
+        while len(_cache) > CACHE_MAX_ENTRIES:
+            _cache.popitem(last=False)
+    return sizes
 
 
 def clear_cache() -> None:
     _cache.clear()
-    _post_sources.clear()

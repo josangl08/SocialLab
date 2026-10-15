@@ -38,6 +38,7 @@ class Post(PostBase):
     publication_date: Optional[datetime] = None
     is_ai_generated: Optional[bool] = None
     drive_file_id: Optional[str] = None
+    thumbnail_url_base: Optional[str] = None
     content_format: Optional[str] = None
     content_structure: Optional[dict] = None
     quality_report: Optional[dict] = None

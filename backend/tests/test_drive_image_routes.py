@@ -1,6 +1,6 @@
 import asyncio
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -115,54 +115,76 @@ def test_post_thumbnail_without_media_is_404(user_db):
     assert client.get("/api/posts/42/thumbnail?token=t").status_code == 404
 
 
+SIZES = {640: b"p640", 480: b"p480", 320: b"p320", 160: b"p160"}
+BASE = "https://p.supabase.co/storage/v1/object/public/thumbnails/u/42/abc"
+
+
+def _render_and_save(sizes=SIZES, save_error=None):
+    """Simula la generación (render_all_sizes) y el guardado en Storage (save_thumbnails)."""
+    render = patch("routes.posts_routes.render_all_sizes", AsyncMock(return_value=sizes))
+    save = patch("routes.posts_routes.save_thumbnails", AsyncMock(return_value=BASE, side_effect=save_error))
+    return render, save
+
+
+def test_post_thumbnail_already_stored_redirects_to_storage(user_db):
+    _post_rows(user_db, [{"user_id": USER_ID, "media_url": None, "drive_file_id": "f1", "thumbnail_url_base": BASE}])
+    render, save = _render_and_save()
+    with render as render_mock, save:
+        response = client.get("/api/posts/42/thumbnail?token=t&size=160", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == f"{BASE}_160.webp"
+    assert response.headers["cache-control"] == "private, max-age=86400"
+    render_mock.assert_not_called()
+
+
+def test_post_thumbnail_first_request_saves_and_returns_requested_size(user_db):
+    _post_rows(user_db, [{"user_id": USER_ID, "media_url": None, "drive_file_id": "f1", "thumbnail_url_base": None}])
+    render, save = _render_and_save()
+    with render as render_mock, save as save_mock:
+        response = client.get("/api/posts/42/thumbnail?token=t&size=480")
+
+    assert response.status_code == 200
+    assert response.content == b"p480"
+    assert response.headers["content-type"] == "image/webp"
+    assert response.headers["cache-control"] == "private, max-age=86400"
+    render_mock.assert_awaited_once_with("drive", "f1", user_id=USER_ID)
+    save_mock.assert_awaited_once_with(USER_ID, 42, SIZES, {"media_url": None, "drive_file_id": "f1"})
+
+
 def test_post_thumbnail_prefers_storage_over_drive(user_db):
     _post_rows(user_db, [{"user_id": USER_ID, "media_url": "https://x.test/a.jpg", "drive_file_id": "f1"}])
-    with patch("routes.posts_routes.get_thumbnail", return_value=b"jpeg") as get_thumbnail:
-        response = client.get("/api/posts/42/thumbnail?token=t&v=ab12")
+    render, save = _render_and_save()
+    with render as render_mock, save:
+        assert client.get("/api/posts/42/thumbnail?token=t").content == b"p320"
 
-    assert response.status_code == 200
-    assert response.headers["cache-control"] == "private, max-age=86400"
-    get_thumbnail.assert_called_once_with("storage", "https://x.test/a.jpg", 320, user_id=USER_ID)
+    render_mock.assert_awaited_once_with("storage", "https://x.test/a.jpg", user_id=USER_ID)
 
 
-def test_post_thumbnail_from_drive(user_db):
+def test_post_thumbnail_upload_failure_still_returns_image(user_db):
     _post_rows(user_db, [{"user_id": USER_ID, "media_url": None, "drive_file_id": "f1"}])
-    with patch("routes.posts_routes.get_thumbnail", return_value=b"jpeg") as get_thumbnail:
-        response = client.get("/api/posts/42/thumbnail?token=t&size=640")
+    render, save = _render_and_save(save_error=Exception("Storage caído"))
+    with render, save:
+        response = client.get("/api/posts/42/thumbnail?token=t&size=160")
 
     assert response.status_code == 200
-    get_thumbnail.assert_called_once_with("drive", "f1", 640, user_id=USER_ID)
+    assert response.content == b"p160"
 
 
 def test_post_thumbnail_storage_video_is_404(user_db):
     _post_rows(user_db, [{"user_id": USER_ID, "media_url": "https://x.test/reel.mp4", "drive_file_id": None}])
-    with patch("services.media_thumbnails.requests.get") as get:
+    with patch("services.media_thumbnails.requests.get") as get, \
+            patch("routes.posts_routes.save_thumbnails", AsyncMock()) as save:
         assert client.get("/api/posts/42/thumbnail?token=t").status_code == 404
     get.assert_not_called()
+    save.assert_not_called()
 
 
 def test_post_thumbnail_source_failure_is_502(user_db):
     _post_rows(user_db, [{"user_id": USER_ID, "media_url": None, "drive_file_id": "f1"}])
-    with patch("routes.posts_routes.get_thumbnail", side_effect=Exception("Drive caído")):
+    with patch("routes.posts_routes.render_all_sizes", AsyncMock(side_effect=Exception("Drive caído"))):
         assert client.get("/api/posts/42/thumbnail?token=t").status_code == 502
 
 
 def test_post_thumbnail_invalid_size_is_422(user_db):
     assert client.get("/api/posts/42/thumbnail?token=t&size=50").status_code == 422
-
-
-def test_post_thumbnail_second_request_with_same_version_skips_db(user_db):
-    _post_rows(user_db, [{"user_id": USER_ID, "media_url": None, "drive_file_id": "f1"}])
-    with patch("routes.posts_routes.get_thumbnail", return_value=b"img"):
-        assert client.get("/api/posts/42/thumbnail?token=t&v=ab12").status_code == 200
-        assert client.get("/api/posts/42/thumbnail?token=t&v=ab12").status_code == 200
-        assert client.get("/api/posts/42/thumbnail?token=t&v=cd34").status_code == 200
-
-    assert user_db.table.call_count == 2  # v nueva → vuelve a consultar
-
-
-def test_post_thumbnail_accepts_480(user_db):
-    _post_rows(user_db, [{"user_id": USER_ID, "media_url": None, "drive_file_id": "f1"}])
-    with patch("routes.posts_routes.get_thumbnail", return_value=b"img") as get_thumbnail:
-        assert client.get("/api/posts/42/thumbnail?token=t&size=480").status_code == 200
-    assert get_thumbnail.call_args.args[2] == 480
