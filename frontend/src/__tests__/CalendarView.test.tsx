@@ -213,6 +213,19 @@ describe('CalendarView Component', () => {
     expect(withImage).toHaveTextContent('Second post on the same day');
   });
 
+  test('week view: clicking a post opens its detail window, not the viewer', async () => {
+    render(<CalendarView />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-calendar')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('btn-view-week'));
+    fireEvent.click(screen.getByTestId('event-4'));
+
+    expect(screen.queryByTestId('media-lightbox')).not.toBeInTheDocument();
+    expect(document.querySelector('.pdm-backdrop')).toHaveTextContent('Second post on the same day');
+  });
+
   test('onEventDrop calls reschedule API endpoint (week view)', async () => {
     render(<CalendarView />);
 

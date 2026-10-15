@@ -37,6 +37,15 @@ describe('MediaLightbox', () => {
     expect(screen.getByText('2 / 3')).toBeInTheDocument();
   });
 
+  test('muestra la fecha y hora programadas en la zona de la cuenta', () => {
+    render(
+      <MediaLightbox posts={posts} startIndex={0} token="tok" onClose={vi.fn()} onDetails={vi.fn()}
+        zonesFor={() => ({ primary: 'Europe/Madrid' })} />
+    );
+    // 2030-06-27T12:30Z = jueves 27, 14:30 en Madrid
+    expect(screen.getByTestId('lightbox-date')).toHaveTextContent(/27 · 14:30/);
+  });
+
   test('navega con los botones y con el teclado, en bucle', () => {
     setup(0);
     fireEvent.click(screen.getByLabelText('Siguiente'));
