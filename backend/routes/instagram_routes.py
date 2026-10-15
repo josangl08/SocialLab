@@ -254,7 +254,7 @@ def instagram_sync(
         instagram_user_id = ig_account_data['instagram_business_account']['id']
 
         all_media = []
-        next_url = f"https://graph.facebook.com/v19.0/{instagram_user_id}/media?fields=id,caption,media_type,media_url,timestamp,permalink,media_product_type&limit=100&access_token={access_token}"
+        next_url = f"https://graph.facebook.com/v19.0/{instagram_user_id}/media?fields=id,caption,media_type,media_url,thumbnail_url,timestamp,permalink,media_product_type&limit=100&access_token={access_token}"
 
         logger.info("📦 Obteniendo posts de Instagram API con paginación...")
         page_count = 0
@@ -299,6 +299,7 @@ def instagram_sync(
                 'instagram_post_id': item['id'],
                 'content': item.get('caption', ''),
                 'media_url': item.get('media_url'),
+                'media_thumbnail_url': item.get('thumbnail_url'),
                 'post_type': post_type,
                 'status': 'published',
                 'publication_date': item.get('timestamp'),

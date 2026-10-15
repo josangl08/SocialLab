@@ -61,7 +61,8 @@ const MediaLightbox: React.FC<MediaLightboxProps> = ({ posts, startIndex, token,
   if (!post) return null;
 
   const original = postOriginalUrl(post, token);
-  const src = fallback === 0 ? original : fallback === 1 ? postThumbnailUrl(post, token, 640) : null;
+  // Sin original (vídeo de Instagram con audio con copyright) se ve su portada
+  const src = fallback === 0 && original ? original : fallback <= 1 ? postThumbnailUrl(post, token, 640) : null;
   const format = post.content_format ?? post.post_type;
   const date = postDate(post);
 

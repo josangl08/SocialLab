@@ -29,6 +29,14 @@ describe('api/media', () => {
     expect(isStorageVideo('https://s.test/a.mov?x=1')).toBe(true);
   });
 
+  test('un vídeo con portada de Instagram tiene miniatura, también sin media_url', () => {
+    const cover = 'https://cdn.test/cover.jpg';
+    expect(postThumbnailUrl({ id: 1, media_url: 'https://cdn.test/reel.mp4', media_thumbnail_url: cover }, token))
+      .toContain('/api/posts/1/thumbnail');
+    expect(postThumbnailUrl({ id: 2, media_url: null, media_thumbnail_url: cover }, token))
+      .toContain('/api/posts/2/thumbnail');
+  });
+
   test('con miniatura guardada usa Storage directamente, sin token ni backend', () => {
     const base = 'https://p.supabase.co/storage/v1/object/public/thumbnails/u1/42/abc';
     const post = { id: 42, drive_file_id: 'file-1', thumbnail_url_base: base };

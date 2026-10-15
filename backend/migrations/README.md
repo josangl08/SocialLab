@@ -19,6 +19,7 @@ Las migraciones deben ejecutarse en orden cronológico:
 37. `037_account_timezones.sql` - Opciones de zona horaria por cuenta (primary, secondary, detected) (AD-1)
 38. `038_persistent_thumbnails.sql` - Bucket público `thumbnails`, columna posts.thumbnail_url_base y trigger que la anula al cambiar la imagen
 39. `039_thumbnail_ignore_url_signature.sql` - El trigger de miniaturas ignora la query (firma) de media_url: el sync de Instagram ya no las invalida
+40. `040_post_media_thumbnail_url.sql` - Columna posts.media_thumbnail_url: portada de los vídeos/Reels de Instagram
 
 ## Cómo Ejecutar
 

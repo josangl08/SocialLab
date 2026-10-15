@@ -80,6 +80,25 @@ describe('DayMosaic', () => {
     expect(screen.getByTestId('day-mosaic')).toHaveClass('sl-mosaic--2');
   });
 
+  test('un Reel de Instagram muestra su portada; sin portada, el icono de vídeo', () => {
+    const { container } = render(
+      <DayMosaic
+        items={[
+          item(1, { drive_file_id: null, media_url: 'https://cdn.test/r.mp4?oe=1', media_thumbnail_url: 'https://cdn.test/r.jpg', post_type: 'VIDEO' }),
+          item(2, { drive_file_id: null, media_url: null, media_thumbnail_url: 'https://cdn.test/c.jpg', post_type: 'VIDEO' }),
+          item(3, { drive_file_id: null, media_url: 'https://cdn.test/s.mp4', post_type: 'VIDEO' }),
+        ]}
+        token="tok"
+        onOpen={() => {}}
+      />
+    );
+    const srcs = Array.from(container.querySelectorAll('img')).map(img => img.getAttribute('src'));
+    expect(srcs).toHaveLength(2);
+    expect(srcs[0]).toContain('/api/posts/1/thumbnail?size=160');
+    expect(srcs[1]).toContain('/api/posts/2/thumbnail?size=160');
+    expect(screen.getByTestId('mosaic-placeholder-3')).toHaveClass('bi-camera-video');
+  });
+
   test('si la miniatura falla se muestra el icono', () => {
     const { container } = render(<DayMosaic items={items(1)} token="tok" onOpen={() => {}} />);
     fireEvent.error(container.querySelector('img')!);

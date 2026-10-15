@@ -23,6 +23,7 @@ from services.media_thumbnails import (
     IMAGE_CACHE_HEADERS,
     THUMBNAIL_MEDIA_TYPE,
     ThumbnailSize,
+    is_storage_video,
     render_all_sizes,
 )
 from services.thumbnail_store import generate_once, save_in_background
@@ -364,7 +365,7 @@ async def get_post_thumbnail(
     y los guarda después de responder."""
     user_id = str(current_user.id)
     result = await asyncio.to_thread(
-        lambda: supabase.table('posts').select('user_id, media_url, drive_file_id, thumbnail_url_base')
+        lambda: supabase.table('posts').select('user_id, media_url, drive_file_id, media_thumbnail_url, thumbnail_url_base')
         .eq('id', post_id).limit(1).execute()
     )
     if not result.data or str(result.data[0]['user_id']) != user_id:
@@ -377,8 +378,12 @@ async def get_post_thumbnail(
     if post.get('thumbnail_url_base'):
         return stored(post['thumbnail_url_base'])
 
-    # Misma prioridad que al publicar: media_url antes que drive_file_id
-    if post.get('media_url'):
+    # Misma prioridad que al publicar: media_url antes que drive_file_id. Un vídeo de
+    # Instagram (o uno sin media_url por copyright) usa su portada
+    media_url = post.get('media_url')
+    if post.get('media_thumbnail_url') and (not media_url or is_storage_video(media_url)):
+        source, source_id = "storage", post['media_thumbnail_url']
+    elif media_url:
         source, source_id = "storage", post['media_url']
     elif post.get('drive_file_id'):
         source, source_id = "drive", post['drive_file_id']

@@ -389,7 +389,7 @@ class InstagramInsightsService:
     def get_media_list(self, limit: int = 25) -> List[Dict]:
         endpoint = f"{self.instagram_account_id}/media"
         params = {
-            'fields': 'id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count',
+            'fields': 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count',
             'limit': min(limit, 100)
         }
         data = self._make_request(endpoint, params)
@@ -438,7 +438,7 @@ class InstagramInsightsService:
         all_media = []
         endpoint = f"{self.instagram_account_id}/media"
         params = {
-            'fields': 'id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count',
+            'fields': 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count',
             'limit': 100
         }
         while endpoint:
@@ -468,6 +468,7 @@ class InstagramInsightsService:
                 'instagram_post_id': post_data['id'],
                 'content': post_data.get('caption', ''),
                 'media_url': post_data.get('media_url'),
+                'media_thumbnail_url': post_data.get('thumbnail_url'),
                 'post_type': post_data.get('media_type'),
                 'publication_date': post_data.get('timestamp'),
                 'status': 'published',

@@ -240,6 +240,19 @@ test.describe('Calendario: mosaico de miniaturas', () => {
     expect(backendThumbnails).toHaveLength(0);
   });
 
+  test('un Reel de Instagram muestra su portada en vez del icono', async ({ page }) => {
+    const reel = post(30, 20, 18, 'published', {
+      media_url: null, media_thumbnail_url: 'https://cdn.test/cover.jpg', post_type: 'VIDEO', content_format: null,
+    });
+    await mockApi(page, { posts: [...POSTS, reel] });
+
+    await openCalendar(page);
+
+    const tile = page.getByTestId('mosaic-tile-30');
+    await expect(tile.locator('img')).toHaveAttribute('src', /\/api\/posts\/30\/thumbnail\?size=160/);
+    await expect(page.getByTestId('mosaic-placeholder-30')).toHaveCount(0);
+  });
+
   test('soltar en un día pasado no la mueve', async ({ page }) => {
     const reschedules = await mockApi(page);
     await openCalendar(page);

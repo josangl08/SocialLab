@@ -10,6 +10,7 @@ export interface PostMediaRef {
   media_url?: string | null;
   drive_file_id?: string | null;
   thumbnail_url_base?: string | null;
+  media_thumbnail_url?: string | null;
 }
 
 const VIDEO_URL = /\.(mp4|mov|webm|ogg|m4v)(\?.*)?$/i;
@@ -36,8 +37,9 @@ export function postThumbnailUrl(
   size: ThumbnailSize = 320,
 ): string | null {
   if (post.thumbnail_url_base) return `${post.thumbnail_url_base}_${size}.webp`;
-  const source = post.media_url || post.drive_file_id;
-  if (!source || !token || isStorageVideo(post.media_url)) return null;
+  // Un vídeo solo tiene miniatura si Instagram dio su portada
+  const source = post.media_url || post.drive_file_id || post.media_thumbnail_url;
+  if (!source || !token || (isStorageVideo(post.media_url) && !post.media_thumbnail_url)) return null;
   const params = new URLSearchParams({ size: String(size), v: sourceVersion(source), token });
   return apiClient.getUrl(`/api/posts/${post.id}/thumbnail?${params}`);
 }

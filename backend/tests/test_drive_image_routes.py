@@ -180,6 +180,42 @@ def test_post_thumbnail_storage_video_is_404(user_db):
     save.assert_not_called()
 
 
+COVER = "https://cdn.test/v/cover.jpg?oe=1"
+
+
+def test_post_thumbnail_of_instagram_video_uses_its_cover(user_db):
+    _post_rows(user_db, [{"user_id": USER_ID, "media_url": "https://cdn.test/v/reel.mp4?oe=1",
+                          "drive_file_id": None, "media_thumbnail_url": COVER}])
+    render, save = _render_and_save()
+    with render as render_mock, save as save_mock:
+        assert client.get("/api/posts/42/thumbnail?token=t&size=160").content == b"p160"
+
+    render_mock.assert_awaited_once_with("storage", COVER, user_id=USER_ID)
+    save_mock.assert_awaited_once_with(
+        USER_ID, 42, SIZES, {"media_url": "https://cdn.test/v/reel.mp4?oe=1", "drive_file_id": None}
+    )
+
+
+def test_post_thumbnail_of_video_without_media_url_uses_its_cover(user_db):
+    # Instagram no da media_url a los vídeos con audio con copyright
+    _post_rows(user_db, [{"user_id": USER_ID, "media_url": None, "drive_file_id": None, "media_thumbnail_url": COVER}])
+    render, save = _render_and_save()
+    with render as render_mock, save:
+        assert client.get("/api/posts/42/thumbnail?token=t").status_code == 200
+
+    render_mock.assert_awaited_once_with("storage", COVER, user_id=USER_ID)
+
+
+def test_post_thumbnail_of_image_ignores_cover(user_db):
+    _post_rows(user_db, [{"user_id": USER_ID, "media_url": "https://x.test/a.jpg", "drive_file_id": None,
+                          "media_thumbnail_url": COVER}])
+    render, save = _render_and_save()
+    with render as render_mock, save:
+        client.get("/api/posts/42/thumbnail?token=t")
+
+    render_mock.assert_awaited_once_with("storage", "https://x.test/a.jpg", user_id=USER_ID)
+
+
 def test_post_thumbnail_source_failure_is_502(user_db):
     _post_rows(user_db, [{"user_id": USER_ID, "media_url": None, "drive_file_id": "f1"}])
     with patch("routes.posts_routes.render_all_sizes", AsyncMock(side_effect=Exception("Drive caído"))):

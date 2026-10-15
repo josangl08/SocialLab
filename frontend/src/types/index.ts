@@ -11,6 +11,7 @@ export interface Post {
   is_ai_generated?: boolean | null;
   drive_file_id?: string | null;
   thumbnail_url_base?: string | null; // miniaturas guardadas en Storage: añadir `_{size}.webp`
+  media_thumbnail_url?: string | null; // portada de los vídeos de Instagram
   instagram_account_id?: number | null;
   content_format?: 'post' | 'reel' | 'carousel' | 'story' | null;
   content_structure?: ContentStructure | null;

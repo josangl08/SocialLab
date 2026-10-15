@@ -22,14 +22,17 @@ export const POST_DRAG_TYPE = 'application/x-sociallab-post';
 
 const MAX_TILES = 4;
 
+// El sync de métricas guarda el media_type de Instagram (VIDEO, CAROUSEL_ALBUM) en post_type
 const FORMAT_ICONS: Record<string, string> = {
-  reel:     'bi-camera-video',
-  carousel: 'bi-collection',
-  story:    'bi-layers',
+  reel:           'bi-camera-video',
+  video:          'bi-camera-video',
+  carousel:       'bi-collection',
+  carousel_album: 'bi-collection',
+  story:          'bi-layers',
 };
 
 export function formatIcon(post: Post): string {
-  return FORMAT_ICONS[post.content_format ?? post.post_type] ?? 'bi-image';
+  return FORMAT_ICONS[(post.content_format ?? post.post_type ?? '').toLowerCase()] ?? 'bi-image';
 }
 
 function layoutClass(count: number): string {
