@@ -40,6 +40,7 @@ class Post(PostBase):
     drive_file_id: Optional[str] = None
     thumbnail_url_base: Optional[str] = None
     media_thumbnail_url: Optional[str] = None
+    is_collaboration: bool = False
     content_format: Optional[str] = None
     content_structure: Optional[dict] = None
     quality_report: Optional[dict] = None

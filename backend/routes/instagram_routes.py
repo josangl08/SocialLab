@@ -12,6 +12,7 @@ from database.supabase_client import get_supabase_client
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import User, InstagramAccountConfigUpdate
 from auth.dependencies import get_current_user, get_current_user_from_query_token
+from services.instagram_insights import InstagramInsightsService
 from utils.encryption import encrypt_token, decrypt_token
 from utils.oauth_state import generate_state_token, verify_state_token
 
@@ -303,9 +304,14 @@ def instagram_sync(
                 'post_type': post_type,
                 'status': 'published',
                 'publication_date': item.get('timestamp'),
-                'instagram_account_id': account_id
+                'instagram_account_id': account_id,
+                'is_collaboration': False,
             }
             posts_to_upsert.append(post_data)
+        posts_to_upsert.extend(
+            InstagramInsightsService(access_token, instagram_user_id)
+            .get_collaboration_post_rows(current_user.id, account_id)
+        )
 
         admin_supabase.table('posts').upsert(
             posts_to_upsert,

@@ -453,6 +453,37 @@ class InstagramInsightsService:
                 break
         return all_media
 
+    def get_collaboration_post_rows(self, user_id: str, instagram_account_id_db: int) -> List[Dict]:
+        """Filas de `posts` para la media de otros autores en la que la cuenta es colaboradora
+        aceptada. Si Instagram falla devuelve lo obtenido hasta entonces: no rompe el sync."""
+        media: List[Dict] = []
+        endpoint = f"{self.instagram_account_id}/collaborative_media"
+        params = {
+            'fields': 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp',
+            'limit': 100
+        }
+        while endpoint:
+            try:
+                data = self._make_request(endpoint, params)
+            except Exception as e:
+                logger.error(f"❌ Error obteniendo colaboraciones: {e}")
+                break
+            media.extend(data.get('data', []))
+            endpoint = data.get('paging', {}).get('next')
+            params = {}
+        return [{
+            'user_id': user_id,
+            'instagram_account_id': instagram_account_id_db,
+            'instagram_post_id': item['id'],
+            'content': item.get('caption', ''),
+            'media_url': item.get('media_url'),
+            'media_thumbnail_url': item.get('thumbnail_url'),
+            'post_type': item.get('media_type'),
+            'publication_date': item.get('timestamp'),
+            'status': 'published',
+            'is_collaboration': True,
+        } for item in media]
+
     def sync_posts_to_database(self, db_client, user_id: str, instagram_account_id_db: int):
         logger.info("🚀 Iniciando sincronización de posts...")
         all_posts_from_api = self._get_all_media_paginated()
@@ -472,7 +503,10 @@ class InstagramInsightsService:
                 'post_type': post_data.get('media_type'),
                 'publication_date': post_data.get('timestamp'),
                 'status': 'published',
+                'is_collaboration': False,
             })
+        # Las métricas de abajo solo recorren la media propia (all_posts_from_api)
+        posts_to_upsert.extend(self.get_collaboration_post_rows(user_id, instagram_account_id_db))
 
         BATCH_SIZE = 50
         MAX_RETRIES = 3
