@@ -61,6 +61,13 @@ class TestCaptionLinter:
         warning_codes = [w["code"] for w in result.get("warnings", [])]
         assert "HASHTAGS_OVER_LIMIT" in warning_codes
 
+    def test_hashtag_over_limit_message_lists_extras(self):
+        caption = "Post con muchos hashtags #uno #dos #tres #cuatro #cinco #seis #siete #ocho"
+        result = lint_caption(caption)
+        warning = next(w for w in result["warnings"] if w["code"] == "HASHTAGS_OVER_LIMIT")
+        assert result["hashtags_over_limit"] == ["#seis", "#siete", "#ocho"]
+        assert warning["message"] == "8 / 5 máx. Sobran: #seis #siete #ocho"
+
     def test_enforce_hashtag_limit_reduces_to_max_5(self):
         caption = "Texto del post #uno #dos #tres #cuatro #cinco #seis #siete #ocho"
         cleaned = enforce_hashtag_limit(caption, max_hashtags=5)

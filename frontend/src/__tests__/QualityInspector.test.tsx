@@ -79,9 +79,9 @@ describe('QualityInspector Component', () => {
       visible_text: 'Descubre este increíble contenido.',
       visible_length: 34,
       truncated: false,
-      hashtag_count: 7,
+      hashtag_count: 8,
       hashtag_limit: 5,
-      hashtags_over_limit: ['#seis', '#siete'],
+      hashtags_over_limit: ['#seis', '#siete', '#ocho'],
       keywords_missing_in_visible: [],
       slop: {
         score: 30,
@@ -96,7 +96,7 @@ describe('QualityInspector Component', () => {
         dealbreakers: ['Stop scrolling'],
       },
       warnings: [
-        { code: 'HASHTAGS_OVER_LIMIT', message: 'Se superó el límite de 5 hashtags' },
+        { code: 'HASHTAGS_OVER_LIMIT', message: '8 / 5 máx. Sobran: #seis #siete #ocho' },
       ],
     };
 
@@ -109,11 +109,11 @@ describe('QualityInspector Component', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('hashtag-count')).toHaveTextContent('7/5');
+      expect(screen.getByTestId('hashtag-count')).toHaveTextContent('8/5');
       expect(screen.getByText('Exceso')).toBeInTheDocument();
       expect(screen.getByText(/delve into/)).toBeInTheDocument();
       expect(screen.getByText(/Stop scrolling/)).toBeInTheDocument();
-      expect(screen.getByText('Se superó el límite de 5 hashtags')).toBeInTheDocument();
+      expect(screen.getByText('8 / 5 máx. Sobran: #seis #siete #ocho')).toBeInTheDocument();
     });
   });
 
