@@ -11,9 +11,9 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   return (
     <div className="d-flex main-layout-container">
       <Sidebar />
-      <div className="content-area p-4 flex-grow-1">
+      <main className="content-area p-4 flex-grow-1">
         {children}
-      </div>
+      </main>
     </div>
   );
 };

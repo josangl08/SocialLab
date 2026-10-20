@@ -24,7 +24,7 @@ const Sidebar: React.FC = () => {
   ];
 
   return (
-    <div className="sidebar d-flex flex-column p-3 text-white bg-dark">
+    <nav className="sidebar d-flex flex-column p-3 text-white bg-dark" aria-label="Navegación principal">
       <Link
         to="/dashboard"
         className="d-flex align-items-center mb-2 mb-md-0 me-md-auto text-white text-decoration-none"
@@ -62,7 +62,7 @@ const Sidebar: React.FC = () => {
           <span>Cerrar Sesión</span>
         </button>
       </div>
-    </div>
+    </nav>
   );
 };
 
