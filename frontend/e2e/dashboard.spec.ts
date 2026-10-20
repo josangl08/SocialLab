@@ -3,6 +3,7 @@
  */
 
 import { test, expect } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 import { setupAuthenticatedState } from './utils/auth-helpers';
 
 test.describe('Dashboard', () => {
@@ -55,19 +56,10 @@ test.describe('Dashboard', () => {
   });
 
   test('should be accessible', async ({ page }) => {
-    const { injectAxe, checkA11y } = await import('@axe-core/playwright');
-
     await page.goto('/dashboard');
 
-    // Inject axe-core
-    await injectAxe(page);
-
     // Run accessibility checks
-    await checkA11y(page, undefined, {
-      detailedReport: true,
-      detailedReportOptions: {
-        html: true
-      }
-    });
+    const results = await new AxeBuilder({ page }).analyze();
+    expect(results.violations).toEqual([]);
   });
 });
