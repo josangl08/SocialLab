@@ -62,7 +62,6 @@ const PostList: React.FC<PostListProps> = ({ refresh, accounts }) => {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [alert, setAlert] = useState<{ text: string; ok: boolean } | null>(null);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
 
@@ -78,18 +77,6 @@ const PostList: React.FC<PostListProps> = ({ refresh, accounts }) => {
   };
 
   useEffect(() => { fetchPosts(); }, [token, refresh]);
-
-  const handleDelete = async (postId: number) => {
-    if (!window.confirm('¿Eliminar esta publicación?')) return;
-    setAlert(null);
-    try {
-      await apiClient.delete(`/api/posts/${postId}`);
-      setAlert({ text: 'Publicación eliminada.', ok: true });
-      fetchPosts();
-    } catch (err) {
-      setAlert({ text: 'Error: ' + (err instanceof ApiError ? err.detail : 'Error de red o servidor'), ok: false });
-    }
-  };
 
   if (loading) return (
     <div className="sl-post-list">
@@ -118,13 +105,6 @@ const PostList: React.FC<PostListProps> = ({ refresh, accounts }) => {
 
   return (
     <div className="sl-post-list">
-      {alert && (
-        <div className={`sl-post-alert ${alert.ok ? 'sl-post-alert-success' : 'sl-post-alert-error'}`}>
-          <i className={`bi ${alert.ok ? 'bi-check-circle' : 'bi-exclamation-circle'}`}></i>
-          {alert.text}
-        </div>
-      )}
-
       {posts.length === 0 ? (
         <div className="sl-post-empty">
           <i className="bi bi-inbox"></i>

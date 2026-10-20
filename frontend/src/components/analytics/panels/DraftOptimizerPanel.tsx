@@ -45,7 +45,7 @@ export const DraftOptimizerPanel: React.FC<DraftOptimizerPanelProps> = ({
   // 2. Calculate most common format (highest count)
   let mostCommonFormat = 'Reel';
   let maxCount = -1;
-  Object.entries(byContentType).forEach(([type, stats]) => {
+  Object.values(byContentType).forEach(stats => {
     if (stats.count > maxCount) {
       maxCount = stats.count;
       mostCommonFormat = stats.type_name;

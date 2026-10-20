@@ -117,10 +117,10 @@ const HASHTAG_OPTS = [
   { value: 'maximum'  as const, label: 'Máximos',   desc: '11–15' },
 ];
 
-const CAPTION_VOICE_OPTS = [
-  { value: null           as const, label: 'Automático', desc: 'hereda de la cuenta' },
-  { value: 'personal'     as const, label: 'Personal',    desc: 'corto, emojis' },
-  { value: 'professional' as const, label: 'Profesional', desc: 'semiformal' },
+const CAPTION_VOICE_OPTS: { value: AgentStrategyConfig['caption_voice']; label: string; desc: string }[] = [
+  { value: null,           label: 'Automático', desc: 'hereda de la cuenta' },
+  { value: 'personal',     label: 'Personal',    desc: 'corto, emojis' },
+  { value: 'professional', label: 'Profesional', desc: 'semiformal' },
 ];
 
 const DAYS = [
