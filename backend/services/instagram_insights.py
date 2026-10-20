@@ -14,6 +14,10 @@ from utils.graph_api import GRAPH_BASE_URL
 
 logger = logging.getLogger(__name__)
 
+# Métricas de Story que se piden (navigation va aparte, con breakdown). La API no da `likes` de
+# Stories: se deducen de total_interactions (verificado contra la app el 2026-10-18)
+STORY_METRICS = ('views', 'reach', 'replies', 'shares', 'link_clicks', 'total_interactions')
+
 
 class InstagramInsightsService:
     """Servicio para interactuar con Instagram Graph API y obtener insights"""
@@ -434,6 +438,132 @@ class InstagramInsightsService:
                     logger.debug(f"Reel metrics {metrics} not available for {media_id}: {e}")
 
         return insights
+
+    def get_live_stories(self, ig_user_id: Optional[str] = None) -> List[Dict]:
+        """Stories activas (≤ 24 h) de la cuenta: `/media` no las incluye."""
+        data = self._make_request(
+            f"{ig_user_id or self.instagram_account_id}/stories",
+            {'fields': 'id,media_type,media_url,thumbnail_url,permalink,timestamp'}
+        )
+        return data.get('data', [])
+
+    def get_story_insights(self, media_id: str) -> Dict[str, Any]:
+        """Métricas de una Story activa. `navigation` va en una segunda llamada: la API rechaza
+        el breakdown `story_navigation_action_type` junto a las demás métricas (#100)."""
+        endpoint = f"{media_id}/insights"
+        data = self._make_request(endpoint, {'metric': ','.join(STORY_METRICS)})
+        insights: Dict[str, Any] = {}
+        for item in data.get('data', []):
+            values = item.get('values', [])
+            if values:
+                insights[item.get('name')] = values[0].get('value', 0)
+
+        try:
+            navigation = self._make_request(
+                endpoint, {'metric': 'navigation', 'breakdown': 'story_navigation_action_type'}
+            )
+            breakdown = self._parse_breakdown(navigation)
+            if breakdown:
+                insights['story_navigation'] = breakdown
+        except Exception as e:
+            logger.warning(f"⚠️  Navegación no disponible para la Story {media_id}: {e}")
+        return insights
+
+    @staticmethod
+    def _story_likes(insights: Dict[str, Any]) -> Optional[int]:
+        """Me gusta de una Story = total_interactions − replies − shares."""
+        total = insights.get('total_interactions')
+        if total is None:
+            return None
+        return max(total - (insights.get('replies') or 0) - (insights.get('shares') or 0), 0)
+
+    @staticmethod
+    def store_story_thumbnail(post: Dict, story: Dict) -> Optional[str]:
+        """Guarda la miniatura de la Story en el bucket `thumbnails` (`posts.thumbnail_url_base`)
+        mientras su imagen del CDN sigue disponible. Vídeo → su portada. None si falla."""
+        import asyncio
+        from services.media_thumbnails import render_all_sizes
+        from services.thumbnail_store import save_thumbnails
+
+        source = story.get('thumbnail_url') if story.get('media_type') == 'VIDEO' else story.get('media_url')
+        if not source:
+            return None
+
+        async def _store() -> Optional[str]:
+            sizes = await render_all_sizes("storage", source)
+            if sizes is None:
+                return None
+            return await save_thumbnails(str(post['user_id']), post['id'], sizes, {
+                'media_url': post.get('media_url'), 'drive_file_id': post.get('drive_file_id'),
+            })
+
+        try:
+            return asyncio.run(_store())
+        except Exception as e:
+            logger.warning(f"⚠️  Miniatura de la Story {story.get('id')} no guardada: {e}")
+            return None
+
+    def sync_story_insights(self, account: Dict, db_client) -> int:
+        """Da de alta las Stories activas que falten en `posts` (sin tocar las existentes),
+        guarda su miniatura si no la tienen y hace upsert de sus métricas. Idempotente.
+        Devuelve cuántas Stories quedaron con métricas."""
+        stories = self.get_live_stories(account['instagram_business_account_id'])
+        if not stories:
+            return 0
+
+        columns = 'id, user_id, instagram_post_id, media_url, drive_file_id, thumbnail_url_base'
+        # Sin filtrar por cuenta: las Stories publicadas desde SocialLab pueden no tener instagram_account_id
+        existing = db_client.table('posts').select(columns)\
+            .in_('instagram_post_id', [s['id'] for s in stories]).execute()
+        rows = {p['instagram_post_id']: p for p in (existing.data or [])}
+
+        missing = [{
+            'user_id': account['user_id'],
+            'instagram_account_id': account['id'],
+            'instagram_post_id': s['id'],
+            'content': '',
+            'media_url': s.get('media_url'),
+            'media_thumbnail_url': s.get('thumbnail_url'),
+            'post_type': 'story',
+            'publication_date': s.get('timestamp'),
+            'status': 'published',
+            'is_collaboration': False,
+        } for s in stories if s['id'] not in rows]
+        if missing:
+            inserted = db_client.table('posts').insert(missing).execute()
+            rows.update({p['instagram_post_id']: p for p in (inserted.data or [])})
+
+        performance = []
+        for story in stories:
+            post = rows.get(story['id'])
+            if not post:
+                continue
+            if not post.get('thumbnail_url_base'):
+                self.store_story_thumbnail(post, story)
+            try:
+                insights = self.get_story_insights(story['id'])
+            except Exception as e:
+                logger.warning(f"⚠️  Sin métricas para la Story {story['id']}: {e}")
+                continue
+            performance.append({
+                'post_id': post['id'],
+                'views': insights.get('views'),
+                'reach': insights.get('reach'),
+                'replies': insights.get('replies'),
+                'shares': insights.get('shares'),
+                'likes': self._story_likes(insights),
+                'link_clicks': insights.get('link_clicks'),
+                'story_navigation': insights.get('story_navigation'),
+                'last_synced_at': datetime.now().isoformat(),
+            })
+
+        if performance:
+            db_client.table('post_performance').upsert(performance, on_conflict='post_id').execute()
+        logger.info(
+            f"📖 Stories de la cuenta {account['id']}: {len(stories)} activas, "
+            f"{len(missing)} nuevas, {len(performance)} con métricas"
+        )
+        return len(performance)
 
     def _get_all_media_paginated(self) -> List[Dict]:
         all_media = []

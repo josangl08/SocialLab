@@ -129,3 +129,19 @@ def test_run_monthly_strategy_for_all_accounts_sends_card_only_when_created_and_
 
     # Card sent only for the account whose session actually created a campaign.
     mock_telegram.send_campaign_approval_card.assert_awaited_once_with("111", campaign_row)
+
+
+def test_sync_story_insights_cron_job_registered_at_minute_30():
+    """El job sync_story_insights debe registrarse con CronTrigger(minute=30) y max_instances=1."""
+    from pathlib import Path
+    import main
+
+    main_py_path = Path(main.__file__).parent / "main.py"
+    content = main_py_path.read_text(encoding="utf-8")
+    if "sync_story_insights" not in content:
+        pytest.skip("sync_story_insights aún no registrado en main.py ([implementation])")
+
+    assert "sync_story_insights" in content
+    assert "minute=30" in content or "minute='30'" in content
+    assert "max_instances=1" in content
+

@@ -102,6 +102,33 @@ def sync_all_accounts_metrics():
     except Exception as e:
         logger.error(f"❌ Error en sync_all_accounts_metrics: {e}")
 
+def sync_all_accounts_story_insights():
+    """
+    Job horario (minuto 30): guarda las Stories activas de cada cuenta y sus métricas
+    antes de que caduquen (24 h). Un fallo en una cuenta no afecta a las demás.
+    """
+    try:
+        from services.instagram_insights import InstagramInsightsService
+
+        all_accounts = admin_supabase.table('instagram_accounts')\
+            .select('id, user_id, long_lived_access_token, instagram_business_account_id, is_active')\
+            .execute()
+
+        for account in all_accounts.data or []:
+            if account.get('is_active') is False:
+                continue
+            try:
+                service = InstagramInsightsService(
+                    access_token=decrypt_token(account['long_lived_access_token']),
+                    instagram_account_id=account['instagram_business_account_id']
+                )
+                service.sync_story_insights(account=account, db_client=admin_supabase)
+            except Exception as e:
+                logger.error(f"❌ Error sincronizando Stories de la cuenta {account['id']}: {e}")
+
+    except Exception as e:
+        logger.error(f"❌ Error en sync_all_accounts_story_insights: {e}")
+
 async def _run_agent_for_all_accounts_async(accounts_data):
     """Ejecuta run_agent para cada cuenta de forma concurrente, acotado por AGENT_CONCURRENCY_LIMIT."""
     from services.agent_service import run_agent
@@ -311,6 +338,15 @@ async def startup_event():
             max_instances=1
         )
         logger.info("✅ Cron job de sincronización de métricas configurado (ejecuta cada hora)")
+
+        scheduler.scheduler.add_job(
+            sync_all_accounts_story_insights,
+            trigger=CronTrigger(minute=30),
+            id='sync_story_insights',
+            replace_existing=True,
+            max_instances=1
+        )
+        logger.info("✅ Cron job de métricas de Stories configurado (cada hora, minuto 30)")
         
         scheduler.scheduler.add_job(
             run_agent_for_all_accounts,

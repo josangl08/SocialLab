@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { apiClient, ApiError } from '../../api/client';
 import { postOriginalUrl, postThumbnailUrl } from '../../api/media';
-import type { Post, StrategyMode } from '../../types';
+import type { Post, StoryMetrics, StrategyMode } from '../../types';
 import { getFirstOfDayOfMonth } from '../../features/agent/AgentStrategyDrawer';
 import type { MonthlyCampaign } from '../../features/agent/AgentStrategyDrawer';
 import CommentTriage from '../studio/CommentTriage';
@@ -42,6 +42,22 @@ const TYPE_ICONS: Record<string, string> = {
   story:    'bi-layers',
 };
 
+const STORY_TYPES = new Set(['story', 'stories']);
+// Una Story sigue activa (y se sincronizará) durante 24 h
+const STORY_LIFETIME_MS = 24 * 60 * 60 * 1000;
+
+const STORY_METRICS: { label: string; value: (m: StoryMetrics) => number | null | undefined }[] = [
+  { label: 'Vistas',          value: m => m.views },
+  { label: 'Alcance',         value: m => m.reach },
+  { label: 'Me gusta',        value: m => m.likes },
+  { label: 'Respuestas',      value: m => m.replies },
+  { label: 'Clics en enlace', value: m => m.link_clicks },
+  { label: 'Avances',         value: m => m.story_navigation?.tap_forward },
+  { label: 'Retrocesos',      value: m => m.story_navigation?.tap_back },
+  { label: 'Salidas',         value: m => m.story_navigation?.tap_exit },
+  { label: 'Siguiente historia', value: m => m.story_navigation?.swipe_forward },
+];
+
 const formatDate = (d: string) =>
   new Date(d).toLocaleDateString('es-ES', {
     day: 'numeric', month: 'long', year: 'numeric',
@@ -67,6 +83,20 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
     setActionError('');
     setScheduleDate('');
   }, [post?.id, show]);
+
+  // Métricas de la Story guardadas por el job horario (solo vienen en el detalle del post)
+  const isStory = !!post && STORY_TYPES.has(post.post_type.toLowerCase());
+  const [storyMetrics, setStoryMetrics] = useState<StoryMetrics | null | undefined>(undefined);
+  useEffect(() => {
+    setStoryMetrics(undefined);
+    if (!show || !isStory || post?.status !== 'published') return;
+    let active = true;
+    apiClient
+      .get<Post>(`/api/posts/${post?.id}`)
+      .then((detail) => { if (active) setStoryMetrics(detail?.story_metrics ?? null); })
+      .catch(() => { if (active) setStoryMetrics(null); });
+    return () => { active = false; };
+  }, [show, isStory, post?.id, post?.status]);
 
   // Estrategia de la campaña del mes; sin campaña → personal (AD-2)
   const accountId = post?.instagram_account_id;
@@ -148,6 +178,10 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
   const isImage = post.media_url?.match(/\.(jpeg|jpg|gif|png|webp|svg)(\?.*)?$/i);
   const isVideo = post.post_type === 'reel' ||
     !!post.media_url?.match(/\.(mp4|webm|ogg|mov)(\?.*)?$/i);
+  // La media de una Story en el CDN de Instagram caduca: se muestra su miniatura guardada
+  const storyThumbnail = isStory ? postThumbnailUrl(post, token, 640) : null;
+  const storyIsLive = !!post.publication_date &&
+    Date.now() - new Date(post.publication_date).getTime() < STORY_LIFETIME_MS;
 
   // ── Shared action fragments ─────────────────────────
   const editBtn = onEdit ? (
@@ -365,7 +399,9 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
 
         {/* ── Media zone ─────────────────────────── */}
         <div className="pdm-media">
-          {post.media_url ? (
+          {storyThumbnail ? (
+            <img src={storyThumbnail} alt="story" className="pdm-media-img" loading="lazy" />
+          ) : post.media_url ? (
             isImage ? (
               <img
                 src={showOriginal ? post.media_url : postThumbnailUrl(post, token, 640) ?? post.media_url}
@@ -445,6 +481,25 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
               </div>
             )}
           </div>
+
+          {isStory && storyMetrics && (
+            <div className="pdm-story-performance" data-testid="story-performance">
+              <h6 className="pdm-story-title">Rendimiento de la Story</h6>
+              <div className="pdm-story-grid">
+                {STORY_METRICS.map(({ label, value }) => (
+                  <div key={label} className="pdm-story-metric">
+                    <span className="pdm-story-value">{(value(storyMetrics) ?? 0).toLocaleString('es-ES')}</span>
+                    <span className="pdm-story-label">{label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {isStory && storyMetrics === null && storyIsLive && (
+            <p className="pdm-story-pending">
+              <i className="bi bi-hourglass-split"></i>Métricas disponibles en la próxima sincronización
+            </p>
+          )}
 
           {/* ── Comunidad (Fase F): solo sugerencias para copiar ── */}
           {post.status === 'published' && strategyMode && (

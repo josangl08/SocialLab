@@ -18,6 +18,23 @@ export interface Post {
   quality_report?: QualityReport | null;
   matrix_role?: string | null;
   trial_graduation?: 'MANUAL' | 'SS_PERFORMANCE' | null;
+  story_metrics?: StoryMetrics | null; // solo en GET /api/posts/{id} de una Story
+}
+
+export interface StoryNavigation {
+  tap_forward?: number | null;
+  tap_back?: number | null;
+  tap_exit?: number | null;
+  swipe_forward?: number | null;
+}
+
+export interface StoryMetrics {
+  views?: number | null;
+  reach?: number | null;
+  likes?: number | null;
+  replies?: number | null;
+  link_clicks?: number | null;
+  story_navigation?: StoryNavigation | null;
 }
 
 export interface InstagramAccount {

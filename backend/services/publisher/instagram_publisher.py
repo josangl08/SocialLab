@@ -26,7 +26,7 @@ from utils.graph_api import GRAPH_BASE_URL
 logger = logging.getLogger(__name__)
 
 _REEL_TYPES = {'REEL', 'REELS', 'VIDEO'}
-_STORY_TYPES = {'STORY', 'STORIES'}
+STORY_POST_TYPES = {'STORY', 'STORIES'}
 
 
 def resolve_publish_type(post: Dict) -> Dict[str, Optional[str]]:
@@ -40,7 +40,7 @@ def resolve_publish_type(post: Dict) -> Dict[str, Optional[str]]:
     kind = (post.get('content_format') or post.get('post_type') or 'FEED').upper()
     if kind in _REEL_TYPES:
         return {'post_type': 'REELS', 'video_url': post.get('video_url') or post.get('media_url')}
-    if kind in _STORY_TYPES:
+    if kind in STORY_POST_TYPES:
         return {'post_type': 'STORY', 'video_url': None}
     return {'post_type': 'FEED', 'video_url': None}
 

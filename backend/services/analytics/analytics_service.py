@@ -329,6 +329,14 @@ class AnalyticsService:
             }
         }
 
+    STORY_METRIC_COLUMNS = 'views, reach, likes, replies, link_clicks, story_navigation, last_synced_at'
+
+    def get_story_metrics(self, post_id: int) -> Optional[Dict]:
+        """Métricas guardadas de una Story (job sync_story_insights); None si aún no hay."""
+        result = self.db.table('post_performance').select(self.STORY_METRIC_COLUMNS)\
+            .eq('post_id', post_id).limit(1).execute()
+        return result.data[0] if result.data else None
+
     def _get_account_info(
         self,
         user_id: str,

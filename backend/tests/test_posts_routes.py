@@ -667,3 +667,44 @@ def test_create_post_invalid_trial_graduation_422(mock_supabase, mock_admin_supa
     })
     assert response.status_code == 422
     mock_supabase.table.return_value.insert.assert_not_called()
+
+
+# ==============================================================================
+# Story metrics in GET /api/posts/{id} (instagram-graph-api-upgrade, AD-2)
+# ==============================================================================
+
+def _mock_get_post(mock_supabase, post):
+    mock_supabase.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(data=post)
+
+
+def test_get_story_post_includes_story_metrics(mock_supabase, mock_admin_supabase):
+    metrics = {"views": 282, "reach": 228, "replies": 4, "link_clicks": 1,
+               "story_navigation": {"tap_forward": 132}, "last_synced_at": "2026-10-18T10:30:00"}
+    _mock_get_post(mock_supabase, {"id": 5, "user_id": USER_ID, "post_type": "story"})
+    mock_admin_supabase.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(data=[metrics])
+
+    response = client.get("/api/posts/5")
+
+    assert response.status_code == 200
+    assert response.json()["story_metrics"] == metrics
+    mock_admin_supabase.table.assert_called_with("post_performance")
+
+
+def test_get_story_post_without_metrics_returns_null(mock_supabase, mock_admin_supabase):
+    _mock_get_post(mock_supabase, {"id": 6, "user_id": USER_ID, "post_type": "STORIES"})
+    mock_admin_supabase.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
+
+    response = client.get("/api/posts/6")
+
+    assert response.status_code == 200
+    assert response.json()["story_metrics"] is None
+
+
+def test_get_feed_post_has_no_story_metrics(mock_supabase, mock_admin_supabase):
+    _mock_get_post(mock_supabase, {"id": 7, "user_id": USER_ID, "post_type": "IMAGE"})
+
+    response = client.get("/api/posts/7")
+
+    assert response.status_code == 200
+    assert "story_metrics" not in response.json()
+    mock_admin_supabase.table.assert_not_called()

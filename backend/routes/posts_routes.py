@@ -27,7 +27,8 @@ from services.media_thumbnails import (
     render_all_sizes,
 )
 from services.thumbnail_store import generate_once, save_in_background
-from services.publisher.instagram_publisher import InstagramPublisher, InstagramPublishError, resolve_publish_type
+from services.publisher.instagram_publisher import InstagramPublisher, InstagramPublishError, resolve_publish_type, STORY_POST_TYPES
+from services.analytics.analytics_service import AnalyticsService
 from supabase import Client
 
 logger = logging.getLogger(__name__)
@@ -423,6 +424,10 @@ def get_post(
         post = result.data
         if post['user_id'] != current_user.id:
             raise HTTPException(status_code=403, detail="You don't have permission to view this post")
+
+        if (post.get('post_type') or '').upper() in STORY_POST_TYPES:
+            # post_performance no tiene políticas RLS: se lee con service role tras validar el dueño
+            post['story_metrics'] = AnalyticsService(admin_supabase).get_story_metrics(post_id)
 
         return post
     except HTTPException:

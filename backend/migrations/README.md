@@ -21,6 +21,7 @@ Las migraciones deben ejecutarse en orden cronológico:
 39. `039_thumbnail_ignore_url_signature.sql` - El trigger de miniaturas ignora la query (firma) de media_url: el sync de Instagram ya no las invalida
 40. `040_post_media_thumbnail_url.sql` - Columna posts.media_thumbnail_url: portada de los vídeos/Reels de Instagram
 41. `041_posts_is_collaboration.sql` - Columna posts.is_collaboration: publicaciones de otros autores en las que la cuenta colabora
+42. `042_story_insights_and_publish_quota.sql` - Métricas de Stories en post_performance, scheduled_jobs.quota_deferrals y status 'deferred_quota'
 
 ## Cómo Ejecutar
 
