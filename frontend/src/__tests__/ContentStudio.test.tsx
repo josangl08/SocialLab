@@ -136,6 +136,9 @@ describe('ContentStudio Component', () => {
     const selector = screen.getByLabelText(/Cuenta de Instagram/i) as HTMLSelectElement;
     fireEvent.change(selector, { target: { value: '2' } });
     expect(selector.value).toBe('2');
+
+    // Al cambiar de cuenta se pide su campaña del mes
+    await waitFor(() => expect(apiClient.get).toHaveBeenCalledWith(expect.stringContaining('account_id=2')));
   });
 
   // --- Requisitos específicos de ContentStudio ---
@@ -160,6 +163,9 @@ describe('ContentStudio Component', () => {
 
     // "Estadísticas deportivas" ya no debe aparecer
     expect(screen.queryByRole('button', { name: /Estadísticas deportivas/i })).not.toBeInTheDocument();
+
+    // Al cambiar de cuenta se pide su campaña del mes
+    await waitFor(() => expect(apiClient.get).toHaveBeenCalledWith(expect.stringContaining('account_id=2')));
   });
 
   test('Reel de prueba: envía trial_graduation con la graduación elegida', async () => {
@@ -397,6 +403,9 @@ describe('ContentStudio Component', () => {
     fireEvent.change(selector, { target: { value: '2' } });
 
     expect(reviewBtn).toBeDisabled();
+
+    // Al cambiar de cuenta se pide su campaña del mes
+    await waitFor(() => expect(apiClient.get).toHaveBeenCalledWith(expect.stringContaining('account_id=2')));
   });
 
   test('precarga fecha desde query ?date= y redirige /create-post a /generate', async () => {

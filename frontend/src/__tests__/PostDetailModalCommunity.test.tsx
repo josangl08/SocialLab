@@ -104,5 +104,6 @@ describe('DmFunnel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Copiar seguimiento 2' }));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('¿Cómo te fue?');
+    expect(await screen.findByText('Copiado')).toBeInTheDocument();
   });
 });

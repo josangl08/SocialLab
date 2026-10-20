@@ -101,7 +101,7 @@ describe('PostDetailModal — Stories (AD-2, AD-2b)', () => {
     expect(screen.queryByTestId('story-performance')).not.toBeInTheDocument();
   });
 
-  test('una Story muestra su miniatura guardada en lugar de la media del CDN', () => {
+  test('una Story muestra su miniatura guardada en lugar de la media del CDN', async () => {
     const { container } = renderModal({
       ...baseStoryPost,
       media_url: 'https://cdn.instagram.com/story.mp4?oh=1',
@@ -111,5 +111,6 @@ describe('PostDetailModal — Stories (AD-2, AD-2b)', () => {
     expect(container.querySelector('video')).not.toBeInTheDocument();
     expect(container.querySelector('img.pdm-media-img')?.getAttribute('src'))
       .toBe('https://storage.test/thumbnails/u1/10/key_640.webp');
+    await waitFor(() => expect(apiClient.get).toHaveBeenCalled());
   });
 });

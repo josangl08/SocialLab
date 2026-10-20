@@ -48,6 +48,7 @@ describe('StorySequence', () => {
     render(<StorySequence accountId={7} />);
     fireEvent.click(screen.getByRole('button', { name: /Generar Stories del día/i }));
     expect(contentApi.generateStory).toHaveBeenCalledWith({ account_id: 7, topic: undefined });
+    expect(await screen.findByRole('button', { name: /Generar Stories del día/i })).toBeEnabled();
   });
 
   test('deshabilitado sin cuenta', () => {

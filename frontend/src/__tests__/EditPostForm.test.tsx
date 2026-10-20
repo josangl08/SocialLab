@@ -68,7 +68,7 @@ describe('EditPostForm con estructura', () => {
     expect(sentForm().has('content_structure')).toBe(false);
   });
 
-  test('un reel muestra su beat sheet guardado', () => {
+  test('un reel muestra su beat sheet guardado', async () => {
     const reelPost: Post = {
       ...basePost,
       post_type: 'reel',
@@ -83,6 +83,7 @@ describe('EditPostForm con estructura', () => {
     };
     render(<EditPostForm post={reelPost} onSave={vi.fn()} onCancel={vi.fn()} />);
     expect(screen.getByText(/Beat Sheet/i)).toBeInTheDocument();
+    await waitFor(() => expect(apiClient.get).toHaveBeenCalledWith('/instagram/accounts'));
   });
 
   test('un post sin estructura no muestra editor ni la envía', async () => {
