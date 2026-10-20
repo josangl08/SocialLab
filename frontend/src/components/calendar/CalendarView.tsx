@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
+import type { View } from 'react-big-calendar';
 import withDragAndDrop from 'react-big-calendar/lib/addons/dragAndDrop';
-import format from 'date-fns/format';
-import parse from 'date-fns/parse';
-import startOfWeek from 'date-fns/startOfWeek';
-import getDay from 'date-fns/getDay';
-import enUS from 'date-fns/locale/en-US';
+import { format, parse, startOfWeek, getDay } from 'date-fns';
+import { enUS } from 'date-fns/locale';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import 'react-big-calendar/lib/addons/dragAndDrop/styles.css';
 import './CalendarView.css';
@@ -114,7 +112,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [currentDate, setCurrentDate] = useState<Date>(() => toWallClock(new Date(), tz));
-  const [currentView, setCurrentView] = useState<string>('month');
+  const [currentView, setCurrentView] = useState<View>('month');
   const [showPostModal, setShowPostModal] = useState<boolean>(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   useEffect(() => {
