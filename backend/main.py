@@ -3,7 +3,8 @@ import sys
 import asyncio
 import logging
 from datetime import date, timedelta
-from typing import Optional
+from contextlib import asynccontextmanager
+from typing import AsyncIterator, Optional
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -38,10 +39,19 @@ admin_supabase = get_supabase_admin_client()
 AGENT_CONCURRENCY_LIMIT = 2
 
 # --- Inicialización de la Aplicación FastAPI ---
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Arranca y apaga los servicios con la aplicación."""
+    await startup_event()
+    yield
+    await shutdown_event()
+
+
 app = FastAPI(
     title="SocialLab API",
     description="La API para el planificador de publicaciones con IA.",
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan,
 )
 
 # --- Función de Sincronización Automática de Métricas ---
@@ -304,7 +314,6 @@ def refresh_niche_insights():
         logger.error(f"❌ Error refrescando insights de nicho: {e}")
 
 # --- Lifecycle Events ---
-@app.on_event("startup")
 async def startup_event():
     """Inicializa servicios al arrancar la aplicación."""
     logger.info("🚀 Iniciando SocialLab API...")
@@ -416,7 +425,6 @@ async def startup_event():
     except Exception as e:
         logger.error(f"❌ Error configurando cron job de métricas: {e}")
 
-@app.on_event("shutdown")
 async def shutdown_event():
     """Cierra servicios al apagar la aplicación."""
     logger.info("🛑 Apagando SocialLab API...")
