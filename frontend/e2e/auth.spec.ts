@@ -7,12 +7,6 @@ import { TEST_USERS } from './fixtures/test-users';
 import { login, logout } from './utils/auth-helpers';
 
 test.describe('Authentication', () => {
-  test.beforeEach(async ({ page }) => {
-    // Clear storage before each test
-    await page.context().clearCookies();
-    await page.evaluate(() => localStorage.clear());
-  });
-
   test('should display login page', async ({ page }) => {
     await page.goto('/login');
 
