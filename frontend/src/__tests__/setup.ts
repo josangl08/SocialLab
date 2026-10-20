@@ -2,7 +2,7 @@ import '@testing-library/jest-dom';
 import { vi } from 'vitest';
 
 // Mock fetch globally
-global.fetch = vi.fn();
+globalThis.fetch = vi.fn();
 
 // jsdom's real localStorage isn't usable without an explicit origin config,
 // and apiClient reads localStorage.getItem('authToken') on every request —

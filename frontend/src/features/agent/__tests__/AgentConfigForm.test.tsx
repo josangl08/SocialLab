@@ -1,4 +1,3 @@
-import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import AgentConfigForm from '../AgentConfigForm';
@@ -25,7 +24,7 @@ describe('AgentConfigForm Component', () => {
     window.localStorage.setItem('authToken', mockToken);
 
     // Mock global fetch
-    global.fetch = vi.fn().mockImplementation((url: string, options?: any) => {
+    globalThis.fetch = vi.fn().mockImplementation(() => {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({ updated: true }),
@@ -80,7 +79,7 @@ describe('AgentConfigForm Component', () => {
     fireEvent.click(screen.getByRole('button', { name: /Guardar Estrategia/i }));
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(globalThis.fetch).toHaveBeenCalledWith(
         'http://localhost:8000/api/agent/config/123',
         expect.objectContaining({
           method: 'PUT',

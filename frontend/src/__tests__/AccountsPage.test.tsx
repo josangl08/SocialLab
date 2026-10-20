@@ -1,9 +1,6 @@
-import React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import AccountsPage from '../components/accounts/AccountsPage';
-import fs from 'fs';
-import path from 'path';
 
 describe('AccountsPage Component', () => {
   const mockToken = 'mock-auth-token-xyz';
@@ -63,7 +60,7 @@ describe('AccountsPage Component', () => {
     window.localStorage.setItem('authToken', mockToken);
     
     // Mock global fetch
-    global.fetch = vi.fn().mockImplementation((url: string, options?: any) => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string, options?: any) => {
       if (url.includes('/instagram/accounts') && (!options || (options.method !== 'DELETE' && options.method !== 'PATCH' && options.method !== 'PUT'))) {
         return Promise.resolve({
           ok: true,
@@ -146,7 +143,7 @@ describe('AccountsPage Component', () => {
 
     // Wait for DELETE fetch call and UI update
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(globalThis.fetch).toHaveBeenCalledWith(
         'http://localhost:8000/instagram/accounts/1',
         expect.objectContaining({ method: 'DELETE' })
       );
@@ -159,7 +156,7 @@ describe('AccountsPage Component', () => {
 
   test('displays info alert if accounts list is empty', async () => {
     // Override fetch to return empty list
-    global.fetch = vi.fn().mockResolvedValue({
+    globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve([]),
     });
@@ -204,7 +201,7 @@ describe('AccountsPage Component', () => {
 
     // Should call generate-link-token endpoint
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(globalThis.fetch).toHaveBeenCalledWith(
         'http://localhost:8000/api/telegram/generate-link-token',
         expect.objectContaining({ method: 'POST' })
       );
@@ -233,7 +230,7 @@ describe('AccountsPage Component', () => {
 
     // Should call update endpoint
     await waitFor(() => {
-      const call = (global.fetch as any).mock.calls.find(([url]: any) => url.includes('/accounts/1'));
+      const call = (globalThis.fetch as any).mock.calls.find(([url]: any) => url.includes('/accounts/1'));
       expect(call).toBeDefined();
       const [, options] = call;
       expect(options.method === 'PATCH' || options.method === 'PUT').toBe(true);
@@ -249,21 +246,13 @@ describe('AccountsPage Component', () => {
     await waitFor(() => {
       expect(screen.getByText('@active_user')).toBeInTheDocument();
     });
-    
-    // Check if the component source code has implemented the custom Conectar Drive button
-    const code = fs.readFileSync(path.resolve(__dirname, '../components/accounts/AccountsPage.tsx'), 'utf8');
-    const isStub = code.includes('TODO(human)');
-    
-    if (!isStub) {
-      expect(screen.getAllByRole('button', { name: /Conectar Drive/i }).length).toBeGreaterThan(0);
-    } else {
-      expect(screen.getAllByText(/Google Drive/i).length).toBeGreaterThan(0);
-    }
+
+    expect(screen.getAllByRole('button', { name: /Conectar Drive/i }).length).toBeGreaterThan(0);
   });
 
   test('renders "Drive conectado" placeholder when driveConnected is true', async () => {
     // Mock drive status as connected
-    global.fetch = vi.fn().mockImplementation((url: string) => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes('/api/drive/status')) {
         return Promise.resolve({
           ok: true,
@@ -281,14 +270,7 @@ describe('AccountsPage Component', () => {
       expect(screen.getByText('@active_user')).toBeInTheDocument();
     });
 
-    const code = fs.readFileSync(path.resolve(__dirname, '../components/accounts/AccountsPage.tsx'), 'utf8');
-    const isStub = code.includes('TODO(human)');
-
-    if (!isStub) {
-      expect(screen.getAllByText(/Drive conectado/i).length).toBeGreaterThan(0);
-    } else {
-      expect(screen.getAllByText(/Google Drive/i).length).toBeGreaterThan(0);
-    }
+    expect(screen.getAllByText(/Drive conectado/i).length).toBeGreaterThan(0);
   });
 
   test('handles drive_connected=true URL search parameter', async () => {
@@ -303,18 +285,10 @@ describe('AccountsPage Component', () => {
 
     render(<AccountsPage />);
 
-    const code = fs.readFileSync(path.resolve(__dirname, '../components/accounts/AccountsPage.tsx'), 'utf8');
-    const isStub = code.includes('TODO(human)');
-    
-    if (!isStub) {
-      await waitFor(() => {
-        expect(replaceStateSpy).toHaveBeenCalled();
-      });
-    } else {
-      // Just assert window.location was read or mock checks out
-      expect(window.location.search).toBe('?drive_connected=true');
-    }
+    await waitFor(() => {
+      expect(replaceStateSpy).toHaveBeenCalled();
+    });
 
-    window.location = originalLocation;
+    (window as any).location = originalLocation;
   });
 });

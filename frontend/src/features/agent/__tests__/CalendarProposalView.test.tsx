@@ -1,5 +1,4 @@
-import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 // We import from features folder, even if it is a stub or not fully implemented by logic agent yet.
 // Since the path is frontend/src/features/agent/CalendarProposalView.tsx, we mock/test it.
@@ -39,7 +38,7 @@ describe('CalendarProposalView Component', () => {
     window.localStorage.setItem('authToken', mockToken);
 
     // Mock fetch for listing proposals
-    global.fetch = vi.fn().mockImplementation((url: string, options?: any) => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes('/api/agent/proposals')) {
         return Promise.resolve({
           ok: true,

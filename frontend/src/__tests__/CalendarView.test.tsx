@@ -1,4 +1,3 @@
-import React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import CalendarView from '../components/calendar/CalendarView';
@@ -146,7 +145,7 @@ describe('CalendarView Component', () => {
     (useAuth as any).mockReturnValue({ token: mockToken, syncCompleted: false });
 
     // Mock global fetch
-    (global.fetch as any).mockImplementation((url: string) => {
+    (globalThis.fetch as any).mockImplementation((url: string) => {
       if (url.includes('/api/posts')) {
         return Promise.resolve({
           ok: true,
@@ -240,7 +239,7 @@ describe('CalendarView Component', () => {
 
     await waitFor(() => {
       // Verify fetch was called with PUT /api/scheduler/reschedule/1
-      expect(global.fetch).toHaveBeenCalledWith(
+      expect(globalThis.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/api/scheduler/reschedule/1'),
         expect.objectContaining({
           method: 'PUT',

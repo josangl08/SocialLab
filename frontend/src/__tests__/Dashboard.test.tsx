@@ -1,4 +1,3 @@
-import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import Dashboard from '../components/dashboard/Dashboard';
@@ -68,7 +67,7 @@ describe('Dashboard Component', () => {
     window.alert = vi.fn();
 
     // Mock fetch
-    global.fetch = vi.fn().mockImplementation((url: string) => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes('/instagram/status')) {
         return Promise.resolve({
           ok: true,

@@ -1,4 +1,3 @@
-import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
@@ -35,7 +34,7 @@ describe('MonthlyFocusBanner Component', () => {
 
   test('shows a configure-campaign prompt when there is no campaign config', async () => {
     // Mock GET /api/agent/campaign returning null/None
-    (global.fetch as any).mockImplementation(() =>
+    (globalThis.fetch as any).mockImplementation(() =>
       Promise.resolve({
         ok: true,
         json: () => Promise.resolve(null),
@@ -67,7 +66,7 @@ describe('MonthlyFocusBanner Component', () => {
 
   test('renders title, description and all four weekly focuses, highlighting the current week', async () => {
     // Mock GET /api/agent/campaign returning campaign data
-    (global.fetch as any).mockImplementation(() =>
+    (globalThis.fetch as any).mockImplementation(() =>
       Promise.resolve({
         ok: true,
         json: () => Promise.resolve(mockCampaign),
@@ -101,7 +100,7 @@ describe('MonthlyFocusBanner Component', () => {
   });
 
   test('highlights week 4 as active when currentDate falls in week 4', async () => {
-    (global.fetch as any).mockImplementation(() =>
+    (globalThis.fetch as any).mockImplementation(() =>
       Promise.resolve({
         ok: true,
         json: () => Promise.resolve(mockCampaign),

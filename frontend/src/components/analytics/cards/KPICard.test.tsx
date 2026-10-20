@@ -1,4 +1,3 @@
-import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, test, expect, vi } from 'vitest';
 import KPICard from './KPICard';
