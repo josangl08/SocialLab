@@ -12,7 +12,7 @@ from typing import Optional
 import logging
 
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 from services.scheduler.post_scheduler import PostScheduler
 from auth.dependencies import get_user_supabase_client
@@ -41,7 +41,8 @@ class SchedulePostRequest(BaseModel):
         description="Whether to retry on failure"
     )
 
-    @validator('scheduled_time')
+    @field_validator('scheduled_time')
+    @classmethod
     def validate_future_time(cls, v):
         """Ensure scheduled time is in the future."""
         if v <= datetime.now(timezone.utc):
@@ -65,7 +66,8 @@ class ReschedulePostRequest(BaseModel):
         description="New publication time (ISO 8601 format, UTC timezone)"
     )
 
-    @validator('new_scheduled_time')
+    @field_validator('new_scheduled_time')
+    @classmethod
     def validate_future_time(cls, v):
         """Ensure scheduled time is in the future."""
         if v <= datetime.now(timezone.utc):

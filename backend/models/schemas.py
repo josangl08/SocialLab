@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from datetime import datetime
 from typing import Literal, Optional, Any, Union
 
@@ -118,8 +118,7 @@ class TelegramMessage(BaseModel):
     document: Optional[TelegramDocument] = None
     reply_to_message: Optional['TelegramMessage'] = None
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 class TelegramCallbackQuery(BaseModel):
     id: str
@@ -130,8 +129,7 @@ class TelegramCallbackQuery(BaseModel):
     data: Optional[str] = None
     game_short_name: Optional[str] = None
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 class TelegramUpdate(BaseModel):
     update_id: int
@@ -334,8 +332,7 @@ class HumanizeChange(BaseModel):
     to: str
     rule: str
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class HumanizeResponse(BaseModel):
