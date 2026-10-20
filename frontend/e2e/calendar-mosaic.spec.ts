@@ -45,10 +45,12 @@ const PORTRAIT_SVG =
 
 async function mockApi(page: Page, opts: { rescheduleStatus?: number; posts?: unknown[] } = {}) {
   const reschedules: { id: string; body: unknown }[] = [];
+  // Copia mutable: tras reprogramar, el calendario vuelve a pedir /api/posts
+  let posts = [...((opts.posts ?? POSTS) as { id: number; scheduled_at?: string }[])];
   await page.route(`${API}/**`, async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
-    if (path === '/api/posts') return route.fulfill({ json: opts.posts ?? POSTS });
+    if (path === '/api/posts') return route.fulfill({ json: posts });
     if (/^\/api\/posts\/\d+\/thumbnail$/.test(path)) {
       return route.fulfill({ contentType: 'image/svg+xml', body: PORTRAIT_SVG });
     }
@@ -57,8 +59,12 @@ async function mockApi(page: Page, opts: { rescheduleStatus?: number; posts?: un
     }
     const reschedule = path.match(/^\/api\/scheduler\/reschedule\/(\d+)$/);
     if (reschedule) {
-      reschedules.push({ id: reschedule[1], body: route.request().postDataJSON() });
+      const body = route.request().postDataJSON() as { new_scheduled_time: string };
+      reschedules.push({ id: reschedule[1], body });
       const status = opts.rescheduleStatus ?? 200;
+      if (status === 200) {
+        posts = posts.map(p => (String(p.id) === reschedule[1] ? { ...p, scheduled_at: body.new_scheduled_time } : p));
+      }
       return route.fulfill({ status, json: status === 200 ? { ok: true } : { detail: 'fallo simulado' } });
     }
     // Sin campaña mensual (el banner espera un objeto, no una lista)
