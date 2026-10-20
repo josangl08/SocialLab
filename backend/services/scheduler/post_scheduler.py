@@ -23,10 +23,75 @@ from database.supabase_client import get_supabase_admin_client
 from services.publisher.instagram_publisher import (
     InstagramPublisher,
     InstagramPublishError,
+    PublishQuotaExceeded,
     resolve_publish_type
 )
 
 logger = logging.getLogger(__name__)
+
+# Aplazamientos de 1 h por falta de cupo antes de dar el post por fallido (≈ 24 h)
+MAX_QUOTA_DEFERRALS = 24
+QUOTA_DEFERRAL_MINUTES = 60
+
+
+def _notify_status(telegram_chat_id: Optional[str], post_id: int, status: str, detail: Optional[str] = None) -> None:
+    if not telegram_chat_id:
+        return
+    try:
+        import asyncio
+        from services.telegram_service import TelegramService
+        asyncio.run(TelegramService().send_status_notification(
+            telegram_chat_id, post_id, status, detail
+        ))
+    except Exception as te:
+        logger.error(f"Telegram notification failed for post {post_id}: {te}")
+
+
+def _defer_for_quota(supabase, post_id: int, telegram_chat_id: Optional[str]) -> None:
+    """Sin cupo de publicación: reprograma +1 h sin consumir reintentos de error; al
+    aplazamiento MAX_QUOTA_DEFERRALS marca el post como fallido. Avisa solo en el primero."""
+    job_result = supabase.table('scheduled_jobs')\
+        .select('quota_deferrals')\
+        .eq('post_id', post_id)\
+        .single()\
+        .execute()
+    deferrals = ((job_result.data or {}).get('quota_deferrals') or 0) + 1
+
+    if deferrals >= MAX_QUOTA_DEFERRALS:
+        supabase.table('scheduled_jobs').update({
+            'status': 'failed',
+            'quota_deferrals': deferrals,
+            'error_message': 'PUBLISH_QUOTA_EXCEEDED',
+            'completed_at': datetime.now().isoformat()
+        }).eq('post_id', post_id).execute()
+        supabase.table('posts').update({
+            'status': 'failed'
+        }).eq('id', post_id).execute()
+        logger.error(f"❌ Post {post_id} failed: no publishing quota after {deferrals} deferrals")
+        _notify_status(telegram_chat_id, post_id, 'failed', 'PUBLISH_QUOTA_EXCEEDED')
+        return
+
+    run_at = datetime.now(timezone.utc) + timedelta(minutes=QUOTA_DEFERRAL_MINUTES)
+    from services.scheduler.post_scheduler import PostScheduler
+    PostScheduler().scheduler.add_job(
+        func=publish_post_job,
+        trigger=DateTrigger(run_date=run_at),
+        args=[post_id],
+        id=f"post_{post_id}",
+        name=f"Publish post {post_id} (quota deferral {deferrals})",
+        replace_existing=True
+    )
+    supabase.table('scheduled_jobs').update({
+        'status': 'deferred_quota',
+        'quota_deferrals': deferrals,
+        'scheduled_time': run_at.isoformat()
+    }).eq('post_id', post_id).execute()
+    logger.warning(
+        f"⏳ Post {post_id} deferred to {run_at.isoformat()}: no publishing quota "
+        f"({deferrals}/{MAX_QUOTA_DEFERRALS})"
+    )
+    if deferrals == 1:
+        _notify_status(telegram_chat_id, post_id, 'deferred_quota')
 
 
 def publish_post_job(post_id: int) -> None:
@@ -80,6 +145,13 @@ def publish_post_job(post_id: int) -> None:
 
         instagram_account_id = instagram_result.data['id']
         telegram_chat_id = instagram_result.data.get('telegram_chat_id')
+
+        # Cupo de Instagram (100 posts/24 h). None = no se pudo consultar: se publica igual
+        quota = publisher.get_publishing_quota(instagram_account_id)
+        if quota and quota['quota_usage'] >= quota['quota_total']:
+            raise PublishQuotaExceeded(
+                f"{quota['quota_usage']}/{quota['quota_total']} posts in the last 24h"
+            )
 
         # Publish to Instagram
         logger.info(f"📤 Publishing post {post_id} to Instagram...")
@@ -143,6 +215,10 @@ def publish_post_job(post_id: int) -> None:
                 ))
             except Exception as te:
                 logger.error(f"Telegram notification failed for post {post_id}: {te}")
+
+    except PublishQuotaExceeded as qe:
+        logger.warning(f"Post {post_id}: publishing quota exceeded ({qe})")
+        _defer_for_quota(supabase, post_id, telegram_chat_id)
 
     except Exception as e:
         logger.error(f"❌ Error publishing post {post_id}: {e}")
@@ -524,7 +600,7 @@ class PostScheduler:
             # Step 1: Restore jobs from scheduled_jobs table
             pending_jobs = self.supabase.table('scheduled_jobs')\
                 .select('*')\
-                .in_('status', ['pending', 'retrying'])\
+                .in_('status', ['pending', 'retrying', 'deferred_quota'])\
                 .gte('scheduled_time', datetime.now(timezone.utc).isoformat())\
                 .execute()
 
@@ -580,7 +656,7 @@ class PostScheduler:
                     existing_job = self.supabase.table('scheduled_jobs')\
                         .select('job_id')\
                         .eq('job_id', job_id)\
-                        .in_('status', ['pending', 'retrying'])\
+                        .in_('status', ['pending', 'retrying', 'deferred_quota'])\
                         .execute()
 
                     if existing_job.data:

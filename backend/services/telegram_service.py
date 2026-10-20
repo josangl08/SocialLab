@@ -654,6 +654,11 @@ class TelegramService:
             text = f"✅ Post #{post_id} published successfully."
             if detail:
                 text += f"\n🔗 {detail}"
+        elif status == "deferred_quota":
+            text = (
+                f"⏳ Post #{post_id} postponed: Instagram's 24h publishing limit reached. "
+                f"It will be retried every hour."
+            )
         else:
             text = f"❌ Post #{post_id} failed to publish."
             if detail:

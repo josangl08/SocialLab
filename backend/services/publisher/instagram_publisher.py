@@ -50,6 +50,36 @@ class InstagramPublishError(Exception):
     pass
 
 
+class PublishQuotaExceeded(Exception):
+    """La cuenta ha agotado el cupo de publicaciones de Instagram de las últimas 24 h."""
+    pass
+
+
+def fetch_publishing_quota(ig_user_id: str, access_token: str) -> Optional[Dict[str, int]]:
+    """
+    Cupo de publicación de las últimas 24 h (límite de Instagram: 100 posts por API).
+
+    Returns:
+        {'quota_usage': int, 'quota_total': int}, o None si no se puede consultar
+        (quien llama publica igualmente: fail-open)
+    """
+    try:
+        response = requests.get(
+            f"{GRAPH_BASE_URL}/{ig_user_id}/content_publishing_limit",
+            params={'fields': 'config,quota_usage', 'access_token': access_token},
+            timeout=10
+        )
+        response.raise_for_status()
+        data = response.json()['data'][0]
+        return {
+            'quota_usage': int(data.get('quota_usage', 0)),
+            'quota_total': int(data['config']['quota_total'])
+        }
+    except Exception as e:
+        logger.warning(f"No se pudo consultar el cupo de publicación de {ig_user_id}: {e}")
+        return None
+
+
 class InstagramPublisher:
     """
     Publishes content to Instagram using Graph API.
@@ -648,6 +678,16 @@ class InstagramPublisher:
             raise InstagramPublishError(
                 f"Failed to publish container: {error_msg}"
             )
+
+    def get_publishing_quota(
+        self,
+        instagram_account_id: int
+    ) -> Optional[Dict[str, int]]:
+        """Cupo de publicación de la cuenta (ID interno); None si no se puede consultar."""
+        account = self._get_instagram_account(instagram_account_id)
+        if not account:
+            return None
+        return fetch_publishing_quota(account['instagram_user_id'], account['access_token'])
 
     def _get_media_info(
         self,

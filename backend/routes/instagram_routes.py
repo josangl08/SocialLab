@@ -6,13 +6,14 @@ import requests
 from typing import Optional
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
-from starlette.responses import RedirectResponse
+from starlette.responses import RedirectResponse, JSONResponse
 
 from database.supabase_client import get_supabase_client
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import User, InstagramAccountConfigUpdate
 from auth.dependencies import get_current_user, get_current_user_from_query_token
 from services.instagram_insights import InstagramInsightsService
+from services.publisher.instagram_publisher import fetch_publishing_quota
 from utils.encryption import encrypt_token, decrypt_token
 from utils.oauth_state import generate_state_token, verify_state_token
 from utils.graph_api import graph_url
@@ -462,6 +463,15 @@ def publish_to_instagram(post_id: int, current_user: User = Depends(get_current_
         media_url = post.get('media_url')
         if not media_url:
             raise HTTPException(status_code=400, detail="El post debe tener una imagen o video")
+
+        # Cupo de Instagram (100 posts/24 h); si no se puede consultar se publica igual
+        quota = fetch_publishing_quota(ig_account_id, access_token)
+        if quota and quota['quota_usage'] >= quota['quota_total']:
+            # Respuesta directa: HTTPException anidaría el código dentro de "detail"
+            return JSONResponse(status_code=429, content={
+                "detail": "Se ha alcanzado el límite diario de publicaciones de Instagram (100 en 24 h). Inténtalo más tarde.",
+                "code": "PUBLISH_QUOTA_EXCEEDED",
+            })
 
         post_type = post.get('post_type', 'image').lower()
         media_type = 'VIDEO' if post_type in ['video', 'reel'] else 'IMAGE'

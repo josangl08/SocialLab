@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, BackgroundTasks
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi import status as http_status
 from pydantic import BaseModel, Field
 
@@ -314,6 +314,14 @@ def publish_post_now(
             raise HTTPException(status_code=400, detail="Post must be associated with an Instagram account")
 
         publisher = InstagramPublisher()
+        # Cupo de Instagram (100 posts/24 h); si no se puede consultar se publica igual
+        quota = publisher.get_publishing_quota(instagram_account_id)
+        if quota and quota['quota_usage'] >= quota['quota_total']:
+            # Respuesta directa: HTTPException anidaría el código dentro de "detail"
+            return JSONResponse(status_code=429, content={
+                "detail": "Se ha alcanzado el límite diario de publicaciones de Instagram (100 en 24 h). Inténtalo más tarde.",
+                "code": "PUBLISH_QUOTA_EXCEEDED",
+            })
         publish_type = resolve_publish_type(
             {**post, 'content_format': None, 'post_type': request.post_type} if request.post_type else post
         )

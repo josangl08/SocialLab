@@ -294,3 +294,44 @@ def test_instagram_sync_expired_token_returns_401_not_500():
     assert "reconectar" in response.json()["detail"].lower() or "expirado" in response.json()["detail"].lower()
     mock_admin_supabase.table.return_value.update.assert_called_once_with({"token_invalid": True})
     mock_admin_supabase.table.return_value.update.return_value.eq.assert_called_once_with("id", 7)
+
+
+def test_publish_to_instagram_quota_exceeded_returns_429(mock_supabase, mock_admin_supabase):
+    """Publicación directa con cuota agotada devuelve 429 PUBLISH_QUOTA_EXCEEDED sin publicar."""
+    mock_post = {
+        "id": 11,
+        "user_id": USER_ID,
+        "content": "Post sin cuota",
+        "media_url": "https://img.url/photo.png",
+        "post_type": "image",
+        "status": "draft",
+        "instagram_account_id": 1,
+        "instagram_post_id": None
+    }
+    mock_post_execute = MagicMock()
+    mock_post_execute.execute.return_value = MagicMock(data=mock_post)
+    mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value = mock_post_execute
+
+    mock_account = {
+        "id": 1,
+        "instagram_business_account_id": "ig-123",
+        "long_lived_access_token": "valid-token",
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
+        "is_active": True
+    }
+    mock_acc_execute = MagicMock()
+    mock_acc_execute.execute.return_value = MagicMock(data=[mock_account])
+    mock_query = MagicMock()
+    mock_query.eq.return_value = mock_query
+    mock_query.limit.return_value = mock_acc_execute
+    mock_admin_supabase.table.return_value.select.return_value.eq.return_value = mock_query
+
+    with patch("routes.instagram_routes.fetch_publishing_quota", return_value={"quota_usage": 100, "quota_total": 100}) as mock_quota, \
+         patch("routes.instagram_routes.decrypt_token", return_value="valid-token"), \
+         patch("routes.instagram_routes.requests.post") as mock_post_req:
+        response = client.post("/instagram/publish/11")
+
+    assert response.status_code == 429
+    assert response.json()["code"] == "PUBLISH_QUOTA_EXCEEDED"
+    mock_quota.assert_called_once_with("ig-123", "valid-token")
+    mock_post_req.assert_not_called()

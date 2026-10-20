@@ -24,6 +24,7 @@ def test_scheduled_job_publishes_studio_reel_as_reels():
         MagicMock(data={"id": 3, "telegram_chat_id": None, "drive_folder_id": None})
     publisher = MagicMock()
     publisher.publish_post.return_value = {"id": "ig-1"}
+    publisher.get_publishing_quota.return_value = None
 
     with patch("services.scheduler.post_scheduler.get_supabase_admin_client", return_value=db), \
          patch("services.scheduler.post_scheduler.InstagramPublisher", return_value=publisher):
@@ -35,7 +36,7 @@ def test_scheduled_job_publishes_studio_reel_as_reels():
     assert kwargs["trial_graduation"] == "MANUAL"
 
 
-def _publish_now(post, body=None):
+def _publish_now(post, body=None, quota=None, expected_status=200):
     async def user():
         return User(id=USER_ID, email="t@example.com")
 
@@ -44,6 +45,7 @@ def _publish_now(post, body=None):
         MagicMock(data=post)
     publisher = MagicMock()
     publisher.publish_post.return_value = {"id": "ig-1", "permalink": "https://instagram.com/p/1"}
+    publisher.get_publishing_quota.return_value = quota
     prev_user = app.dependency_overrides.get(get_current_user)
     app.dependency_overrides[get_current_user] = user
     app.dependency_overrides[get_user_supabase_client] = lambda: db
@@ -54,7 +56,9 @@ def _publish_now(post, body=None):
         app.dependency_overrides.pop(get_user_supabase_client, None)
         if prev_user is not None:
             app.dependency_overrides[get_current_user] = prev_user
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == expected_status, resp.text
+    if expected_status != 200:
+        return resp.json(), publisher
     return publisher.publish_post.call_args.kwargs
 
 
@@ -70,3 +74,9 @@ def test_publish_now_explicit_post_type_overrides():
     kwargs = _publish_now(STUDIO_REEL, {"post_type": "FEED"})
     assert kwargs["post_type"] == "FEED"
     assert kwargs["video_url"] is None
+
+
+def test_publish_now_without_quota_returns_429_and_does_not_publish():
+    body, publisher = _publish_now(STUDIO_REEL, quota={"quota_usage": 100, "quota_total": 100}, expected_status=429)
+    assert body["code"] == "PUBLISH_QUOTA_EXCEEDED"
+    publisher.publish_post.assert_not_called()
