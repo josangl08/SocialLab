@@ -281,6 +281,9 @@ async def startup_event():
     """Inicializa servicios al arrancar la aplicación."""
     logger.info("🚀 Iniciando SocialLab API...")
 
+    from utils.graph_api import warn_if_outdated
+    warn_if_outdated()
+
     try:
         from services.scheduler.post_scheduler import PostScheduler
         scheduler = PostScheduler()

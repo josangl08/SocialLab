@@ -12,6 +12,7 @@ backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
 from database.supabase_client import get_supabase_client, get_supabase_admin_client, SUPABASE_URL
+from utils.graph_api import graph_url
 
 
 def diagnose_instagram_api():
@@ -94,7 +95,7 @@ def diagnose_instagram_api():
     if not ig_user_id:
         print("   Intentando obtener Instagram ID desde el token...")
         try:
-            me_url = "https://graph.facebook.com/v24.0/me/accounts"
+            me_url = graph_url("me/accounts")
             me_params = {'access_token': access_token}
             me_response = requests.get(me_url, params=me_params)
 
@@ -105,7 +106,7 @@ def diagnose_instagram_api():
                     page_id = pages[0]['id']
                     page_token = pages[0].get('access_token', access_token)
 
-                    ig_url = f"https://graph.facebook.com/v24.0/{page_id}"
+                    ig_url = graph_url(page_id)
                     ig_params = {
                         'fields': 'instagram_business_account',
                         'access_token': page_token
@@ -126,7 +127,7 @@ def diagnose_instagram_api():
         return
 
     try:
-        url = f"https://graph.facebook.com/v24.0/{ig_user_id}"
+        url = graph_url(ig_user_id)
         params = {
             'fields': 'id,username,name,media_count,followers_count',
             'access_token': access_token
@@ -172,7 +173,7 @@ def diagnose_instagram_api():
         print(f"   Probando: {metric} (period={period})...")
 
         try:
-            url = f"https://graph.facebook.com/v24.0/{ig_user_id}/insights"
+            url = graph_url(f"{ig_user_id}/insights")
             params = {
                 'metric': metric,
                 'period': period,
@@ -224,7 +225,7 @@ def diagnose_instagram_api():
         metric = metric_info['name']
         print(f"   Probando: {metric}...")
         try:
-            url = f"https://graph.facebook.com/v24.0/{ig_user_id}/insights"
+            url = graph_url(f"{ig_user_id}/insights")
             params = {
                 'metric': metric,
                 'period': 'lifetime',
@@ -259,7 +260,7 @@ def diagnose_instagram_api():
         metric = 'follower_demographics'
         print(f"   Probando: {friendly_name} (via '{metric}' con breakdown '{breakdown}')...")
         try:
-            url = f"https://graph.facebook.com/v24.0/{ig_user_id}/insights"
+            url = graph_url(f"{ig_user_id}/insights")
             params = {
                 'metric': metric,
                 'period': 'lifetime',
@@ -297,7 +298,7 @@ def diagnose_instagram_api():
 
     try:
         # Obtener el último post
-        media_url = f"https://graph.facebook.com/v24.0/{ig_user_id}/media"
+        media_url = graph_url(f"{ig_user_id}/media")
         media_params = {'access_token': access_token, 'limit': 1}
         media_response = requests.get(media_url, params=media_params)
 
@@ -308,7 +309,7 @@ def diagnose_instagram_api():
             media_metrics_to_test = ['total_interactions', 'reach', 'saved']
             for metric in media_metrics_to_test:
                 print(f"      Probando: {metric}...")
-                insights_url = f"https://graph.facebook.com/v24.0/{media_id}/insights"
+                insights_url = graph_url(f"{media_id}/insights")
                 insights_params = {
                     'metric': metric,
                     'access_token': access_token

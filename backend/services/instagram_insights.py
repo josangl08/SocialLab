@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from httpx import ReadError
 
 from utils.encryption import decrypt_token
+from utils.graph_api import GRAPH_BASE_URL
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 class InstagramInsightsService:
     """Servicio para interactuar con Instagram Graph API y obtener insights"""
 
-    BASE_URL = "https://graph.facebook.com/v24.0"
+    BASE_URL = GRAPH_BASE_URL
 
     def __init__(self, access_token: str, instagram_account_id: str):
         self.access_token = access_token

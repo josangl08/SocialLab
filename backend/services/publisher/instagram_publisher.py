@@ -10,7 +10,6 @@ Author: SocialLab
 Date: 2025-01-16
 """
 
-import os
 import json
 import time
 import logging
@@ -22,6 +21,7 @@ from requests.exceptions import RequestException
 
 from database.supabase_client import get_supabase_admin_client
 from utils.encryption import decrypt_token
+from utils.graph_api import GRAPH_BASE_URL
 
 logger = logging.getLogger(__name__)
 
@@ -65,13 +65,7 @@ class InstagramPublisher:
 
     def __init__(self):
         self.supabase = get_supabase_admin_client()
-        self.graph_api_version = os.getenv(
-            'INSTAGRAM_GRAPH_API_VERSION',
-            'v18.0'
-        )
-        self.base_url = (
-            f"https://graph.facebook.com/{self.graph_api_version}"
-        )
+        self.base_url = GRAPH_BASE_URL
         self.container_check_interval = 5  # seconds
         self.max_container_checks = 12  # 60 seconds total
 

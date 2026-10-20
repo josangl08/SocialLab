@@ -15,6 +15,9 @@ import requests
 # Cargar variables de entorno
 load_dotenv()
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.graph_api import graph_url
+
 # Colores para terminal
 class Colors:
     GREEN = '\033[92m'
@@ -257,7 +260,7 @@ class Diagnostic:
 
         try:
             # Probar token obteniendo info del usuario
-            debug_url = f"https://graph.facebook.com/v19.0/debug_token?input_token={token}&access_token={token}"
+            debug_url = graph_url(f"debug_token?input_token={token}&access_token={token}")
             debug_response = requests.get(debug_url)
 
             if debug_response.status_code == 200:
@@ -276,7 +279,7 @@ class Diagnostic:
 
             # Obtener páginas de Facebook
             print(f"\n  {Colors.CYAN}→ Obteniendo páginas de Facebook...{Colors.END}")
-            pages_url = f"https://graph.facebook.com/v19.0/me/accounts?access_token={token}"
+            pages_url = graph_url(f"me/accounts?access_token={token}")
             pages_response = requests.get(pages_url)
 
             if pages_response.status_code != 200:
@@ -306,7 +309,7 @@ class Diagnostic:
             # Obtener cuenta de Instagram Business
             print(f"\n  {Colors.CYAN}→ Obteniendo cuenta de Instagram Business...{Colors.END}")
             facebook_page_id = pages[0]["id"]
-            ig_url = f"https://graph.facebook.com/v19.0/{facebook_page_id}?fields=instagram_business_account&access_token={token}"
+            ig_url = graph_url(f"{facebook_page_id}?fields=instagram_business_account&access_token={token}")
             ig_response = requests.get(ig_url)
 
             if ig_response.status_code != 200:
@@ -336,7 +339,7 @@ class Diagnostic:
 
             # Obtener media de Instagram
             print(f"\n  {Colors.CYAN}→ Obteniendo publicaciones de Instagram...{Colors.END}")
-            media_url = f"https://graph.facebook.com/v19.0/{ig_business_id_api}/media?fields=id,caption,media_type,media_url,timestamp&limit=5&access_token={token}"
+            media_url = graph_url(f"{ig_business_id_api}/media?fields=id,caption,media_type,media_url,timestamp&limit=5&access_token={token}")
             media_response = requests.get(media_url)
 
             if media_response.status_code != 200:

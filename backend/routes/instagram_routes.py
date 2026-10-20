@@ -15,6 +15,7 @@ from auth.dependencies import get_current_user, get_current_user_from_query_toke
 from services.instagram_insights import InstagramInsightsService
 from utils.encryption import encrypt_token, decrypt_token
 from utils.oauth_state import generate_state_token, verify_state_token
+from utils.graph_api import graph_url
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/instagram", tags=["Instagram Integration"])
@@ -142,7 +143,7 @@ def instagram_callback(
 
         expires_at = datetime.utcnow() + timedelta(seconds=long_lived_expires_in)
 
-        pages_url = f"https://graph.facebook.com/v19.0/me/accounts?access_token={long_lived_access_token}"
+        pages_url = graph_url(f"me/accounts?access_token={long_lived_access_token}")
         pages_response = requests.get(pages_url)
         pages_response.raise_for_status()
         pages_data = pages_response.json()
@@ -154,7 +155,7 @@ def instagram_callback(
         if not facebook_page_id:
             raise HTTPException(status_code=500, detail="No se pudo obtener el ID de la página de Facebook.")
 
-        instagram_business_account_url = f"https://graph.facebook.com/v19.0/{facebook_page_id}?fields=instagram_business_account&access_token={long_lived_access_token}"
+        instagram_business_account_url = graph_url(f"{facebook_page_id}?fields=instagram_business_account&access_token={long_lived_access_token}")
         instagram_account_response = requests.get(instagram_business_account_url)
         instagram_account_response.raise_for_status()
         instagram_account_data = instagram_account_response.json()
@@ -228,7 +229,7 @@ def instagram_sync(
         account_id = response.data[0]['id']
         access_token = decrypt_token(response.data[0]['long_lived_access_token'])
 
-        user_accounts_url = f"https://graph.facebook.com/v19.0/me/accounts?access_token={access_token}"
+        user_accounts_url = graph_url(f"me/accounts?access_token={access_token}")
         user_accounts_response = requests.get(user_accounts_url)
         user_accounts_response.raise_for_status()
         user_accounts_data = user_accounts_response.json()
@@ -241,7 +242,7 @@ def instagram_sync(
 
         facebook_page_id = user_accounts_data['data'][0]['id']
 
-        ig_account_url = f"https://graph.facebook.com/v19.0/{facebook_page_id}?fields=instagram_business_account&access_token={access_token}"
+        ig_account_url = graph_url(f"{facebook_page_id}?fields=instagram_business_account&access_token={access_token}")
         ig_account_response = requests.get(ig_account_url)
         ig_account_response.raise_for_status()
         ig_account_data = ig_account_response.json()
@@ -255,7 +256,7 @@ def instagram_sync(
         instagram_user_id = ig_account_data['instagram_business_account']['id']
 
         all_media = []
-        next_url = f"https://graph.facebook.com/v19.0/{instagram_user_id}/media?fields=id,caption,media_type,media_url,thumbnail_url,timestamp,permalink,media_product_type&limit=100&access_token={access_token}"
+        next_url = graph_url(f"{instagram_user_id}/media?fields=id,caption,media_type,media_url,thumbnail_url,timestamp,permalink,media_product_type&limit=100&access_token={access_token}")
 
         logger.info("📦 Obteniendo posts de Instagram API con paginación...")
         page_count = 0
@@ -318,7 +319,7 @@ def instagram_sync(
             on_conflict='instagram_post_id'
         ).execute()
 
-        profile_url = f"https://graph.facebook.com/v19.0/{instagram_user_id}?fields=followers_count,media_count,follows_count,name,username,profile_picture_url&access_token={access_token}"
+        profile_url = graph_url(f"{instagram_user_id}?fields=followers_count,media_count,follows_count,name,username,profile_picture_url&access_token={access_token}")
         profile_response = requests.get(profile_url)
         profile_response.raise_for_status()
         profile_data = profile_response.json()
@@ -476,7 +477,7 @@ def publish_to_instagram(post_id: int, current_user: User = Depends(get_current_
             container_params['video_url'] = media_url
             container_params['media_type'] = 'REELS' if post_type == 'reel' else 'VIDEO'
 
-        container_url = f"https://graph.facebook.com/v19.0/{ig_account_id}/media"
+        container_url = graph_url(f"{ig_account_id}/media")
         container_response = requests.post(container_url, data=container_params)
 
         if container_response.status_code != 200:
@@ -487,7 +488,7 @@ def publish_to_instagram(post_id: int, current_user: User = Depends(get_current_
 
         container_id = container_response.json().get('id')
 
-        status_url = f"https://graph.facebook.com/v19.0/{container_id}"
+        status_url = graph_url(container_id)
         status_params = {'fields': 'status_code', 'access_token': access_token}
 
         max_attempts = 10
@@ -501,7 +502,7 @@ def publish_to_instagram(post_id: int, current_user: User = Depends(get_current_
                     raise HTTPException(status_code=500, detail="Error al procesar media en Instagram")
             time.sleep(2)
 
-        publish_url = f"https://graph.facebook.com/v19.0/{ig_account_id}/media_publish"
+        publish_url = graph_url(f"{ig_account_id}/media_publish")
         publish_params = {'creation_id': container_id, 'access_token': access_token}
 
         publish_response = requests.post(publish_url, data=publish_params)

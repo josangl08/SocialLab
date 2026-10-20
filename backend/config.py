@@ -27,6 +27,7 @@ _OPTIONAL_DEFAULTS = {
     "GOOGLE_CLIENT_SECRET": "",
     "GOOGLE_REDIRECT_URI": "",
     "FRONTEND_URL": "http://localhost:5173",
+    "INSTAGRAM_GRAPH_API_VERSION": "v26.0",
 }
 
 def __getattr__(name: str) -> str:
