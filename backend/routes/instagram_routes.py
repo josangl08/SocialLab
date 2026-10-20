@@ -14,6 +14,7 @@ from models.schemas import User, InstagramAccountConfigUpdate
 from auth.dependencies import get_current_user, get_current_user_from_query_token
 from services.instagram_insights import InstagramInsightsService
 from services.publisher.instagram_publisher import fetch_publishing_quota
+from services.instagram_token import get_reconnect_deadline
 from utils.encryption import encrypt_token, decrypt_token
 from utils.oauth_state import generate_state_token, verify_state_token
 from utils.graph_api import graph_url
@@ -143,6 +144,10 @@ def instagram_callback(
             logger.warning("'expires_in' no recibido para el token de larga duración. Usando 60 días por defecto.")
 
         expires_at = datetime.utcnow() + timedelta(seconds=long_lived_expires_in)
+        # La fecha real de reconexión es la caducidad del acceso a datos (AD-4)
+        token_status = get_reconnect_deadline(long_lived_access_token)
+        if token_status and token_status['reconnect_by']:
+            expires_at = token_status['reconnect_by'].replace(tzinfo=None)
 
         pages_url = graph_url(f"me/accounts?access_token={long_lived_access_token}")
         pages_response = requests.get(pages_url)

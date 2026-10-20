@@ -670,6 +670,19 @@ class TelegramService:
                 "text": text
             })
 
+    async def send_reconnect_reminder(self, chat_id: str, username: str, days_left: int) -> None:
+        account = f"@{username}" if username else "your Instagram account"
+        text = (
+            f"🔑 Reconnect {account} in SocialLab within {days_left} "
+            f"day{'s' if days_left != 1 else ''}: Instagram stops sharing its data after that "
+            f"and scheduled posts, sync and metrics will stop working."
+        )
+        async with httpx.AsyncClient() as client:
+            await client.post(self._bot_url("sendMessage"), json={
+                "chat_id": chat_id,
+                "text": text
+            })
+
     async def _download_drive_image(self, user_id: str, file_id: str) -> Optional[bytes]:
         """Downloads a Google Drive file as bytes. Runs the sync Drive API in a thread executor."""
         import io

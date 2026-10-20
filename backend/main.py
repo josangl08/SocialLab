@@ -347,6 +347,16 @@ async def startup_event():
             max_instances=1
         )
         logger.info("✅ Cron job de métricas de Stories configurado (cada hora, minuto 30)")
+
+        from services.instagram_token import check_account_tokens
+        scheduler.scheduler.add_job(
+            check_account_tokens,
+            trigger=CronTrigger(hour=7),
+            id='check_instagram_tokens',
+            replace_existing=True,
+            max_instances=1
+        )
+        logger.info("✅ Cron job de caducidad de tokens de Instagram configurado (diario 07:00)")
         
         scheduler.scheduler.add_job(
             run_agent_for_all_accounts,

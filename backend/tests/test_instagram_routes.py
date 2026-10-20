@@ -219,6 +219,7 @@ def test_callback_instagram_valid_state_succeeds(mock_admin_supabase):
 
     with patch("routes.instagram_routes.requests.post", return_value=mock_post_response), \
          patch("routes.instagram_routes.requests.get", side_effect=mock_get_responses), \
+         patch("routes.instagram_routes.get_reconnect_deadline", return_value=None), \
          patch("routes.instagram_routes.get_supabase_admin_client", return_value=mock_admin_supabase):
         response = client.get(
             f"/callback/instagram?code=auth_code&state={state_token}",
@@ -246,6 +247,7 @@ def test_callback_instagram_with_account_id_updates_targeted_row_not_upsert(mock
 
     with patch("routes.instagram_routes.requests.post", return_value=mock_post_response), \
          patch("routes.instagram_routes.requests.get", side_effect=mock_get_responses), \
+         patch("routes.instagram_routes.get_reconnect_deadline", return_value=None), \
          patch("routes.instagram_routes.get_supabase_admin_client", return_value=mock_admin_supabase):
         response = client.get(
             f"/callback/instagram?code=auth_code&state={state_token}",
@@ -259,6 +261,30 @@ def test_callback_instagram_with_account_id_updates_targeted_row_not_upsert(mock
     assert update_payload["instagram_business_account_id"] == "ig-account-1"
     assert update_payload["token_invalid"] is False
     mock_admin_supabase.table.return_value.update.return_value.eq.assert_any_call("id", "7")
+
+def test_callback_instagram_stores_real_reconnect_deadline(mock_admin_supabase):
+    """expires_at = fecha real de reconexión de debug_token, no ahora + expires_in (AD-4)."""
+    state_token = generate_state_token(USER_ID, account_id="7")
+    mock_post_response = MagicMock()
+    mock_post_response.json.return_value = {"access_token": "short-lived-token"}
+    mock_get_responses = [
+        MagicMock(json=MagicMock(return_value={"access_token": "long-lived-token", "expires_in": 5184000})),
+        MagicMock(json=MagicMock(return_value={"data": [{"id": "fb-page-1"}]})),
+        MagicMock(json=MagicMock(return_value={"instagram_business_account": {"id": "ig-account-1"}})),
+    ]
+    deadline = datetime(2027, 1, 16, 12, 38, 55, tzinfo=timezone.utc)
+
+    with patch("routes.instagram_routes.requests.post", return_value=mock_post_response), \
+         patch("routes.instagram_routes.requests.get", side_effect=mock_get_responses), \
+         patch("routes.instagram_routes.get_reconnect_deadline",
+               return_value={"is_valid": True, "reconnect_by": deadline}) as mock_deadline, \
+         patch("routes.instagram_routes.get_supabase_admin_client", return_value=mock_admin_supabase):
+        response = client.get(f"/callback/instagram?code=auth_code&state={state_token}", follow_redirects=False)
+
+    assert response.status_code in [302, 307]
+    mock_deadline.assert_called_once_with("long-lived-token")
+    update_payload = mock_admin_supabase.table.return_value.update.call_args[0][0]
+    assert update_payload["expires_at"] == "2027-01-16T12:38:55Z"
 
 def test_callback_instagram_invalid_state_returns_400():
     response = client.get(
