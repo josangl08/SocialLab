@@ -20,6 +20,7 @@ from utils.timezones import (
     to_local,
     zone_label,
     local_today,
+    utc_now_naive,
 )
 
 
@@ -152,3 +153,11 @@ def test_local_today_uses_zone_date():
         mock_dt.now.return_value = datetime(2026, 10, 31, 17, 0, tzinfo=timezone.utc)
         assert local_today("Asia/Kuching") == date(2026, 11, 1)
         assert local_today("Europe/Madrid") == date(2026, 10, 31)
+
+
+def test_utc_now_naive_es_utc_sin_tzinfo():
+    antes = datetime.now(timezone.utc).replace(tzinfo=None)
+    ahora = utc_now_naive()
+    despues = datetime.now(timezone.utc).replace(tzinfo=None)
+    assert ahora.tzinfo is None
+    assert antes <= ahora <= despues

@@ -27,6 +27,7 @@ from mcp.vision_server import mcp as vision_mcp
 from mcp.analytics_server import mcp as analytics_mcp
 from mcp.skills_server import mcp as skills_mcp
 from services.hermes.skills import run_niche_research_for_account, run_visual_performance_skill
+from utils.timezones import utc_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -319,7 +320,7 @@ async def _maybe_refresh_memory_summary(account_id: int) -> None:
         return
     supabase.table("instagram_accounts").update({
         "agent_memory_summary": summary,
-        "agent_memory_summary_updated_at": datetime.utcnow().isoformat(),
+        "agent_memory_summary_updated_at": utc_now_naive().isoformat(),
     }).eq("id", account_id).execute()
 
 

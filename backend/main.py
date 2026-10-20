@@ -2,7 +2,7 @@ import os
 import sys
 import asyncio
 import logging
-from datetime import datetime, date, timedelta
+from datetime import date, timedelta
 from typing import Optional
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
@@ -30,6 +30,7 @@ sys.stdout.flush()
 # Importar cliente de Supabase
 from database.supabase_client import get_supabase_client, get_supabase_admin_client
 from utils.encryption import decrypt_token
+from utils.timezones import utc_now_naive
 supabase = get_supabase_client()
 admin_supabase = get_supabase_admin_client()
 
@@ -86,7 +87,7 @@ def sync_all_accounts_metrics():
                 )
 
                 admin_supabase.table('instagram_accounts')\
-                    .update({'last_sync_at': datetime.utcnow().isoformat()})\
+                    .update({'last_sync_at': utc_now_naive().isoformat()})\
                     .eq('id', account['id'])\
                     .execute()
 

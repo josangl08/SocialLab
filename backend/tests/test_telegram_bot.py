@@ -10,6 +10,7 @@ from auth.dependencies import get_current_user
 from models.schemas import User
 from tests.conftest import USER_ID
 from services.telegram_service import TelegramService
+from utils.timezones import utc_now_naive
 
 # Set dummy env vars for testing
 os.environ["TELEGRAM_BOT_TOKEN"] = "mock-bot-token"
@@ -188,7 +189,7 @@ def test_generate_link_token_no_accounts(mock_supabase):
 
 def test_link_account_success(mock_supabase):
     # Token valid for 10 minutes in the future
-    future_expiry = (datetime.utcnow() + timedelta(minutes=5)).isoformat() + "Z"
+    future_expiry = (utc_now_naive() + timedelta(minutes=5)).isoformat() + "Z"
     
     mock_select = MagicMock()
     mock_select.execute.return_value = MagicMock(data=[{"id": 42, "telegram_link_token_expires_at": future_expiry}])
@@ -212,7 +213,7 @@ def test_link_account_success(mock_supabase):
 
 def test_link_account_expired(mock_supabase):
     # Token expired 5 minutes ago
-    past_expiry = (datetime.utcnow() - timedelta(minutes=5)).isoformat() + "Z"
+    past_expiry = (utc_now_naive() - timedelta(minutes=5)).isoformat() + "Z"
     
     mock_select = MagicMock()
     mock_select.execute.return_value = MagicMock(data=[{"id": 42, "telegram_link_token_expires_at": past_expiry}])

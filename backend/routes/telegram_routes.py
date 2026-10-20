@@ -9,6 +9,7 @@ from database.supabase_client import get_supabase_client, get_supabase_admin_cli
 from models.schemas import User, TelegramUpdate, TelegramLinkTokenResponse
 from auth.dependencies import get_current_user
 from services.telegram_service import TelegramService
+from utils.timezones import utc_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ def generate_link_token(current_user: User = Depends(get_current_user)):
         account_id = account_data[0]['id']
         token = str(uuid.uuid4())
         # Token is valid for 10 minutes
-        expires_at = datetime.utcnow() + timedelta(minutes=10)
+        expires_at = utc_now_naive() + timedelta(minutes=10)
 
         admin_supabase.table('instagram_accounts')\
             .update({

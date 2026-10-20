@@ -121,6 +121,11 @@ def local_today(tz: Union[str, ZoneInfo]) -> date:
     return to_local(datetime.now(timezone.utc), tz).date()
 
 
+def utc_now_naive() -> datetime:
+    """Hora actual en UTC sin tzinfo; sustituye a datetime.utcnow(), obsoleto."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def zone_label(tz: str) -> str:
     """Nombre corto legible de una zona IANA ("Asia/Kuching" -> "Kuching")."""
     return tz.split("/")[-1].replace("_", " ")

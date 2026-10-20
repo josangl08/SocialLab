@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 from collections import defaultdict
 
 from database.supabase_client import retry_on_network_error
-from utils.timezones import effective_timezone, local_today, to_local
+from utils.timezones import effective_timezone, local_today, to_local, utc_now_naive
 from services.content_quality import score_hook
 from services.content_formats import get_strategy_mode
 
@@ -102,7 +102,7 @@ class AnalyticsService:
 
     def _get_median_views_90d(self, instagram_account_id: int) -> Optional[float]:
         """Mediana de vistas de los posts publicados en los últimos 90 días."""
-        cutoff = datetime.utcnow() - timedelta(days=90)
+        cutoff = utc_now_naive() - timedelta(days=90)
         result = self.db.table('posts').select(
             'id, post_performance(impressions)'
         ).eq('instagram_account_id', instagram_account_id).eq(
@@ -116,7 +116,7 @@ class AnalyticsService:
 
     def _get_follower_growth(self, instagram_account_id: int, days: int) -> Dict:
         """Serie de altas/bajas y toques en botones de contacto desde los snapshots diarios — AD-9."""
-        cutoff = (datetime.utcnow() - timedelta(days=days)).date()
+        cutoff = (utc_now_naive() - timedelta(days=days)).date()
         result = self.db.table('instagram_account_snapshots').select(
             'date, follows, unfollows, profile_links_taps'
         ).eq('instagram_account_id', instagram_account_id).gte(
@@ -141,7 +141,7 @@ class AnalyticsService:
         agregado por fórmula. Sin Gemini (score_hook es determinista).
         Los Trial Reels llevan su reels_skip_rate para comparar ganchos (AD-10).
         """
-        cutoff = datetime.utcnow() - timedelta(days=90)
+        cutoff = utc_now_naive() - timedelta(days=90)
         result = self.db.table('posts').select(
             'id, content, trial_graduation, '
             'post_performance(impressions, reach, shares, reels_skip_rate)'
@@ -411,7 +411,7 @@ class AnalyticsService:
 
         # Solo aplicar filtro de fecha si NO es "all time"
         if days < 3650:
-            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            cutoff_date = utc_now_naive() - timedelta(days=days)
             query = query.gte('publication_date', cutoff_date.isoformat())
             logger.info(
                 f"📊 Obteniendo posts de los últimos {days} días "
@@ -548,10 +548,10 @@ class AnalyticsService:
             Dict con porcentajes de crecimiento
         """
         # Obtener posts del periodo anterior (mismo número de días)
-        previous_start = datetime.utcnow() - timedelta(
+        previous_start = utc_now_naive() - timedelta(
             days=current_period_days * 2
         )
-        previous_end = datetime.utcnow() - timedelta(days=current_period_days)
+        previous_end = utc_now_naive() - timedelta(days=current_period_days)
 
         previous_posts_result = self.db.table('posts').select(
             'id, post_performance(likes, comments, saves, reach, impressions)'
@@ -630,7 +630,7 @@ class AnalyticsService:
         # 1. Crecimiento de seguidores (snapshots diarios)
         # Limitar a 365 días máximo para evitar payloads enormes con 'all'
         display_days = min(days, 365)
-        cutoff_date = datetime.utcnow().date() - timedelta(days=display_days)
+        cutoff_date = utc_now_naive().date() - timedelta(days=display_days)
         try:
             growth_result = self.db.table('instagram_account_snapshots').select(
                 'date, follower_count'
@@ -647,7 +647,7 @@ class AnalyticsService:
                 # Forward-fill: generar un punto por cada día del rango para que
                 # el eje X del gráfico siempre cubra el período seleccionado.
                 # Días sin sync heredan el último valor conocido (no se pone 0).
-                today = datetime.utcnow().date()
+                today = utc_now_naive().date()
                 prev_count = snapshots[0]['follower_count']
                 result = []
                 current = cutoff_date + timedelta(days=1)
@@ -817,7 +817,7 @@ class AnalyticsService:
         recommendations = []
 
         # 1. Obtener performance histórico por hora
-        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        cutoff_date = utc_now_naive() - timedelta(days=days)
 
         try:
             # Query para obtener engagement promedio por hora del día
@@ -1236,7 +1236,7 @@ class AnalyticsService:
         ).eq('is_collaboration', False).not_.is_('drive_file_id', 'null')
 
         if days < 3650:
-            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            cutoff_date = utc_now_naive() - timedelta(days=days)
             query = query.gte('publication_date', cutoff_date.isoformat())
 
         posts_res = query.execute()

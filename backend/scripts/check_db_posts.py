@@ -6,7 +6,8 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database import supabase
-from datetime import datetime, timedelta
+from datetime import timedelta
+from utils.timezones import utc_now_naive
 
 print("🔍 Verificando posts en la base de datos...\n")
 
@@ -48,7 +49,7 @@ for status in ['published', 'scheduled', 'draft', 'failed']:
     print(f"   - {status.capitalize()}: {count_result.count}")
 
 # 4. Verificar posts de los últimos 7 días
-cutoff_date = datetime.utcnow() - timedelta(days=7)
+cutoff_date = utc_now_naive() - timedelta(days=7)
 print(f"\n📅 Posts de los últimos 7 días (desde {cutoff_date.date()}):")
 
 posts_7d = supabase.table('posts')\

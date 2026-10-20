@@ -30,6 +30,7 @@ from services.thumbnail_store import generate_once, save_in_background
 from services.publisher.instagram_publisher import InstagramPublisher, InstagramPublishError, resolve_publish_type, STORY_POST_TYPES
 from services.analytics.analytics_service import AnalyticsService
 from supabase import Client
+from utils.timezones import utc_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -334,7 +335,7 @@ def publish_post_now(
             trial_graduation=post.get('trial_graduation')
         )
 
-        published_at = datetime.utcnow()
+        published_at = utc_now_naive()
         supabase.table('posts').update({
             'status': 'published',
             'instagram_post_id': result['id'],

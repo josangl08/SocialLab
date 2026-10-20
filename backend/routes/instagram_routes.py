@@ -24,6 +24,7 @@ router = APIRouter(prefix="/instagram", tags=["Instagram Integration"])
 supabase = get_supabase_client()
 admin_supabase = get_supabase_admin_client()
 from config import INSTAGRAM_APP_ID, INSTAGRAM_APP_SECRET, INSTAGRAM_REDIRECT_URI
+from utils.timezones import utc_now_naive
 
 @router.get("/login")
 def instagram_login(
@@ -143,7 +144,7 @@ def instagram_callback(
             long_lived_expires_in = 60 * 24 * 60 * 60
             logger.warning("'expires_in' no recibido para el token de larga duración. Usando 60 días por defecto.")
 
-        expires_at = datetime.utcnow() + timedelta(seconds=long_lived_expires_in)
+        expires_at = utc_now_naive() + timedelta(seconds=long_lived_expires_in)
         # La fecha real de reconexión es la caducidad del acceso a datos (AD-4)
         token_status = get_reconnect_deadline(long_lived_access_token)
         if token_status and token_status['reconnect_by']:
@@ -335,7 +336,7 @@ def instagram_sync(
             'username': profile_data.get('username', ''),
             'account_name': profile_data.get('name', ''),
             'profile_picture_url': profile_data.get('profile_picture_url', ''),
-            'last_sync_at': datetime.utcnow().isoformat(),
+            'last_sync_at': utc_now_naive().isoformat(),
             'token_invalid': False
         }).eq('id', account_id).execute()
 
@@ -533,7 +534,7 @@ def publish_to_instagram(post_id: int, current_user: User = Depends(get_current_
         supabase.table('posts').update({
             'instagram_post_id': instagram_post_id,
             'status': 'published',
-            'publication_date': datetime.utcnow().isoformat()
+            'publication_date': utc_now_naive().isoformat()
         }).eq('id', post_id).execute()
 
         return {
@@ -563,7 +564,7 @@ def schedule_instagram_post(
         if post.get('instagram_post_id'):
             raise HTTPException(status_code=400, detail="Este post ya está publicado en Instagram")
 
-        if scheduled_time <= datetime.utcnow():
+        if scheduled_time <= utc_now_naive():
             raise HTTPException(status_code=400, detail="La fecha programada debe ser en el futuro")
 
         supabase.table('posts').update({

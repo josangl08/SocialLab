@@ -21,6 +21,7 @@ from database.supabase_client import get_supabase_admin_client
 from services.instagram_insights import InstagramInsightsService
 from services.analytics import AnalyticsService
 from utils.encryption import decrypt_token
+from utils.timezones import utc_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ def full_sync_account(instagram_service, db_client, user_id, instagram_account_i
     - online_followers_data (actividad por hora)
     - posts + post_performance (contenido)
     """
-    today = datetime.utcnow().date()
+    today = utc_now_naive().date()
 
     # 1. Sincronizar métricas principales de la cuenta (15+ métricas)
     logger.info(f"🔄 Sincronizando métricas de cuenta {instagram_account_id_db}")

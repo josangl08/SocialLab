@@ -9,6 +9,7 @@ from services.gemini_service import (
     get_gemini_client,
     DECISION_GEMINI_MODELS,
 )
+from utils.timezones import utc_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -333,7 +334,7 @@ def extract_rule_from_correction(account_id: int, correction_row: Dict[str, Any]
         }
         response = supabase.table("account_brand_rules").insert(insert_data).execute()
         supabase.table("account_brand_rules").update(
-            {"is_active": False, "updated_at": datetime.utcnow().isoformat()}
+            {"is_active": False, "updated_at": utc_now_naive().isoformat()}
         ).eq("id", target["id"]).execute()
         return response.data[0] if response.data else {**target, **insert_data}
     except Exception:
