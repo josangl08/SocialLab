@@ -251,3 +251,29 @@ def test_get_instagram_account_resolves_base_url_from_login_type(publisher):
         with patch("services.publisher.instagram_publisher.decrypt_token", return_value="tok"):
             account = publisher._get_instagram_account(1)
         assert account["base_url"].startswith(f"https://{host}/")
+
+
+def test_publish_story_waits_for_container_before_publishing(publisher, mock_account):
+    """Smoke: publicar la Story sin esperar al contenedor fallaba de forma intermitente."""
+    calls = []
+    with patch.object(publisher, "_get_instagram_account", return_value=mock_account), \
+         patch.object(publisher, "verify_media_url_accessibility", return_value=True), \
+         patch.object(publisher, "_wait_for_container", side_effect=lambda *a: calls.append("wait")), \
+         patch.object(publisher, "_publish_container", side_effect=lambda *a: calls.append("publish") or "story-id"), \
+         patch("services.publisher.instagram_publisher.requests.post") as mock_post:
+        mock_post.return_value.json.return_value = {"id": "container-story"}
+
+        publisher.publish_post(media_url="https://example.com/s.jpg", caption="", instagram_account_id=1, post_type="STORY")
+
+    assert calls == ["wait", "publish"]
+
+
+def test_parse_error_response_reads_error_body_of_failed_response(publisher):
+    """Un Response 400 es falsy: antes devolvía "No response from Instagram API" y ocultaba el error."""
+    import requests
+    response = requests.Response()
+    response.status_code = 400
+    response._content = json.dumps({"error": {"message": "Media ID is not available", "code": 9007, "type": "OAuthException"}}).encode()
+
+    assert publisher._parse_error_response(response) == "[9007] OAuthException: Media ID is not available"
+    assert publisher._parse_error_response(None) == "No response from Instagram API"

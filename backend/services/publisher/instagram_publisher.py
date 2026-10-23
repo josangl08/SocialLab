@@ -433,7 +433,9 @@ class InstagramPublisher:
 
         container_id = response.json()['id']
 
-        # Publish immediately
+        # Publicar antes de que Instagram procese el contenedor falla de forma intermitente
+        self._wait_for_container(base_url, container_id, access_token)
+
         media_id = self._publish_container(
             base_url,
             ig_user_id,
@@ -793,7 +795,8 @@ class InstagramPublisher:
         Returns:
             Human-readable error message
         """
-        if not response:
+        # `is None`: un Response con error es falsy (__bool__ refleja .ok) y ocultaba el mensaje
+        if response is None:
             return "No response from Instagram API"
 
         try:
