@@ -37,10 +37,13 @@ export interface StoryMetrics {
   story_navigation?: StoryNavigation | null;
 }
 
+export type LoginType = 'facebook' | 'instagram';
+
 export interface InstagramAccount {
   id: number;
   username: string | null;
   account_name: string | null;
+  login_type?: LoginType;
   profile_picture_url?: string | null;
   followers_count?: number | null;
   expires_at?: string | null;

@@ -291,4 +291,122 @@ describe('AccountsPage Component', () => {
 
     (window as any).location = originalLocation;
   });
+
+  test('?instagram_error=no_linked_page explica que falta vincular Instagram a una Página', async () => {
+    const originalLocation = window.location;
+    delete (window as any).location;
+    window.location = { ...originalLocation, search: '?instagram_error=no_linked_page' } as any;
+    const replaceStateSpy = vi.spyOn(window.history, 'replaceState');
+
+    render(<AccountsPage />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/cuenta profesional de Instagram vinculada/);
+    expect(replaceStateSpy).toHaveBeenCalled();
+    (window as any).location = originalLocation;
+  });
+
+  const mixedAccounts = [
+    {
+      id: 1,
+      username: 'fb_user',
+      account_name: 'FB Connected',
+      login_type: 'facebook',
+      profile_picture_url: null,
+      expires_at: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
+      is_active: true,
+    },
+    {
+      id: 2,
+      username: 'ig_user',
+      account_name: 'IG Connected',
+      login_type: 'instagram',
+      profile_picture_url: null,
+      expires_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      is_active: true,
+    },
+  ];
+
+  const renderMixed = async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(url.includes('/api/drive/status') ? { connected: false } : mixedAccounts),
+    }));
+    render(<AccountsPage />);
+    await waitFor(() => expect(screen.getByText('@fb_user')).toBeInTheDocument());
+  };
+
+  const withMockLocation = (fn: () => void) => {
+    const originalLocation = window.location;
+    const setLocation = (value: unknown) =>
+      Object.defineProperty(window, 'location', { value, writable: true, configurable: true });
+    setLocation({ href: '' });
+    try { fn(); } finally { setLocation(originalLocation); }
+  };
+
+  test('cada tarjeta muestra con qué login está conectada y lo que no incluye', async () => {
+    await renderMixed();
+
+    const fbCard = screen.getByText('@fb_user').closest('.st-account-card') as HTMLElement;
+    const igCard = screen.getByText('@ig_user').closest('.st-account-card') as HTMLElement;
+    expect(within(fbCard).getByText(/Conectada con Facebook/)).toBeInTheDocument();
+    expect(within(fbCard).getByText(/reconectar cada 90 días/i)).toBeInTheDocument();
+    expect(within(igCard).getByText(/Conectada con Instagram/)).toBeInTheDocument();
+    expect(within(igCard).getByText(/No importa colaboraciones/)).toBeInTheDocument();
+  });
+
+  test('"Conectar cuenta" abre el selector con las dos opciones y redirige con el método elegido', async () => {
+    await renderMixed();
+
+    fireEvent.click(screen.getByRole('button', { name: /Conectar cuenta/i }));
+    const dialog = screen.getByRole('dialog');
+    const facebook = within(dialog).getByRole('region', { name: 'Facebook' });
+    expect(within(facebook).getByText(/Importar Stories/)).toBeInTheDocument();
+    expect(within(facebook).getByText(/Ser administrador de esa Página/)).toBeInTheDocument();
+    const instagram = within(dialog).getByRole('region', { name: 'Instagram' });
+    expect(within(instagram).getByText(/Importar Stories/).closest('li')).toHaveClass('lm-yes');
+    expect(within(instagram).getByText(/Importar colaboraciones/).closest('li')).toHaveClass('lm-no');
+    expect(within(dialog).getByText(/Stories de mejores amigos no se importan/)).toBeInTheDocument();
+
+    withMockLocation(() => {
+      fireEvent.click(within(facebook).getByRole('button', { name: /Conectar con Facebook/i }));
+      expect(window.location.href).toContain('/instagram/login');
+      expect(window.location.href).toContain('method=facebook');
+      expect(window.location.href).not.toContain('account_id');
+    });
+  });
+
+  test('"Cambiar" abre el selector marcando el login actual y reconecta la misma cuenta', async () => {
+    await renderMixed();
+
+    const fbCard = screen.getByText('@fb_user').closest('.st-account-card') as HTMLElement;
+    fireEvent.click(within(fbCard).getByRole('button', { name: 'Cambiar' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(within(dialog).getByRole('region', { name: 'Facebook' })).getByText('Actual')).toBeInTheDocument();
+
+    withMockLocation(() => {
+      fireEvent.click(within(dialog).getByRole('button', { name: /Conectar con Instagram/i }));
+      expect(window.location.href).toContain('method=instagram');
+      expect(window.location.href).toContain('account_id=1');
+    });
+  });
+
+  test('Escape cierra el selector', async () => {
+    await renderMixed();
+
+    fireEvent.click(screen.getByRole('button', { name: /Conectar cuenta/i }));
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  test('"Reconectar" reutiliza el login de la cuenta sin abrir el selector', async () => {
+    await renderMixed();
+
+    const igCard = screen.getByText('@ig_user').closest('.st-account-card') as HTMLElement;
+    withMockLocation(() => {
+      fireEvent.click(within(igCard).getByRole('button', { name: /^Reconectar$/i }));
+      expect(window.location.href).toContain('method=instagram');
+      expect(window.location.href).toContain('account_id=2');
+    });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
 });

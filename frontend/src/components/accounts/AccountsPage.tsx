@@ -2,8 +2,11 @@ import React, { useEffect, useState, useCallback } from 'react';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 import { AgentStrategyDrawer } from '../../features/agent/AgentStrategyDrawer';
 import { apiClient, ApiError } from '../../api/client';
-import type { InstagramAccount } from '../../types';
+import type { InstagramAccount, LoginType } from '../../types';
 import { AccountTimezoneSettings } from './AccountTimezoneSettings';
+import { LoginMethodModal } from './LoginMethodModal';
+import { LOGIN_METHODS } from './loginMethods';
+import './AccountsPage.css';
 
 type TokenStatus = 'valid' | 'expiring' | 'expired';
 
@@ -27,6 +30,8 @@ const AccountsPage: React.FC = () => {
   const [accounts, setAccounts] = useState<InstagramAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Selector de tipo de login: abierto para una cuenta nueva ({}) o para cambiar el de una existente
+  const [loginChooser, setLoginChooser] = useState<{ accountId?: number; current?: LoginType } | null>(null);
   const [disconnecting, setDisconnecting] = useState<number | null>(null);
   const [telegramLinking, setTelegramLinking] = useState<number | null>(null);
   const [telegramUnlinking, setTelegramUnlinking] = useState<number | null>(null);
@@ -38,6 +43,7 @@ const AccountsPage: React.FC = () => {
   const [driveSuccess, setDriveSuccess] = useState<Record<number, boolean>>({});
   const [driveConnected, setDriveConnected] = useState<boolean>(false);
   const [driveConnectedBanner, setDriveConnectedBanner] = useState(false);
+  const [instagramError, setInstagramError] = useState<string | null>(null);
 
   const fetchAccounts = useCallback(async () => {
     const token = localStorage.getItem('authToken');
@@ -59,6 +65,15 @@ const AccountsPage: React.FC = () => {
     if (params.get('drive_connected') === 'true') {
       setDriveConnectedBanner(true);
       setTimeout(() => setDriveConnectedBanner(false), 5000);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+
+    // ?instagram_error=no_linked_page: Facebook Login sin Página con Instagram vinculado
+    if (params.get('instagram_error') === 'no_linked_page') {
+      setInstagramError(
+        'Ninguna de las Páginas de Facebook que autorizaste tiene una cuenta profesional de Instagram vinculada. '
+        + 'Vincúlala desde la configuración de la Página o conecta con Instagram.'
+      );
       window.history.replaceState({}, '', window.location.pathname);
     }
 
@@ -155,11 +170,11 @@ const AccountsPage: React.FC = () => {
     setDriveConnected(false);
   };
 
-  const handleReconnect = (accountId?: number) => {
+  const handleConnect = (method: LoginType, accountId?: number) => {
     const token = localStorage.getItem('authToken');
     if (!token) return;
     const accountParam = accountId ? `&account_id=${accountId}` : '';
-    window.location.href = apiClient.getUrl(`/instagram/login?token=${token}${accountParam}`);
+    window.location.href = apiClient.getUrl(`/instagram/login?token=${token}${accountParam}&method=${method}`);
   };
 
   const statusBadge = (status: TokenStatus) => {
@@ -203,13 +218,20 @@ const AccountsPage: React.FC = () => {
         </div>
       )}
 
+      {instagramError && (
+        <div className="alert alert-warning py-2" role="alert" style={{ marginBottom: 16 }}>
+          <i className="bi bi-exclamation-triangle me-1"></i>
+          {instagramError}
+        </div>
+      )}
+
       {/* Accounts header */}
       <div className="st-accounts-header">
         <h3 className="st-accounts-title">
           <i className="bi bi-instagram"></i>
           Cuentas de Instagram
         </h3>
-        <button className="st-btn st-btn-primary st-btn-sm" onClick={() => handleReconnect()}>
+        <button className="st-btn st-btn-primary st-btn-sm" onClick={() => setLoginChooser({})}>
           <i className="bi bi-plus-circle"></i>Conectar cuenta
         </button>
       </div>
@@ -219,7 +241,7 @@ const AccountsPage: React.FC = () => {
           <i className="bi bi-instagram"></i>
           No tienes cuentas de Instagram conectadas.
           <br />
-          <button className="st-btn st-btn-ghost st-btn-sm" style={{ marginTop: 12 }} onClick={() => handleReconnect()}>
+          <button className="st-btn st-btn-ghost st-btn-sm" style={{ marginTop: 12 }} onClick={() => setLoginChooser({})}>
             Conectar ahora
           </button>
         </div>
@@ -267,6 +289,27 @@ const AccountsPage: React.FC = () => {
                   )}
                 </div>
 
+                {/* Tipo de login y lo que no incluye */}
+                {account.login_type && (
+                  <div className="account-login-row">
+                    <div className="account-login-info">
+                      <span className={`account-login-badge account-login-${account.login_type}`}>
+                        <i className={`bi ${LOGIN_METHODS[account.login_type].icon}`}></i>
+                        Conectada con {LOGIN_METHODS[account.login_type].name}
+                      </span>
+                      <span className="account-login-limit">
+                        <i className="bi bi-info-circle"></i>{LOGIN_METHODS[account.login_type].limitation}
+                      </span>
+                    </div>
+                    <button
+                      className="st-btn st-btn-ghost st-btn-sm"
+                      onClick={() => setLoginChooser({ accountId: account.id, current: account.login_type })}
+                    >
+                      Cambiar
+                    </button>
+                  </div>
+                )}
+
                 {/* Expiry */}
                 {account.expires_at && (
                   <div className="st-meta" style={{ marginBottom: 12 }}>
@@ -278,7 +321,7 @@ const AccountsPage: React.FC = () => {
                 {/* Actions */}
                 <div style={{ display: 'flex', gap: 8 }}>
                   {status !== 'valid' && (
-                    <button className="st-btn st-btn-accent st-btn-sm" style={{ flex: 1 }} onClick={() => handleReconnect(account.id)}>
+                    <button className="st-btn st-btn-accent st-btn-sm" style={{ flex: 1 }} onClick={() => handleConnect(account.login_type ?? 'instagram', account.id)}>
                       <i className="bi bi-arrow-repeat"></i>Reconectar
                     </button>
                   )}
@@ -434,6 +477,14 @@ const AccountsPage: React.FC = () => {
         onHide={() => setDrawerAccount(null)}
         onSave={fetchAccounts}
       />
+
+      {loginChooser && (
+        <LoginMethodModal
+          current={loginChooser.current}
+          onChoose={method => handleConnect(method, loginChooser.accountId)}
+          onClose={() => setLoginChooser(null)}
+        />
+      )}
     </>
   );
 };
