@@ -115,7 +115,7 @@ def full_sync_account(instagram_service, db_client, user_id, instagram_account_i
             "username": account_insights.get("username", ""),
             "account_name": account_insights.get("name", ""),
             "profile_picture_url": account_insights.get("profile_picture_url", ""),
-            "last_sync_at": datetime.now().isoformat(),
+            "last_sync_at": utc_now_naive().isoformat(),
         }
         db_client.table("instagram_accounts").update(update_data).eq("id", instagram_account_id_db).execute()
         logger.info(f"✅ Cuenta {instagram_account_id_db} actualizada")
