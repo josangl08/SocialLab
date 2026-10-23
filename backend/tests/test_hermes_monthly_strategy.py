@@ -237,3 +237,35 @@ async def test_run_monthly_strategy_session_defaults_to_next_month_when_omitted(
     await run_monthly_strategy_session(account_id=123)
 
     mock_get_prompt.assert_called_once_with(123, "2026-08-01")
+
+
+@pytest.mark.asyncio
+@patch("services.hermes.monthly_strategy.get_monthly_strategy_prompt")
+@patch("services.hermes.monthly_strategy.ToolBridge")
+@patch("services.hermes.orchestrator.get_gemini_client")
+async def test_run_monthly_strategy_session_gathers_context_off_the_event_loop(
+    mock_get_client, mock_tool_bridge_class, mock_get_prompt
+):
+    """Nicho, auditoría y referentes hacen I/O síncrono: no deben bloquear el event loop."""
+    import threading
+    from services.hermes.monthly_strategy import run_monthly_strategy_session
+
+    mock_bridge = MagicMock()
+    mock_bridge.discover_tools = AsyncMock(return_value=[])
+    mock_bridge.dispatch = AsyncMock(return_value={})
+    mock_tool_bridge_class.return_value = mock_bridge
+    mock_get_prompt.return_value = "system prompt"
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = MockResponse(text="Listo.")
+    mock_get_client.return_value = mock_client
+    threads = []
+
+    def _gather(_id):
+        threads.append(threading.get_ident())
+        return {"niche_brief": "nicho"}
+
+    with patch("services.hermes.monthly_strategy._gather_monthly_context", side_effect=_gather):
+        await run_monthly_strategy_session(account_id=123, target_month="2026-09-01")
+
+    assert threads and threads[0] != threading.get_ident()
+    mock_get_prompt.assert_called_once_with(123, "2026-09-01", niche_brief="nicho")

@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 import uuid
@@ -548,7 +549,8 @@ async def run_session(account_id: int) -> HermesSessionResult:
 
     references_summary = None
     try:
-        references_summary = reference_summary_for_prompt(account_id)
+        # En un hilo: un refresco llama en serie a la Graph API y a Gemini
+        references_summary = await asyncio.to_thread(reference_summary_for_prompt, account_id)
     except Exception as e:
         logger.warning(f"Error auto-inyectando referentes para cuenta {account_id}: {e}")
 

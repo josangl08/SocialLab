@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from datetime import date
@@ -96,7 +97,9 @@ async def run_monthly_strategy_session(account_id: int, target_month: Optional[s
     bridge = ToolBridge([supabase_mcp], allowed_tools=_MONTHLY_TOOLS)
     declarations = await bridge.discover_tools()
 
-    system_prompt = get_monthly_strategy_prompt(account_id, target_month, **_gather_monthly_context(account_id))
+    # En un hilo: las fuentes hacen I/O síncrono (Graph API, Gemini, BD) y no deben bloquear el event loop
+    monthly_context = await asyncio.to_thread(_gather_monthly_context, account_id)
+    system_prompt = get_monthly_strategy_prompt(account_id, target_month, **monthly_context)
     model = _FallbackGenerativeModel(system_prompt, declarations)
 
     history = [{"role": "user", "parts": [{"text": "Redacta el borrador de campaña del próximo mes."}]}]

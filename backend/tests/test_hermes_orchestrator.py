@@ -315,6 +315,30 @@ async def test_run_session_registers_all_mcp_servers(mock_get_client, mock_tool_
 
 
 @pytest.mark.asyncio
+@patch("services.hermes.orchestrator.append_turn")
+@patch("services.hermes.orchestrator.ToolBridge")
+@patch("services.hermes.orchestrator.get_gemini_client")
+async def test_run_session_fetches_references_off_the_event_loop(mock_get_client, mock_tool_bridge_class, mock_append_turn):
+    """Un refresco de referentes llama en serie a la Graph API y a Gemini: no debe bloquear el event loop."""
+    import threading
+
+    mock_bridge = MagicMock()
+    mock_bridge.discover_tools = AsyncMock(return_value=[])
+    mock_bridge.dispatch = AsyncMock(return_value={})
+    mock_tool_bridge_class.return_value = mock_bridge
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = MockResponse(text="Listo.")
+    mock_get_client.return_value = mock_client
+    threads = []
+
+    with patch("services.hermes.orchestrator.reference_summary_for_prompt",
+               side_effect=lambda _id: threads.append(threading.get_ident())):
+        await run_session(account_id=123)
+
+    assert threads and threads[0] != threading.get_ident()
+
+
+@pytest.mark.asyncio
 @patch("services.hermes.orchestrator.record_agent_decision")
 @patch("services.hermes.orchestrator.get_supabase_admin_client")
 @patch("services.hermes.orchestrator._correct_content_type_mix")
