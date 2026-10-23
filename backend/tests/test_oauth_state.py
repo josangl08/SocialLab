@@ -11,6 +11,7 @@ def test_generate_and_verify_round_trip():
     payload = verify_state_token(token)
     assert payload["user_id"] == USER_ID
     assert payload["account_id"] is None
+    assert payload["login_type"] == "instagram"
 
 
 def test_generate_and_verify_round_trip_with_account_id():
@@ -43,3 +44,8 @@ def test_tokens_for_same_user_are_not_identical():
 def test_token_length_within_provider_limits():
     token = generate_state_token(USER_ID)
     assert len(token) < 512
+
+
+def test_round_trip_with_facebook_login_type():
+    payload = verify_state_token(generate_state_token(USER_ID, account_id="7", login_type="facebook"))
+    assert payload["login_type"] == "facebook"

@@ -19,6 +19,8 @@ _OPTIONAL_DEFAULTS = {
     "GOOGLE_API_KEY": "",
     "INSTAGRAM_APP_ID": "",
     "INSTAGRAM_APP_SECRET": "",
+    "INSTAGRAM_LOGIN_APP_ID": "",
+    "INSTAGRAM_LOGIN_APP_SECRET": "",
     "INSTAGRAM_REDIRECT_URI": "",
     "TELEGRAM_BOT_TOKEN": "",
     "APP_BASE_URL": "http://localhost:8000",

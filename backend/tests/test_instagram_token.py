@@ -40,7 +40,7 @@ def test_deadline_none_when_debug_token_fails():
 def _run_job(accounts, statuses):
     """Ejecuta el job con cuentas y estados de debug_token simulados (por token)."""
     db = MagicMock()
-    db.table.return_value.select.return_value.execute.return_value = MagicMock(data=accounts)
+    db.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=accounts)
     telegram = MagicMock()
     telegram.send_reconnect_reminder = AsyncMock()
 
@@ -106,3 +106,9 @@ def test_job_leaves_account_untouched_when_debug_token_fails_and_continues():
     db.table.return_value.update.return_value.eq.assert_called_once_with("id", 3)
     telegram.send_reconnect_reminder.assert_awaited_once_with("111", "user3", 3)
 
+
+def test_job_only_checks_facebook_login_accounts():
+    """debug_token no sirve para tokens de Instagram Login: el job filtra login_type='facebook'."""
+    db, _ = _run_job([], {})
+
+    db.table.return_value.select.return_value.eq.assert_called_once_with("login_type", "facebook")

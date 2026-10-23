@@ -4,7 +4,7 @@ import time
 import logging
 import requests
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
 from starlette.responses import RedirectResponse, JSONResponse
 
@@ -14,69 +14,69 @@ from models.schemas import User, InstagramAccountConfigUpdate
 from auth.dependencies import get_current_user, get_current_user_from_query_token
 from services.instagram_insights import InstagramInsightsService
 from services.publisher.instagram_publisher import fetch_publishing_quota
-from services.instagram_token import get_reconnect_deadline
-from utils.encryption import encrypt_token, decrypt_token
+from services.instagram_token import (
+    NoLinkedInstagramAccountError,
+    exchange_code_for_account,
+    exchange_facebook_code_for_account,
+)
+from utils.encryption import decrypt_token
 from utils.oauth_state import generate_state_token, verify_state_token
-from utils.graph_api import graph_base_url, graph_url
+from utils.graph_api import GRAPH_API_VERSION, LoginType, graph_base_url
+import config
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/instagram", tags=["Instagram Integration"])
 supabase = get_supabase_client()
 admin_supabase = get_supabase_admin_client()
-from config import INSTAGRAM_APP_ID, INSTAGRAM_APP_SECRET, INSTAGRAM_REDIRECT_URI
 from utils.timezones import utc_now_naive
 
-@router.get("/login")
-def instagram_login(
-    token: str,
-    account_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user_from_query_token)
-):
-    if not INSTAGRAM_APP_ID:
-        raise HTTPException(status_code=500, detail="INSTAGRAM_APP_ID no configurado.")
+INSTAGRAM_LOGIN_SCOPES = (
+    "instagram_business_basic,instagram_business_content_publish,"
+    "instagram_business_manage_insights,instagram_business_manage_comments"
+)
 
-    state_param = generate_state_token(current_user.id, account_id)
 
-    auth_url = (
-        f"https://graph.facebook.com/oauth/authorize?client_id={INSTAGRAM_APP_ID}"
-        f"&redirect_uri={INSTAGRAM_REDIRECT_URI}"
-        "&scope=business_management,instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,instagram_manage_insights"
+FACEBOOK_LOGIN_SCOPES = (
+    "business_management,instagram_basic,instagram_content_publish,pages_show_list,"
+    "pages_read_engagement,instagram_manage_insights,instagram_manage_comments"
+)
+
+
+def _build_authorize_url(login_type: LoginType, state: str) -> str:
+    """URL de autorización de Instagram Login (sin Página de Facebook) o de Facebook Login
+    (Página con cuenta de Instagram vinculada; da Stories y colaboraciones)."""
+    if login_type == 'facebook':
+        if not config.INSTAGRAM_APP_ID:
+            raise HTTPException(status_code=500, detail="INSTAGRAM_APP_ID no configurado.")
+        return (
+            f"https://www.facebook.com/{GRAPH_API_VERSION}/dialog/oauth?client_id={config.INSTAGRAM_APP_ID}"
+            f"&redirect_uri={config.INSTAGRAM_REDIRECT_URI}"
+            f"&scope={FACEBOOK_LOGIN_SCOPES}"
+            "&response_type=code"
+            f"&state={state}"
+        )
+    if not config.INSTAGRAM_LOGIN_APP_ID:
+        raise HTTPException(status_code=500, detail="INSTAGRAM_LOGIN_APP_ID no configurado.")
+    return (
+        f"https://www.instagram.com/oauth/authorize?client_id={config.INSTAGRAM_LOGIN_APP_ID}"
+        f"&redirect_uri={config.INSTAGRAM_REDIRECT_URI}"
         "&response_type=code"
-        f"&state={state_param}"
+        f"&scope={INSTAGRAM_LOGIN_SCOPES}"
+        f"&state={state}"
     )
-    return RedirectResponse(auth_url)
 
-# callback/instagram no tiene prefijo /instagram, sino /callback/instagram
-# Lo registramos en un router aparte o en este router quitando la barra del prefijo para esta ruta
-# Si definimos router con prefix="/instagram", podemos declarar callback/instagram en este router
-# pero usando un APIRouter global sin prefijo para que coincida exactamente con la URL del callback
-# declarada en Meta.
-# Vamos a declarar callback en este mismo archivo, pero lo asociaremos a un router sin prefijo o
-# usaremos la ruta absoluta en el APIRouter quitando el prefijo para ese endpoint.
-# Para evitar problemas con el prefix de APIRouter, lo más limpio es crear un router secundario
-# en este archivo o no usar prefijo a nivel de clase router y especificar los prefijos en cada método.
-# Hagamos que el router no tenga prefijo de clase, y pongamos el prefijo /instagram en los métodos
-# excepto en el callback. Esto es extremadamente seguro y no rompe la URL.
 
+# Sin prefijo: /callback/instagram debe coincidir exactamente con la URL registrada en Meta
 router_no_prefix = APIRouter(tags=["Instagram Integration"])
 
 @router_no_prefix.get("/instagram/login")
 def instagram_login_np(
     token: str,
     account_id: Optional[str] = None,
+    method: LoginType = 'instagram',
     current_user: User = Depends(get_current_user_from_query_token)
 ):
-    if not INSTAGRAM_APP_ID:
-        raise HTTPException(status_code=500, detail="INSTAGRAM_APP_ID no configurado.")
-    state_param = generate_state_token(current_user.id, account_id)
-    auth_url = (
-        f"https://graph.facebook.com/oauth/authorize?client_id={INSTAGRAM_APP_ID}"
-        f"&redirect_uri={INSTAGRAM_REDIRECT_URI}"
-        "&scope=business_management,instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,instagram_manage_insights"
-        "&response_type=code"
-        f"&state={state_param}"
-    )
-    return RedirectResponse(auth_url)
+    state_param = generate_state_token(current_user.id, account_id, method)
+    return RedirectResponse(_build_authorize_url(method, state_param))
 
 @router_no_prefix.get("/callback/instagram")
 def instagram_callback(
@@ -95,116 +95,31 @@ def instagram_callback(
 
     try:
         state_data = verify_state_token(state)
-        sociallab_user_id = state_data["user_id"]
-        target_account_id = state_data.get("account_id")
     except ValueError:
         raise HTTPException(status_code=400, detail="Parámetro state inválido o expirado.")
 
-    if not INSTAGRAM_APP_ID or not INSTAGRAM_APP_SECRET or not INSTAGRAM_REDIRECT_URI:
+    if state_data['login_type'] == 'facebook':
+        app_id, app_secret, exchange = config.INSTAGRAM_APP_ID, config.INSTAGRAM_APP_SECRET, exchange_facebook_code_for_account
+    else:
+        app_id, app_secret, exchange = config.INSTAGRAM_LOGIN_APP_ID, config.INSTAGRAM_LOGIN_APP_SECRET, exchange_code_for_account
+    if not app_id or not app_secret or not config.INSTAGRAM_REDIRECT_URI:
         raise HTTPException(status_code=500, detail="Credenciales de Instagram no configuradas.")
 
-    token_exchange_url = "https://graph.facebook.com/oauth/access_token"
-    data = {
-        'client_id': INSTAGRAM_APP_ID,
-        'client_secret': INSTAGRAM_APP_SECRET,
-        'grant_type': 'authorization_code',
-        'redirect_uri': INSTAGRAM_REDIRECT_URI,
-        'code': code,
-    }
-    
     try:
-        response = requests.post(token_exchange_url, data=data)
-        response.raise_for_status()
-        token_data = response.json()
-        
-        short_lived_access_token = token_data.get('access_token')
-
-        if not short_lived_access_token:
-            raise HTTPException(status_code=500, detail="No se pudo obtener el token de acceso de corta duración de Instagram.")
-
-        long_lived_token_exchange_url = "https://graph.facebook.com/oauth/access_token"
-        long_lived_data = {
-            'grant_type': 'fb_exchange_token',
-            'client_id': INSTAGRAM_APP_ID,
-            'client_secret': INSTAGRAM_APP_SECRET,
-            'fb_exchange_token': short_lived_access_token
-        }
-
-        long_lived_response = requests.get(long_lived_token_exchange_url, params=long_lived_data)
-        long_lived_response.raise_for_status()
-        long_lived_token_data = long_lived_response.json()
-
-        long_lived_access_token = long_lived_token_data.get('access_token')
-        long_lived_expires_in = long_lived_token_data.get('expires_in')
-
-        if not long_lived_access_token:
-            raise HTTPException(status_code=500, detail="No se pudo obtener el token de acceso de larga duración de Instagram.")
-
-        if long_lived_expires_in is None:
-            long_lived_expires_in = 60 * 24 * 60 * 60
-            logger.warning("'expires_in' no recibido para el token de larga duración. Usando 60 días por defecto.")
-
-        expires_at = utc_now_naive() + timedelta(seconds=long_lived_expires_in)
-        # La fecha real de reconexión es la caducidad del acceso a datos (AD-4)
-        token_status = get_reconnect_deadline(long_lived_access_token)
-        if token_status and token_status['reconnect_by']:
-            expires_at = token_status['reconnect_by'].replace(tzinfo=None)
-
-        pages_url = graph_url(f"me/accounts?access_token={long_lived_access_token}")
-        pages_response = requests.get(pages_url)
-        pages_response.raise_for_status()
-        pages_data = pages_response.json()
-
-        facebook_page_id = None
-        if pages_data and pages_data.get('data'):
-            facebook_page_id = pages_data['data'][0].get('id')
-
-        if not facebook_page_id:
-            raise HTTPException(status_code=500, detail="No se pudo obtener el ID de la página de Facebook.")
-
-        instagram_business_account_url = graph_url(f"{facebook_page_id}?fields=instagram_business_account&access_token={long_lived_access_token}")
-        instagram_account_response = requests.get(instagram_business_account_url)
-        instagram_account_response.raise_for_status()
-        instagram_account_data = instagram_account_response.json()
-
-        instagram_business_account_id = None
-        if instagram_account_data.get('instagram_business_account'):
-            instagram_business_account_id = instagram_account_data['instagram_business_account'].get('id')
-
-        if not instagram_business_account_id:
-            raise HTTPException(status_code=500, detail="No se pudo obtener el ID de la cuenta de Instagram Business.")
-
-        try:
-            admin_supabase = get_supabase_admin_client()
-            if target_account_id:
-                # Reconexión de una tarjeta concreta: actualiza esa fila exacta,
-                # sin importar qué instagram_business_account_id devuelva esta vez
-                # Facebook — evita crear una cuenta nueva por accidente si el
-                # usuario elige una página distinta en el popup de Meta.
-                admin_supabase.table('instagram_accounts').update({
-                    'instagram_business_account_id': instagram_business_account_id,
-                    'long_lived_access_token': encrypt_token(long_lived_access_token),
-                    'expires_at': expires_at.isoformat() + 'Z',
-                    'token_invalid': False
-                }).eq('id', target_account_id).eq('user_id', sociallab_user_id).execute()
-            else:
-                admin_supabase.table('instagram_accounts').upsert({
-                    'user_id': sociallab_user_id,
-                    'instagram_business_account_id': instagram_business_account_id,
-                    'long_lived_access_token': encrypt_token(long_lived_access_token),
-                    'expires_at': expires_at.isoformat() + 'Z',
-                    'token_invalid': False
-                }, on_conflict='user_id,instagram_business_account_id').execute()
-            logger.info("Instagram account details saved to Supabase.")
-        except Exception as e:
-            logger.error(f"Error saving Instagram account details to Supabase: {e}")
-            raise HTTPException(status_code=500, detail=f"Error al guardar los detalles de la cuenta de Instagram: {str(e)}")
-
-        return RedirectResponse(url="http://localhost:5173/dashboard?instagram_connected=true")
-
+        exchange(code, state_data)
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error durante el intercambio de tokens: {e.response.text if e.response else e}")
+        logger.error(f"Error durante el intercambio de tokens: {e.response.text if e.response is not None else e}")
         raise HTTPException(status_code=500, detail=f"Error durante el proceso de autenticación de Instagram: {e}")
+    except NoLinkedInstagramAccountError:
+        # Error del usuario, no del servidor: la página de Cuentas explica qué falta
+        return RedirectResponse(url="http://localhost:5173/accounts?instagram_error=no_linked_page")
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error saving Instagram account details to Supabase: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al guardar los detalles de la cuenta de Instagram: {str(e)}")
+
+    return RedirectResponse(url="http://localhost:5173/dashboard?instagram_connected=true")
 
 @router_no_prefix.get("/instagram/sync")
 def instagram_sync(

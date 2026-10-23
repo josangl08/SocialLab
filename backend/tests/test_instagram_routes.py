@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 from main import app
-from auth.dependencies import get_current_user
+from auth.dependencies import get_current_user, get_current_user_from_query_token
 from models.schemas import User
 from tests.conftest import USER_ID
 from utils.oauth_state import generate_state_token
@@ -16,6 +16,7 @@ async def mock_get_current_user():
 
 # Apply dependency override
 app.dependency_overrides[get_current_user] = mock_get_current_user
+app.dependency_overrides[get_current_user_from_query_token] = mock_get_current_user
 
 client = TestClient(app)
 
@@ -205,57 +206,50 @@ def test_publish_to_instagram_expired_token(mock_supabase, mock_admin_supabase):
     assert response.status_code == 401
     assert "El token de Instagram ha expirado" in response.json()["detail"]
 
-def test_callback_instagram_valid_state_succeeds(mock_admin_supabase):
-    state_token = generate_state_token(USER_ID)
+@pytest.fixture
+def instagram_login_env(monkeypatch):
+    monkeypatch.setenv("INSTAGRAM_LOGIN_APP_ID", "ig-app-id")
+    monkeypatch.setenv("INSTAGRAM_LOGIN_APP_SECRET", "ig-app-secret")
+    monkeypatch.setenv("INSTAGRAM_REDIRECT_URI", "http://localhost:8000/callback/instagram")
 
-    mock_post_response = MagicMock()
-    mock_post_response.json.return_value = {"access_token": "short-lived-token"}
 
-    mock_get_responses = [
+def _instagram_login_responses(ig_user_id="ig-account-1"):
+    """Respuestas simuladas: token corto (POST), token largo y /me (GET)."""
+    short = MagicMock()
+    short.json.return_value = {"access_token": "short-lived-token"}
+    gets = [
         MagicMock(json=MagicMock(return_value={"access_token": "long-lived-token", "expires_in": 5184000})),
-        MagicMock(json=MagicMock(return_value={"data": [{"id": "fb-page-1"}]})),
-        MagicMock(json=MagicMock(return_value={"instagram_business_account": {"id": "ig-account-1"}})),
+        MagicMock(json=MagicMock(return_value={"user_id": ig_user_id, "username": "user"})),
     ]
+    return short, gets
 
-    mock_upsert_execute = MagicMock()
-    mock_admin_supabase.table.return_value.upsert.return_value.execute.return_value = mock_upsert_execute
 
-    with patch("routes.instagram_routes.requests.post", return_value=mock_post_response), \
-         patch("routes.instagram_routes.requests.get", side_effect=mock_get_responses), \
-         patch("routes.instagram_routes.get_reconnect_deadline", return_value=None), \
-         patch("routes.instagram_routes.get_supabase_admin_client", return_value=mock_admin_supabase):
-        response = client.get(
-            f"/callback/instagram?code=auth_code&state={state_token}",
-            follow_redirects=False
-        )
+def _run_callback(mock_admin_supabase, state_token):
+    short, gets = _instagram_login_responses()
+    with patch("services.instagram_token.requests.post", return_value=short) as mock_post, \
+         patch("services.instagram_token.requests.get", side_effect=gets) as mock_get, \
+         patch("services.instagram_token.encrypt_token", side_effect=lambda t: f"enc:{t}"), \
+         patch("services.instagram_token.get_supabase_admin_client", return_value=mock_admin_supabase):
+        response = client.get(f"/callback/instagram?code=auth_code&state={state_token}", follow_redirects=False)
+    return response, mock_post, mock_get
+
+
+def test_callback_instagram_valid_state_succeeds(mock_admin_supabase, instagram_login_env):
+    response, mock_post, mock_get = _run_callback(mock_admin_supabase, generate_state_token(USER_ID))
 
     assert response.status_code in [302, 307]
     assert "instagram_connected=true" in response.headers.get("location", "")
+    assert mock_post.call_args[0][0] == "https://api.instagram.com/oauth/access_token"
+    urls = [c[0][0] for c in mock_get.call_args_list]
+    assert urls[0] == "https://graph.instagram.com/access_token"
+    assert mock_get.call_args_list[0][1]["params"]["grant_type"] == "ig_exchange_token"
+    assert urls[1].startswith("https://graph.instagram.com/v") and urls[1].endswith("/me")
+    assert not any("me/accounts" in url or "facebook.com" in url for url in urls)
 
-def test_callback_instagram_with_account_id_updates_targeted_row_not_upsert(mock_admin_supabase):
-    # Regression test: reconnecting a specific card (state carries account_id)
-    # must UPDATE that exact row, never upsert-by-instagram_business_account_id
-    # — otherwise picking a different Facebook Page in Meta's popup while
-    # reconnecting account #7 could silently create/touch a different account.
-    state_token = generate_state_token(USER_ID, account_id="7")
 
-    mock_post_response = MagicMock()
-    mock_post_response.json.return_value = {"access_token": "short-lived-token"}
-
-    mock_get_responses = [
-        MagicMock(json=MagicMock(return_value={"access_token": "long-lived-token", "expires_in": 5184000})),
-        MagicMock(json=MagicMock(return_value={"data": [{"id": "fb-page-1"}]})),
-        MagicMock(json=MagicMock(return_value={"instagram_business_account": {"id": "ig-account-1"}})),
-    ]
-
-    with patch("routes.instagram_routes.requests.post", return_value=mock_post_response), \
-         patch("routes.instagram_routes.requests.get", side_effect=mock_get_responses), \
-         patch("routes.instagram_routes.get_reconnect_deadline", return_value=None), \
-         patch("routes.instagram_routes.get_supabase_admin_client", return_value=mock_admin_supabase):
-        response = client.get(
-            f"/callback/instagram?code=auth_code&state={state_token}",
-            follow_redirects=False
-        )
+def test_callback_instagram_with_account_id_updates_targeted_row_not_upsert(mock_admin_supabase, instagram_login_env):
+    # Reconectar una tarjeta concreta (state con account_id) actualiza esa fila exacta, nunca upsert
+    response, _, _ = _run_callback(mock_admin_supabase, generate_state_token(USER_ID, account_id="7"))
 
     assert response.status_code in [302, 307]
     mock_admin_supabase.table.return_value.upsert.assert_not_called()
@@ -263,31 +257,24 @@ def test_callback_instagram_with_account_id_updates_targeted_row_not_upsert(mock
     update_payload = mock_admin_supabase.table.return_value.update.call_args[0][0]
     assert update_payload["instagram_business_account_id"] == "ig-account-1"
     assert update_payload["token_invalid"] is False
+    assert update_payload["login_type"] == "instagram"
     mock_admin_supabase.table.return_value.update.return_value.eq.assert_any_call("id", "7")
 
-def test_callback_instagram_stores_real_reconnect_deadline(mock_admin_supabase):
-    """expires_at = fecha real de reconexión de debug_token, no ahora + expires_in (AD-4)."""
-    state_token = generate_state_token(USER_ID, account_id="7")
-    mock_post_response = MagicMock()
-    mock_post_response.json.return_value = {"access_token": "short-lived-token"}
-    mock_get_responses = [
-        MagicMock(json=MagicMock(return_value={"access_token": "long-lived-token", "expires_in": 5184000})),
-        MagicMock(json=MagicMock(return_value={"data": [{"id": "fb-page-1"}]})),
-        MagicMock(json=MagicMock(return_value={"instagram_business_account": {"id": "ig-account-1"}})),
-    ]
-    deadline = datetime(2027, 1, 16, 12, 38, 55, tzinfo=timezone.utc)
 
-    with patch("routes.instagram_routes.requests.post", return_value=mock_post_response), \
-         patch("routes.instagram_routes.requests.get", side_effect=mock_get_responses), \
-         patch("routes.instagram_routes.get_reconnect_deadline",
-               return_value={"is_valid": True, "reconnect_by": deadline}) as mock_deadline, \
-         patch("routes.instagram_routes.get_supabase_admin_client", return_value=mock_admin_supabase):
-        response = client.get(f"/callback/instagram?code=auth_code&state={state_token}", follow_redirects=False)
+def test_callback_instagram_expires_at_from_expires_in(mock_admin_supabase, instagram_login_env):
+    """Instagram Login: expires_at = ahora + expires_in (60 días), sin debug_token."""
+    response, _, _ = _run_callback(mock_admin_supabase, generate_state_token(USER_ID, account_id="7"))
 
     assert response.status_code in [302, 307]
-    mock_deadline.assert_called_once_with("long-lived-token")
-    update_payload = mock_admin_supabase.table.return_value.update.call_args[0][0]
-    assert update_payload["expires_at"] == "2027-01-16T12:38:55Z"
+    expires_at = datetime.fromisoformat(mock_admin_supabase.table.return_value.update.call_args[0][0]["expires_at"])
+    assert abs(expires_at - (datetime.now(timezone.utc) + timedelta(days=60))) < timedelta(minutes=1)
+
+
+def test_callback_instagram_missing_credentials_returns_500(monkeypatch):
+    monkeypatch.setenv("INSTAGRAM_LOGIN_APP_ID", "")
+    response = client.get(f"/callback/instagram?code=c&state={generate_state_token(USER_ID)}", follow_redirects=False)
+    assert response.status_code == 500
+
 
 def test_callback_instagram_invalid_state_returns_400():
     response = client.get(
@@ -365,6 +352,142 @@ def test_publish_to_instagram_quota_exceeded_returns_429(mock_supabase, mock_adm
     assert response.json()["code"] == "PUBLISH_QUOTA_EXCEEDED"
     mock_quota.assert_called_once_with("ig-123", "valid-token", graph_base_url("instagram"))
     mock_post_req.assert_not_called()
+
+
+# --- Tests de migración a Instagram Login (AD-3, AD-6) ---
+
+
+def test_instagram_login_redirects_to_instagram_oauth_with_scopes(instagram_login_env):
+    """AD-3: /instagram/login redirige a www.instagram.com/oauth/authorize con los 4 scopes."""
+    response = client.get("/instagram/login?token=valid_token", follow_redirects=False)
+    assert response.status_code in [302, 307]
+    location = response.headers.get("location", "")
+
+    assert location.startswith("https://www.instagram.com/oauth/authorize")
+    assert "response_type=code" in location
+    assert "instagram_business_basic" in location
+    assert "instagram_business_content_publish" in location
+    assert "instagram_business_manage_insights" in location
+    assert "instagram_business_manage_comments" in location
+    assert "state=" in location
+
+
+def test_instagram_login_method_facebook_redirects_to_facebook_dialog(monkeypatch):
+    """Facebook Login: diálogo de Facebook con los scopes de Página e Instagram, incluido comentarios."""
+    monkeypatch.setenv("INSTAGRAM_APP_ID", "fb-app-id")
+    monkeypatch.setenv("INSTAGRAM_REDIRECT_URI", "http://localhost:8000/callback/instagram")
+    response = client.get("/instagram/login?token=valid_token&method=facebook", follow_redirects=False)
+    assert response.status_code in [302, 307]
+    location = response.headers.get("location", "")
+
+    assert location.startswith("https://www.facebook.com/v") and "/dialog/oauth?client_id=fb-app-id" in location
+    for scope in ("pages_show_list", "instagram_basic", "instagram_manage_insights", "instagram_manage_comments"):
+        assert scope in location
+
+
+def test_instagram_login_rejects_unknown_method(instagram_login_env):
+    response = client.get("/instagram/login?token=valid_token&method=twitter", follow_redirects=False)
+    assert response.status_code == 422
+
+
+@pytest.fixture
+def facebook_login_env(monkeypatch):
+    monkeypatch.setenv("INSTAGRAM_APP_ID", "fb-app-id")
+    monkeypatch.setenv("INSTAGRAM_APP_SECRET", "fb-app-secret")
+    monkeypatch.setenv("INSTAGRAM_REDIRECT_URI", "http://localhost:8000/callback/instagram")
+
+
+def _run_facebook_callback(mock_admin_supabase, state_token, pages):
+    short = MagicMock(json=MagicMock(return_value={"access_token": "short-lived-token"}))
+    gets = [
+        MagicMock(json=MagicMock(return_value={"access_token": "long-lived-token", "expires_in": 5184000})),
+        MagicMock(json=MagicMock(return_value={"data": pages})),
+    ]
+    reconnect_by = datetime(2027, 1, 20, tzinfo=timezone.utc)
+    with patch("services.instagram_token.requests.post", return_value=short) as mock_post, \
+         patch("services.instagram_token.requests.get", side_effect=gets) as mock_get, \
+         patch("services.instagram_token.get_reconnect_deadline",
+               return_value={"is_valid": True, "reconnect_by": reconnect_by}), \
+         patch("services.instagram_token.encrypt_token", side_effect=lambda t: f"enc:{t}"), \
+         patch("services.instagram_token.get_supabase_admin_client", return_value=mock_admin_supabase):
+        response = client.get(f"/callback/instagram?code=auth_code&state={state_token}", follow_redirects=False)
+    return response, mock_post, mock_get
+
+
+def test_callback_facebook_saves_account_of_first_page_with_instagram(mock_admin_supabase, facebook_login_env):
+    pages = [{"id": "page-1"}, {"id": "page-2", "instagram_business_account": {"id": "ig-fb-2"}}]
+    state = generate_state_token(USER_ID, login_type="facebook")
+    response, mock_post, mock_get = _run_facebook_callback(mock_admin_supabase, state, pages)
+
+    assert response.status_code in [302, 307]
+    assert "instagram_connected=true" in response.headers.get("location", "")
+    assert "graph.facebook.com" in mock_post.call_args[0][0]
+    assert mock_get.call_args_list[0][1]["params"]["grant_type"] == "fb_exchange_token"
+    assert mock_get.call_args_list[1][0][0].endswith("/me/accounts")
+    payload = mock_admin_supabase.table.return_value.upsert.call_args[0][0]
+    assert payload["instagram_business_account_id"] == "ig-fb-2"
+    assert payload["login_type"] == "facebook"
+    assert payload["expires_at"] == "2027-01-20T00:00:00+00:00"  # fecha de reconexión de debug_token
+
+
+def test_callback_facebook_reconnect_switches_login_type_on_same_row(mock_admin_supabase, facebook_login_env):
+    """Cambiar de Instagram a Facebook Login reconectando la tarjeta conserva la fila (y sus posts)."""
+    pages = [{"id": "page-1", "instagram_business_account": {"id": "ig-fb-1"}}]
+    state = generate_state_token(USER_ID, account_id="7", login_type="facebook")
+    response, _, _ = _run_facebook_callback(mock_admin_supabase, state, pages)
+
+    assert response.status_code in [302, 307]
+    mock_admin_supabase.table.return_value.upsert.assert_not_called()
+    assert mock_admin_supabase.table.return_value.update.call_args[0][0]["login_type"] == "facebook"
+    mock_admin_supabase.table.return_value.update.return_value.eq.assert_any_call("id", "7")
+
+
+def test_callback_facebook_without_linked_instagram_redirects_to_accounts(mock_admin_supabase, facebook_login_env):
+    """Sin Página con Instagram vinculado: vuelve a Cuentas con el motivo, sin guardar nada."""
+    state = generate_state_token(USER_ID, login_type="facebook")
+    response, _, _ = _run_facebook_callback(mock_admin_supabase, state, [{"id": "page-1"}])
+
+    assert response.status_code in [302, 307]
+    assert response.headers["location"].endswith("/accounts?instagram_error=no_linked_page")
+    mock_admin_supabase.table.return_value.upsert.assert_not_called()
+
+
+def test_callback_cancelled_authorization_returns_400_without_saving(mock_admin_supabase):
+    """El usuario cancela en Meta: llega ?error=access_denied, no se crea ni modifica ninguna cuenta."""
+    with patch("services.instagram_token.requests.post") as mock_post, \
+         patch("services.instagram_token.get_supabase_admin_client", return_value=mock_admin_supabase):
+        response = client.get(
+            f"/callback/instagram?error=access_denied&state={generate_state_token(USER_ID)}", follow_redirects=False
+        )
+
+    assert response.status_code == 400
+    assert "access_denied" in response.json()["detail"]
+    mock_post.assert_not_called()
+    mock_admin_supabase.table.assert_not_called()
+
+
+def test_callback_instagram_missing_params_returns_400():
+    """AD-3: /callback/instagram sin code o sin state devuelve 400."""
+    res_no_code = client.get("/callback/instagram?state=some-state", follow_redirects=False)
+    assert res_no_code.status_code == 400
+
+    res_no_state = client.get("/callback/instagram?code=some-code", follow_redirects=False)
+    assert res_no_state.status_code == 400
+
+
+def test_callback_instagram_stores_login_type_instagram(mock_admin_supabase, instagram_login_env):
+    """AD-3: El callback de Instagram Login guarda login_type='instagram' y token cifrado."""
+    response, _, _ = _run_callback(mock_admin_supabase, generate_state_token(USER_ID))
+
+    assert response.status_code in [302, 307]
+    upsert = mock_admin_supabase.table.return_value.upsert
+    upsert_data = upsert.call_args[0][0]
+    assert upsert_data["user_id"] == USER_ID
+    assert upsert_data["instagram_business_account_id"] == "ig-account-1"
+    assert upsert_data["login_type"] == "instagram"
+    assert upsert_data["long_lived_access_token"] == "enc:long-lived-token"
+    assert upsert_data["token_invalid"] is False
+    assert upsert.call_args[1]["on_conflict"] == "user_id,instagram_business_account_id"
 
 
 def test_instagram_status_includes_login_type(mock_admin_supabase):

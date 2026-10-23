@@ -6,16 +6,20 @@ from typing import Optional, TypedDict
 from cryptography.fernet import Fernet, InvalidToken
 
 from utils.encryption import get_fernet_key
+from utils.graph_api import LoginType
 
 
 class OAuthStatePayload(TypedDict):
     user_id: str
     account_id: Optional[str]
+    login_type: LoginType
 
 
-def generate_state_token(user_id: str, account_id: Optional[str] = None) -> str:
+def generate_state_token(
+    user_id: str, account_id: Optional[str] = None, login_type: LoginType = "instagram"
+) -> str:
     fernet = Fernet(get_fernet_key())
-    payload = json.dumps({"user_id": user_id, "account_id": account_id})
+    payload = json.dumps({"user_id": user_id, "account_id": account_id, "login_type": login_type})
     return fernet.encrypt(payload.encode("utf-8")).decode("utf-8")
 
 
@@ -27,6 +31,9 @@ def verify_state_token(state_token: str, ttl: int = 600) -> OAuthStatePayload:
         raise ValueError("Parámetro state inválido o expirado.") from e
     try:
         payload = json.loads(decrypted)
-        return {"user_id": payload["user_id"], "account_id": payload.get("account_id")}
+        login_type = payload.get("login_type", "instagram")
+        if login_type not in ("instagram", "facebook"):
+            raise ValueError("Parámetro state inválido o expirado.")
+        return {"user_id": payload["user_id"], "account_id": payload.get("account_id"), "login_type": login_type}
     except (json.JSONDecodeError, KeyError, TypeError) as e:
         raise ValueError("Parámetro state inválido o expirado.") from e
