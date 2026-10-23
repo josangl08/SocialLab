@@ -5,7 +5,9 @@ import logging
 from datetime import date, timedelta
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Optional
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -21,6 +23,11 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Import tras basicConfig a propósito: el filtro se instala en los handlers ya creados, antes de
+# que cualquier otro módulo registre una URL con el access_token
+from utils.redaction import install_log_redaction, redact_secrets
+install_log_redaction()
 
 # Reducir verbosidad de httpx
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -53,6 +60,14 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def redacting_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Los `detail` que incluyen `str(e)` de requests llevan la URL con el access_token."""
+    if isinstance(exc.detail, str):
+        exc.detail = redact_secrets(exc.detail)
+    return await http_exception_handler(request, exc)
 
 # --- Función de Sincronización Automática de Métricas ---
 def sync_all_accounts_metrics():
