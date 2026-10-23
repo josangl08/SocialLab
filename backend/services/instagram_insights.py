@@ -341,6 +341,7 @@ class InstagramInsightsService:
             params = {
                 'metric': 'engaged_audience_demographics',
                 'period': 'lifetime',
+                'timeframe': 'this_month',  # sin timeframe la API responde "Not enough users"
                 'breakdown': 'gender,age',
                 'metric_type': 'total_value'
             }

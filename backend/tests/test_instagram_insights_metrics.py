@@ -89,3 +89,12 @@ def test_insights_service_base_url_by_login_type():
 
     assert svc_fb.base_url.startswith("https://graph.facebook.com/")
     assert svc_ig.base_url.startswith("https://graph.instagram.com/")
+
+
+def test_engaged_demographics_requests_this_month_timeframe():
+    """Sin timeframe, engaged_audience_demographics responde 400 "Not enough users"."""
+    svc = _service()
+    with patch.object(svc, "_make_request", return_value={"data": []}) as req:
+        svc.get_audience_insights()
+    engaged = [c.args[1] for c in req.call_args_list if c.args[1].get("metric") == "engaged_audience_demographics"]
+    assert engaged[0]["timeframe"] == "this_month"
