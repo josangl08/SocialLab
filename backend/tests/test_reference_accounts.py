@@ -189,3 +189,10 @@ def test_delete_stale_snapshots():
     with patch.object(ra, "get_supabase_admin_client", return_value=fake):
         ra.delete_stale_snapshots(7, ["@keep"])
     assert [s["id"] for s in fake.store["reference_account_snapshots"]] == [1, 3]
+
+
+def test_long_first_line_is_cut_at_125_chars():
+    long_caption = "x" * 300
+    data = {"followers_count": 10, "media": {"data": [_media(1, 5, 0, "IMAGE", long_caption)]}}
+    line = ra.compute_reference_metrics(data, NOW)["top_posts"][0]["caption_first_line"]
+    assert len(line) == 126 and line.endswith("…")

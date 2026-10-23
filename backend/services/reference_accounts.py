@@ -28,6 +28,7 @@ MEDIA_LIMIT = 25
 TOP_POSTS = 3
 MAX_NEW_PILLARS = 3
 MIX_GAP_PP = 20
+HOOK_MAX_CHARS = 125
 
 _DISCOVERY_FIELDS = (
     "business_discovery.username({username}){{username,followers_count,media_count,"
@@ -98,7 +99,9 @@ def _format_of(media: Dict[str, Any]) -> str:
 
 
 def _first_line(caption: Optional[str]) -> str:
-    return next((line.strip() for line in (caption or "").splitlines() if line.strip()), "")
+    """Primera línea del caption, cortada a lo que se ve antes del "… más" (125)."""
+    line = next((line.strip() for line in (caption or "").splitlines() if line.strip()), "")
+    return line if len(line) <= HOOK_MAX_CHARS else line[:HOOK_MAX_CHARS].rstrip() + "…"
 
 
 def _themes(captions: List[str]) -> Dict[str, int]:
@@ -335,7 +338,7 @@ def suggest_from_references(account: Dict[str, Any], analysis: Dict[str, Any]) -
             reasons = []
             if gap > MIX_GAP_PP:
                 reasons.append(
-                    "tus referentes reparten sus formatos así: "
+                    "reparten sus formatos así: "
                     + ", ".join(f"{k} {round(v)}%" for k, v in ref_shares.items())
                 )
             if raise_total:
@@ -346,7 +349,7 @@ def suggest_from_references(account: Dict[str, Any], analysis: Dict[str, Any]) -
             record_agent_decision(
                 account_id=account_id, session_id=None, decision_type="suggest_mix_change",
                 status="suggested", confidence_score=0.5,
-                rationale=("Según tus referentes, " + "; ".join(reasons) + ".")[:500],
+                rationale=("Tus referentes " + "; ".join(reasons) + ".")[:500],
                 tool_args={
                     "source": "reference_accounts",
                     "configured_mix": mix,
