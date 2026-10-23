@@ -238,8 +238,9 @@ class TestSwipeFileAndAuditRoutes:
             with patch("routes.content_generation.AnalyticsService.get_swipe_file", return_value=swipe) as svc:
                 resp = auth_client.get("/content/swipe-file/1")
             assert resp.status_code == 200
-            assert resp.json() == swipe
-            svc.assert_called_once_with(1)
+            item = {**swipe["items"][0], "is_competitor": False, "reference_username": None, "permalink": None}
+            assert resp.json() == {**swipe, "items": [item]}
+            svc.assert_called_once_with(1, source="own")
         finally:
             _restore_db_override(prev)
 

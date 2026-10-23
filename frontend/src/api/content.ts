@@ -20,6 +20,7 @@ import type {
   RepurposeOut,
   ProfileAuditResponse,
   SwipeFileResponse,
+  SwipeFileSource,
   CommentsTriageResponse,
   CommentsTriageManualRequest,
   ProspectCommentsRequest,
@@ -104,9 +105,10 @@ export const contentApi = {
 
   getSwipeFile: (
     accountId: number,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; source?: SwipeFileSource }
   ): Promise<SwipeFileResponse> => {
-    return apiClient.get<SwipeFileResponse>(`/content/swipe-file/${accountId}`, options);
+    const source = options?.source ?? 'own';
+    return apiClient.get<SwipeFileResponse>(`/content/swipe-file/${accountId}?source=${source}`, { signal: options?.signal });
   },
 
   getCommentsTriage: (

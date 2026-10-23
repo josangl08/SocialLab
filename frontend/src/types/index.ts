@@ -175,6 +175,33 @@ export interface AgentSuggestion {
   tool_args?: Record<string, unknown> | null;
 }
 
+export interface ReferenceTopPost {
+  caption_first_line: string;
+  media_type: 'REELS' | 'CAROUSEL_ALBUM' | 'IMAGE';
+  engagement_rate: number;
+  permalink?: string | null;
+  timestamp?: string | null;
+  hook_formula?: string | null;
+}
+
+export interface ReferenceAnalysis {
+  username: string;
+  status: 'ok' | 'not_professional' | 'not_found' | 'error';
+  error_message?: string | null;
+  followers?: number | null;
+  posts_per_week?: number | null;
+  format_mix?: Record<'REELS' | 'CAROUSEL_ALBUM' | 'IMAGE', number> | null;
+  top_posts?: ReferenceTopPost[] | null;
+  hook_formulas?: string[] | null;
+  fetched_at?: string | null;
+}
+
+export interface ReferenceAccountsResponse {
+  references: ReferenceAnalysis[];
+  summary: string;
+  refreshed: boolean;
+}
+
 export interface Milestone {
   date: string;
   event: string;
@@ -444,7 +471,12 @@ export interface SwipeFileItem {
   sends_per_reach?: number | null;
   is_trial?: boolean;
   reels_skip_rate?: number | null;
+  is_competitor?: boolean;
+  reference_username?: string | null;
+  permalink?: string | null;
 }
+
+export type SwipeFileSource = 'own' | 'competitors' | 'all';
 
 export interface SwipeFileByFormula {
   formula_id: number;

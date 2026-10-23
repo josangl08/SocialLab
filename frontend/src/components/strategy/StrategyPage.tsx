@@ -11,6 +11,7 @@ import { StrategyPublishingTab } from './StrategyPublishingTab';
 import { StrategyReferencesTab } from './StrategyReferencesTab';
 import { StrategyDiagnosticsTab } from './StrategyDiagnosticsTab';
 import { StrategyWizardModal } from './StrategyWizardModal';
+import { PendingSuggestionsList } from './PendingSuggestionsList';
 import {
   DEFAULT_CONFIG, STRATEGY_TABS, TAB_FIELDS, isStrategyTab, isTabDirty, pickFields,
 } from './strategyOptions';
@@ -211,7 +212,10 @@ const StrategyPage: React.FC = () => {
               <StrategyPublishingTab accountId={accountId} draft={draft} onChange={updateDraft}
                 onSuggestionAccepted={onSuggestionAccepted} />
             )}
-            {tab === 'referentes' && <StrategyReferencesTab draft={draft} onChange={updateDraft} />}
+            {tab === 'referentes' && (
+              <StrategyReferencesTab accountId={accountId} draft={draft} savedReferences={saved.reference_accounts}
+                onChange={updateDraft} onSuggestionAccepted={onSuggestionAccepted} />
+            )}
             {tab === 'diagnostico' && (
               <StrategyDiagnosticsTab accountId={accountId} refreshKey={diagnosticsKey} onGoToTab={goToTab} />
             )}
@@ -238,6 +242,13 @@ const StrategyPage: React.FC = () => {
         onClose={() => setWizardOpen(false)}
         onApply={updateDraft}
         onAnswersSaved={onAnswersSaved}
+        extraProposal={(
+          <div className="mt-3">
+            <h4 className="stg-section-title"><i className="bi bi-search" />Sugerencias de tus referentes</h4>
+            <PendingSuggestionsList accountId={accountId} fromReferences onAccepted={onSuggestionAccepted}
+              emptyText="No hay sugerencias pendientes de tus referentes." />
+          </div>
+        )}
       />
 
       <Modal show={pendingConfirm !== null} onHide={() => setPendingConfirm(null)} centered className="text-light">

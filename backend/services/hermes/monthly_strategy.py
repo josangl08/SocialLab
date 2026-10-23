@@ -14,6 +14,7 @@ from database.supabase_client import get_supabase_admin_client
 from services.analytics.analytics_service import AnalyticsService
 from services.content_quality import audit_profile
 from services.hermes.skills import run_niche_research_for_account
+from services.reference_accounts import reference_summary_for_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ def _gather_monthly_context(account_id: int) -> dict:
         "niche_brief": lambda: run_niche_research_for_account(account_id).get("brief"),
         "outliers_summary": lambda: _monthly_outliers_summary(account_id),
         "audit_summary": lambda: _monthly_audit_summary(account_id),
+        "references_summary": lambda: reference_summary_for_prompt(account_id),
     }
     context = {}
     for key, fetch in sources.items():

@@ -3,6 +3,7 @@ import type {
   AgentConfigPatch,
   AgentStrategyConfig,
   AgentSuggestion,
+  ReferenceAccountsResponse,
   StrategyDiagnostics,
   StrategyWizardAnswers,
 } from '../types';
@@ -33,6 +34,9 @@ export const strategyApi = {
     apiClient.post<{ accepted: boolean; config_column: keyof AgentStrategyConfig; applied_value: unknown }>(
       `/api/agent/decisions/${decisionId}/accept-suggestion`, {}
     ),
+
+  getReferences: (accountId: number, refresh = false) =>
+    apiClient.get<ReferenceAccountsResponse>(`/api/agent/reference-accounts/${accountId}?refresh=${refresh}`),
 
   dismissSuggestion: (decisionId: number) =>
     apiClient.post<{ dismissed: boolean }>(`/api/agent/decisions/${decisionId}/dismiss-suggestion`, {}),

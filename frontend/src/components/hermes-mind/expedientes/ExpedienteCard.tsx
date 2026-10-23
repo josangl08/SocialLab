@@ -9,6 +9,7 @@ import {
   statusLabel,
   relativeTime,
   postImageSrc,
+  fromReferences,
 } from '../shared/types';
 
 interface ExpedienteCardProps {
@@ -101,6 +102,7 @@ export const ExpedienteCard: React.FC<ExpedienteCardProps> = ({
         <ConfidenceRing score={decision.confidence_score} size={54} />
         <span className="exp-verb">{verbFor(decision.decision_type)}</span>
         <span className={`hm-badge ${badgeClass}`}>{statusLabel(decision.status)}</span>
+        {fromReferences(decision) && <span className="hm-badge exp-badge-refs">Referentes</span>}
         <span className="exp-when">{relativeTime(decision.created_at)}</span>
       </div>
 

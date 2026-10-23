@@ -1,2 +1,27 @@
 .srt-count { font-size: 0.75rem; color: var(--sl-text-dim); }
 .srt-help { color: var(--sl-text-muted); }
+.srt-pending { color: #fbbf24; }
+
+.srt-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+
+.srt-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--sl-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.srt-card.is-invalid { border-color: rgba(251, 191, 36, 0.35); }
+.srt-username { font-weight: 600; color: #fff; text-decoration: none; }
+.srt-followers { font-size: 0.75rem; color: var(--sl-text-muted); }
+.srt-warning { color: #fbbf24; }
+
+.srt-metrics { margin: 0 0 8px; font-size: 0.78rem; }
+.srt-metrics div { display: flex; gap: 8px; }
+.srt-metrics dt { min-width: 76px; color: var(--sl-text-dim); font-weight: 500; }
+.srt-metrics dd { margin: 0; color: rgba(255, 255, 255, 0.85); }
+
+.srt-top { margin: 0; padding-left: 18px; font-size: 0.78rem; }
+.srt-top li { margin-bottom: 4px; }
+.srt-top a { color: #93c5fd; }
+.srt-rate { margin-left: 6px; color: var(--sl-purple-light); font-weight: 600; }

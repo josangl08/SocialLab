@@ -26,6 +26,13 @@ from mcp.vision_server import mcp as vision_mcp
 from mcp.analytics_server import mcp as analytics_mcp
 from mcp.skills_server import mcp as skills_mcp
 
+
+@pytest.fixture(autouse=True)
+def _no_reference_accounts():
+    """run_session pide el resumen de referentes (Business Discovery + BD); se prueba aparte."""
+    with patch("services.hermes.orchestrator.reference_summary_for_prompt", return_value=None):
+        yield
+
 class MockFunctionCall:
     def __init__(self, name, args):
         self.name = name
@@ -920,6 +927,7 @@ async def test_run_session_auto_injects_niche_and_visual_perf(
         10,
         niche_brief="Brief de trail running",
         visual_perf_summary="Visual perf summary",
+        references_summary=None,
     )
 
 
@@ -952,6 +960,7 @@ async def test_run_session_auto_inject_exception_continues_with_none(
         20,
         niche_brief=None,
         visual_perf_summary=None,
+        references_summary=None,
     )
 
 

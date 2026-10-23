@@ -77,3 +77,16 @@ def test_monthly_prompt_no_longer_says_type_should_suffice():
         prompt = get_monthly_strategy_prompt(7, "2026-11-01")
     assert "deberían bastar" not in prompt
     assert "Tipo de cuenta: profesional." in prompt
+
+
+def test_weekly_prompt_includes_references_summary():
+    from services.hermes.prompts import get_system_prompt
+    with patch("services.hermes.prompts.get_supabase_admin_client") as mock_get_client, \
+            patch("services.hermes.prompts.get_active_brand_rules", return_value=[]):
+        mock_get_client.return_value.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+            MagicMock(data=[{"id": 7}])
+        )
+        with_refs = get_system_prompt(7, references_summary="- @chef_pro: 1000 seguidores")
+        without = get_system_prompt(7)
+    assert "Cuentas de referencia (qué publican y qué les funciona):\n- @chef_pro" in with_refs
+    assert "Cuentas de referencia (qué publican" not in without

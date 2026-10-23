@@ -203,6 +203,34 @@ class StrategyIssue(BaseModel):
     message: str
 
 
+class ReferenceTopPost(BaseModel):
+    caption_first_line: str = ""
+    media_type: str
+    engagement_rate: float
+    permalink: Optional[str] = None
+    timestamp: Optional[str] = None
+    hook_formula: Optional[str] = None
+
+
+class ReferenceAnalysis(BaseModel):
+    username: str
+    status: Literal["ok", "not_professional", "not_found", "error"]
+    error_message: Optional[str] = None
+    followers: Optional[int] = None
+    posts_per_week: Optional[float] = None
+    format_mix: Optional[dict[str, int]] = None
+    top_posts: Optional[list[ReferenceTopPost]] = None
+    hook_formulas: Optional[list[str]] = None
+    median_engagement_rate: Optional[float] = None
+    fetched_at: Optional[str] = None
+
+
+class ReferenceAccountsResponse(BaseModel):
+    references: list[ReferenceAnalysis] = []
+    summary: str = ""
+    refreshed: bool = False
+
+
 class StrategyDiagnosticsResponse(BaseModel):
     issues: list[StrategyIssue] = []
     context_preview: str
@@ -556,6 +584,9 @@ class SwipeFileItem(BaseModel):
     sends_per_reach: Optional[float] = None
     is_trial: bool = False
     reels_skip_rate: Optional[float] = None
+    is_competitor: bool = False
+    reference_username: Optional[str] = None
+    permalink: Optional[str] = None
 
 
 class SwipeFileByFormula(BaseModel):

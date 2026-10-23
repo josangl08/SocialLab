@@ -5,7 +5,7 @@ from typing import Literal, Optional
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import (
     User, AgentConfig, AgentConfigPatch, ContentProposal, MonthlyCampaign,
-    StrategyDiagnosticsResponse, ProfileAuditResponse,
+    StrategyDiagnosticsResponse, ProfileAuditResponse, ReferenceAccountsResponse,
 )
 from auth.dependencies import get_current_user, get_user_supabase_client
 from supabase import Client
@@ -21,6 +21,7 @@ from services.hermes.orchestrator import run_edit_session
 from services.hermes.memory import append_correction
 from services.hermes.prompts import _build_strategy_context
 from services.content_quality import audit_profile, lint_strategy
+from services.reference_accounts import analyze_reference_accounts, delete_stale_snapshots
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["Agent"])
@@ -371,6 +372,7 @@ def update_agent_config(
         if config.banned_phrases is not None:
             update_data['banned_phrases'] = _clean_banned_phrases(config.banned_phrases)
         admin_supabase.table('instagram_accounts').update(update_data).eq('id', account_id).execute()
+        delete_stale_snapshots(account_id, config.reference_accounts)
 
         return {"updated": True}
     except HTTPException:
@@ -399,11 +401,26 @@ def patch_agent_config(
     try:
         if update_data:
             admin_supabase.table('instagram_accounts').update(update_data).eq('id', account_id).execute()
+        if 'reference_accounts' in update_data:
+            delete_stale_snapshots(account_id, update_data['reference_accounts'])
         res = admin_supabase.table('instagram_accounts').select(STRATEGY_FIELDS).eq('id', account_id).execute()
         return _serialize_agent_config(res.data[0] if res.data else {})
     except Exception as e:
         logger.error(f"Error patching agent config: {str(e)}")
         raise HTTPException(status_code=500, detail="Error al actualizar la configuración")
+
+
+@router.get("/reference-accounts/{account_id}", response_model=ReferenceAccountsResponse)
+async def get_reference_accounts(
+    account_id: int,
+    refresh: bool = False,
+    current_user: User = Depends(get_current_user)
+) -> ReferenceAccountsResponse:
+    """Análisis de los referentes con Business Discovery (AD-10); respeta la caché de
+    7 días salvo con refresh=true."""
+    _verify_account_owner(account_id, str(current_user.id))
+    analysis = await asyncio.to_thread(analyze_reference_accounts, account_id, refresh)
+    return ReferenceAccountsResponse(**analysis)
 
 
 @router.get("/strategy/{account_id}/diagnostics", response_model=StrategyDiagnosticsResponse)
@@ -1459,6 +1476,7 @@ async def override_decision(
 _SUGGESTION_APPLY = {
     "suggest_schedule_change": ("best_times", "suggested_best_times"),
     "suggest_mix_change": ("content_type_mix", "suggested_content_type_mix"),
+    "suggest_pillars_change": ("content_pillars", "suggested_content_pillars"),
 }
 
 

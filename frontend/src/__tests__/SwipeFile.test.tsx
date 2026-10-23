@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { SwipeFile } from '../components/studio/SwipeFile';
 import { contentApi } from '../api/content';
@@ -122,5 +122,29 @@ describe('SwipeFile Component', () => {
     render(<SwipeFile accountId={1} />);
 
     expect(await screen.findByText(/Trial Reel · salto 3 s: 38.5%/)).toBeInTheDocument();
+  });
+
+  test('filters own / competitors / all and marks competitor posts', async () => {
+    (contentApi.getSwipeFile as any).mockImplementation((_id: number, opts?: { source?: string }) =>
+      Promise.resolve(opts?.source === 'competitors'
+        ? {
+            items: [{ post_id: null, hook_text: 'Gancho del referente', formula_name: 'Curiosidad', outlier_multiple: 3,
+                      is_competitor: true, reference_username: 'chef_pro', permalink: 'https://instagram.com/p/x' }],
+            by_formula: [],
+          }
+        : { items: [{ post_id: 1, hook_text: 'Mi gancho', outlier_multiple: 1 }], by_formula: [] })
+    );
+
+    render(<SwipeFile accountId={1} />);
+    expect(await screen.findByText('Mi gancho')).toBeInTheDocument();
+    expect(contentApi.getSwipeFile).toHaveBeenLastCalledWith(1, { source: 'own' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Competencia' }));
+    expect(await screen.findByText('@chef_pro')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Gancho del referente' })).toHaveAttribute('href', 'https://instagram.com/p/x');
+    expect(contentApi.getSwipeFile).toHaveBeenLastCalledWith(1, { source: 'competitors' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Todos' }));
+    await waitFor(() => expect(contentApi.getSwipeFile).toHaveBeenLastCalledWith(1, { source: 'all' }));
   });
 });

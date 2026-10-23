@@ -10,7 +10,7 @@ Date: 2025-01-19
 import logging
 import json
 import statistics
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 from collections import defaultdict
 
@@ -134,61 +134,34 @@ class AnalyticsService:
             'contact_button_taps': sum(int(r.get('profile_links_taps') or 0) for r in rows),
         }
 
-    def get_swipe_file(self, instagram_account_id: int, days: int = 90) -> Dict:
+    def get_swipe_file(self, instagram_account_id: int, days: int = 90, source: str = 'own') -> Dict:
         """
         Swipe File: primera línea de los posts publicados en los últimos `days` días (90),
         clasificada por fórmula de gancho y ordenada por Outlier Multiple, más el
         agregado por fórmula. Sin Gemini (score_hook es determinista).
         Los Trial Reels llevan su reels_skip_rate para comparar ganchos (AD-10).
+        `source`: 'own' (por defecto), 'competitors' (mejores posts de los referentes,
+        desde la caché de Business Discovery, sin llamadas nuevas) o 'all' (AD-12).
         """
-        cutoff = utc_now_naive() - timedelta(days=days)
-        result = self.db.table('posts').select(
-            'id, content, trial_graduation, '
-            'post_performance(impressions, reach, shares, reels_skip_rate)'
-        ).eq('instagram_account_id', instagram_account_id).eq(
-            'status', 'published'
-        ).eq('is_collaboration', False).gte('publication_date', cutoff.isoformat()).execute()
-        posts = [p for p in (result.data or []) if p]
-
-        def _perf(post: Dict) -> Dict:
-            perf = post.get('post_performance') or {}
-            return (perf[0] if perf else {}) if isinstance(perf, list) else perf
-
-        median_views = self.calculate_median_views(
-            [int(_perf(p).get('impressions') or 0) for p in posts]
-        )
-
         items: List[Dict] = []
+        if source in ('own', 'all'):
+            items.extend(self._own_swipe_items(instagram_account_id, days))
+        if source in ('competitors', 'all'):
+            items.extend(self._competitor_swipe_items(instagram_account_id))
+
         by_formula: Dict[int, Dict] = {}
-        for post in posts:
-            lines = [l.strip() for l in (post.get('content') or '').splitlines() if l.strip()]
-            if not lines:
+        for item in items:
+            if item['formula_id'] is None:
                 continue
-            perf = _perf(post)
-            scored = score_hook(lines[0])
-            outlier = self.calculate_outlier_multiple(int(perf.get('impressions') or 0), median_views)
-            items.append({
-                'post_id': post.get('id'),
-                'hook_text': lines[0],
-                'formula_id': scored['formula_id'],
-                'formula_name': scored['formula_name'],
-                'outlier_multiple': outlier,
-                'sends_per_reach': self.calculate_sends_per_reach(
-                    int(perf.get('shares') or 0), int(perf.get('reach') or 0)
-                ),
-                'is_trial': post.get('trial_graduation') is not None,
-                'reels_skip_rate': perf.get('reels_skip_rate'),
+            agg = by_formula.setdefault(item['formula_id'], {
+                'formula_id': item['formula_id'],
+                'formula_name': item['formula_name'],
+                'count': 0,
+                'outliers': [],
             })
-            if scored['formula_id'] is not None:
-                agg = by_formula.setdefault(scored['formula_id'], {
-                    'formula_id': scored['formula_id'],
-                    'formula_name': scored['formula_name'],
-                    'count': 0,
-                    'outliers': [],
-                })
-                agg['count'] += 1
-                if outlier is not None:
-                    agg['outliers'].append(outlier)
+            agg['count'] += 1
+            if item['outlier_multiple'] is not None:
+                agg['outliers'].append(item['outlier_multiple'])
 
         def _by_outlier(value: Optional[float]):
             return (value is not None, value or 0)
@@ -207,6 +180,79 @@ class AnalyticsService:
         ]
         formulas.sort(key=lambda f: _by_outlier(f['avg_outlier']), reverse=True)
         return {'items': items, 'by_formula': formulas}
+
+    def _own_swipe_items(self, instagram_account_id: int, days: int) -> List[Dict]:
+        cutoff = utc_now_naive() - timedelta(days=days)
+        result = self.db.table('posts').select(
+            'id, content, trial_graduation, '
+            'post_performance(impressions, reach, shares, reels_skip_rate)'
+        ).eq('instagram_account_id', instagram_account_id).eq(
+            'status', 'published'
+        ).eq('is_collaboration', False).gte('publication_date', cutoff.isoformat()).execute()
+        posts = [p for p in (result.data or []) if p]
+
+        def _perf(post: Dict) -> Dict:
+            perf = post.get('post_performance') or {}
+            return (perf[0] if perf else {}) if isinstance(perf, list) else perf
+
+        median_views = self.calculate_median_views(
+            [int(_perf(p).get('impressions') or 0) for p in posts]
+        )
+
+        items: List[Dict] = []
+        for post in posts:
+            lines = [l.strip() for l in (post.get('content') or '').splitlines() if l.strip()]
+            if not lines:
+                continue
+            perf = _perf(post)
+            scored = score_hook(lines[0])
+            items.append({
+                'post_id': post.get('id'),
+                'hook_text': lines[0],
+                'formula_id': scored['formula_id'],
+                'formula_name': scored['formula_name'],
+                'outlier_multiple': self.calculate_outlier_multiple(int(perf.get('impressions') or 0), median_views),
+                'sends_per_reach': self.calculate_sends_per_reach(
+                    int(perf.get('shares') or 0), int(perf.get('reach') or 0)
+                ),
+                'is_trial': post.get('trial_graduation') is not None,
+                'reels_skip_rate': perf.get('reels_skip_rate'),
+                'is_competitor': False,
+            })
+        return items
+
+    def _competitor_swipe_items(self, instagram_account_id: int) -> List[Dict]:
+        """Mejores posts de los referentes con snapshot fresco (< 7 días). El Outlier
+        Multiple es engagement relativo a seguidores / su mediana: Business Discovery
+        no da visualizaciones."""
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        result = self.db.table('reference_account_snapshots').select('username, payload')\
+            .eq('account_id', instagram_account_id).eq('status', 'ok')\
+            .gte('fetched_at', cutoff.isoformat()).execute()
+        items: List[Dict] = []
+        for snap in result.data or []:
+            payload = snap.get('payload') or {}
+            median_rate = payload.get('median_engagement_rate')
+            for top in payload.get('top_posts') or []:
+                hook = (top.get('caption_first_line') or '').strip()
+                if not hook:
+                    continue
+                scored = score_hook(hook)
+                rate = top.get('engagement_rate')
+                items.append({
+                    'post_id': None,
+                    'hook_text': hook,
+                    'formula_id': scored['formula_id'],
+                    'formula_name': scored['formula_name'],
+                    'outlier_multiple': round(rate / median_rate, 2) if rate is not None and median_rate else None,
+                    'sends_per_reach': None,
+                    'is_trial': False,
+                    'reels_skip_rate': None,
+                    'is_competitor': True,
+                    'reference_username': snap.get('username'),
+                    'permalink': top.get('permalink'),
+                })
+        return items
 
     def get_comprehensive_analytics(
         self,

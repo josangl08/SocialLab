@@ -28,6 +28,7 @@ export interface DecisionSummary {
   media_url?: string | null;
   post_type?: string | null;
   drive_file_id?: string | null;
+  tool_args?: Record<string, unknown> | null;
 }
 
 /**
@@ -142,6 +143,7 @@ const VERBS: Record<string, string> = {
   supabase_create_proposal: 'Creó una propuesta',
   suggest_schedule_change: 'Sugirió un horario',
   suggest_mix_change: 'Sugirió una mezcla',
+  suggest_pillars_change: 'Sugirió pilares',
 };
 export function verbFor(decisionType: string): string {
   return VERBS[decisionType] ?? decisionType;
@@ -156,6 +158,11 @@ const STATUS_LABEL: Record<DecisionSummary['status'], string> = {
 };
 export function statusLabel(s: DecisionSummary['status']): string {
   return STATUS_LABEL[s] ?? s;
+}
+
+/** Sugerencia generada a partir del análisis de cuentas de referencia (AD-11). */
+export function fromReferences(d: { tool_args?: Record<string, unknown> | null }): boolean {
+  return d.tool_args?.source === 'reference_accounts';
 }
 
 export function isSuggestion(d: { decision_type: string }): boolean {

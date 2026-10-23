@@ -1,13 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { contentApi } from '../../api/content';
-import type { SwipeFileResponse } from '../../types';
+import type { SwipeFileResponse, SwipeFileSource } from '../../types';
 import './SwipeFile.css';
 
 interface SwipeFileProps {
   accountId: number;
 }
 
+const SOURCES: { value: SwipeFileSource; label: string }[] = [
+  { value: 'own', label: 'Propios' },
+  { value: 'competitors', label: 'Competencia' },
+  { value: 'all', label: 'Todos' },
+];
+
 export const SwipeFile: React.FC<SwipeFileProps> = ({ accountId }) => {
+  const [source, setSource] = useState<SwipeFileSource>('own');
   const [data, setData] = useState<SwipeFileResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -18,7 +25,7 @@ export const SwipeFile: React.FC<SwipeFileProps> = ({ accountId }) => {
     setError(null);
 
     contentApi
-      .getSwipeFile(accountId)
+      .getSwipeFile(accountId, { source })
       .then((res) => {
         if (mounted) setData(res);
       })
@@ -32,7 +39,19 @@ export const SwipeFile: React.FC<SwipeFileProps> = ({ accountId }) => {
     return () => {
       mounted = false;
     };
-  }, [accountId]);
+  }, [accountId, source]);
+
+  const filter = (
+    <div className="btn-group btn-group-sm swipe-file-filter" role="group" aria-label="Origen de los ganchos">
+      {SOURCES.map(s => (
+        <button key={s.value} type="button" aria-pressed={source === s.value}
+          className={`btn ${source === s.value ? 'btn-primary' : 'btn-outline-secondary'}`}
+          onClick={() => setSource(s.value)}>
+          {s.label}
+        </button>
+      ))}
+    </div>
+  );
 
   if (loading) {
     return (
@@ -54,8 +73,13 @@ export const SwipeFile: React.FC<SwipeFileProps> = ({ accountId }) => {
   if (!data || data.items.length === 0) {
     return (
       <div className="swipe-file-container text-center py-5">
-        <i className="bi bi-bookmark-star fs-1 text-muted"></i>
-        <p className="mt-2 text-muted">No hay ganchos registrados en el Swipe File.</p>
+        {filter}
+        <i className="bi bi-bookmark-star fs-1 text-muted d-block mt-3"></i>
+        <p className="mt-2 text-muted">
+          {source === 'competitors'
+            ? 'Aún no hay publicaciones de tus referentes. Añádelos en la página de estrategia.'
+            : 'No hay ganchos registrados en el Swipe File.'}
+        </p>
       </div>
     );
   }
@@ -67,6 +91,7 @@ export const SwipeFile: React.FC<SwipeFileProps> = ({ accountId }) => {
         <p className="text-muted small">
           Ganchos con mejor Outlier Multiple clasificados por fórmula.
         </p>
+        {filter}
       </div>
 
       {data.by_formula.length > 0 && (
@@ -90,10 +115,15 @@ export const SwipeFile: React.FC<SwipeFileProps> = ({ accountId }) => {
           </tr>
         </thead>
         <tbody>
-          {data.items.map((item) => (
-            <tr key={item.post_id}>
+          {data.items.map((item, i) => (
+            <tr key={item.post_id ?? `${item.reference_username}-${i}`}>
               <td className="swipe-file-hook">
-                {item.hook_text}
+                {item.is_competitor && item.reference_username && (
+                  <span className="swipe-file-reference">@{item.reference_username}</span>
+                )}
+                {item.permalink
+                  ? <a href={item.permalink} target="_blank" rel="noopener noreferrer" className="swipe-file-link">{item.hook_text}</a>
+                  : item.hook_text}
                 {item.is_trial && (
                   <span className="swipe-file-trial">
                     Trial Reel

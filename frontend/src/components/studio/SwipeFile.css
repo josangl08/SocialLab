@@ -45,3 +45,17 @@
   font-weight: 400;
   color: var(--bs-info);
 }
+
+.swipe-file-filter { margin-top: 4px; }
+
+.swipe-file-reference {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+}
+
+.swipe-file-link { color: inherit; }

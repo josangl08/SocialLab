@@ -297,6 +297,57 @@ def test_swipe_file_insufficient_data(mock_db):
     assert result['items'][0]['sends_per_reach'] is None
 
 
+def _swipe_fake(own_rows, snapshots):
+    from datetime import datetime, timezone
+    from tests.fake_supabase import FakeSupabase
+    now = datetime.now(timezone.utc).isoformat()
+    return FakeSupabase({
+        'posts': own_rows,
+        'reference_account_snapshots': [{'account_id': 1, 'status': 'ok', 'fetched_at': now, **s} for s in snapshots],
+    })
+
+
+_OWN = [{
+    'id': 9, 'content': 'Mi gancho\nCuerpo', 'trial_graduation': None, 'instagram_account_id': 1,
+    'status': 'published', 'is_collaboration': False, 'publication_date': '2099-01-01T00:00:00',
+    'post_performance': {'impressions': 100, 'reach': 100, 'shares': 1},
+}]
+_REF = {'username': 'chef_pro', 'payload': {
+    'median_engagement_rate': 2.0,
+    'top_posts': [{'caption_first_line': 'Nadie te cuenta esto', 'engagement_rate': 6.0,
+                   'permalink': 'https://instagram.com/p/x', 'media_type': 'REELS'}],
+}}
+
+
+def test_swipe_file_own_is_default_and_unchanged():
+    service = AnalyticsService(db_client=_swipe_fake(_OWN, [_REF]))
+    items = service.get_swipe_file(1)['items']
+    assert [i['post_id'] for i in items] == [9]
+    assert items[0]['is_competitor'] is False
+
+
+def test_swipe_file_competitors_from_fresh_snapshots():
+    stale = {'username': 'old', 'fetched_at': '2020-01-01T00:00:00+00:00', 'payload': _REF['payload']}
+    service = AnalyticsService(db_client=_swipe_fake(_OWN, [_REF, stale]))
+    items = service.get_swipe_file(1, source='competitors')['items']
+    assert len(items) == 1
+    item = items[0]
+    assert item['is_competitor'] is True
+    assert item['reference_username'] == 'chef_pro'
+    assert item['permalink'] == 'https://instagram.com/p/x'
+    assert item['outlier_multiple'] == 3.0
+    assert item['post_id'] is None
+
+
+def test_swipe_file_all_mixes_both_and_aggregates():
+    service = AnalyticsService(db_client=_swipe_fake(_OWN, [_REF]))
+    with patch('services.analytics.analytics_service.score_hook',
+               return_value={'formula_id': 3, 'formula_name': 'Curiosidad'}):
+        result = service.get_swipe_file(1, source='all')
+    assert {i['is_competitor'] for i in result['items']} == {True, False}
+    assert result['by_formula'][0]['count'] == 2
+
+
 def _post(pub_date: str, likes: int = 10) -> dict:
     return {'publication_date': pub_date, 'post_performance': {'likes': likes, 'comments': 0, 'reach': 100}}
 

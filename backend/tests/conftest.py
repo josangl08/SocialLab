@@ -215,3 +215,11 @@ def override_supabase_client(mock_supabase_client):
     if get_user_supabase_client in app.dependency_overrides:
         del app.dependency_overrides[get_user_supabase_client]
 
+
+
+@pytest.fixture(autouse=True)
+def no_reference_snapshot_cleanup():
+    """Guardar la config limpia snapshots de referentes con el cliente admin real;
+    en los tests de rutas se anula (la limpieza se prueba en test_reference_accounts)."""
+    with patch("routes.agent_routes.delete_stale_snapshots") as cleanup:
+        yield cleanup

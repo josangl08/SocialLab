@@ -619,12 +619,14 @@ async def audit_profile_endpoint(
 @router.get("/swipe-file/{account_id}", response_model=SwipeFileResponse)
 async def get_swipe_file_endpoint(
     account_id: int,
+    source: Literal['own', 'competitors', 'all'] = 'own',
     current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_user_supabase_client)
 ) -> SwipeFileResponse:
-    """Swipe File de ganchos propios ordenados por Outlier Multiple y agregados por fórmula (sin Gemini)."""
+    """Swipe File de ganchos (propios, de los referentes o ambos) ordenados por Outlier
+    Multiple y agregados por fórmula (sin Gemini)."""
     _verify_account_access(account_id, supabase)
-    return SwipeFileResponse(**AnalyticsService(supabase).get_swipe_file(account_id))
+    return SwipeFileResponse(**AnalyticsService(supabase).get_swipe_file(account_id, source=source))
 
 
 # --- Endpoints de Conversión y Comunidad (Fase F): solo sugerencias, nada se escribe en Graph API ---

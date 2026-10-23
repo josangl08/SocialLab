@@ -28,6 +28,7 @@ from mcp.analytics_server import mcp as analytics_mcp
 from mcp.skills_server import mcp as skills_mcp
 from services.hermes.skills import run_niche_research_for_account, run_visual_performance_skill
 from services.content_quality import schedule_disagreement
+from services.reference_accounts import reference_summary_for_prompt
 from utils.timezones import utc_now_naive
 
 logger = logging.getLogger(__name__)
@@ -545,11 +546,18 @@ async def run_session(account_id: int) -> HermesSessionResult:
     except Exception as e:
         logger.warning(f"Error auto-inyectando rendimiento visual para cuenta {account_id}: {e}")
 
+    references_summary = None
+    try:
+        references_summary = reference_summary_for_prompt(account_id)
+    except Exception as e:
+        logger.warning(f"Error auto-inyectando referentes para cuenta {account_id}: {e}")
+
     # 2. Get system prompt (prompts.py)
     system_prompt = get_system_prompt(
         account_id,
         niche_brief=niche_brief,
         visual_perf_summary=visual_perf_summary,
+        references_summary=references_summary,
     )
     
     # 3. Save system prompt to memory

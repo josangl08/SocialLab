@@ -145,3 +145,8 @@
   font-weight: 600;
 }
 .exp-meta b { color: var(--hm-muted); }
+
+.hermes-mind-page .hm-badge.exp-badge-refs {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+}

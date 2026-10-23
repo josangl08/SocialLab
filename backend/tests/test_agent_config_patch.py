@@ -169,3 +169,20 @@ def test_list_decisions_filters_by_status(admin):
         client.get("/api/agent/decisions?account_id=7&status=suggested")
     eq_calls = [c.args for c in admin.table.return_value.select.return_value.eq.return_value.eq.call_args_list]
     assert ("status", "suggested") in eq_calls
+
+
+def test_reference_accounts_endpoint_respects_refresh_flag(admin):
+    _account_rows(admin, {"user_id": USER_ID})
+    analysis = {"references": [{"username": "chef", "status": "not_professional", "error_message": "x"}],
+                "summary": "", "refreshed": True}
+    with patch("routes.agent_routes.analyze_reference_accounts", return_value=analysis) as analyze:
+        res = client.get("/api/agent/reference-accounts/7?refresh=true")
+    assert res.status_code == 200
+    assert res.json()["references"][0]["status"] == "not_professional"
+    analyze.assert_called_once_with(7, True)
+
+
+def test_patch_references_cleans_removed_snapshots(admin, no_reference_snapshot_cleanup):
+    _account_rows(admin, {"user_id": USER_ID})
+    client.patch("/api/agent/config/7", json={"reference_accounts": ["@chef", "pan"]})
+    no_reference_snapshot_cleanup.assert_called_once_with(7, ["chef", "pan"])

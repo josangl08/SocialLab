@@ -15,7 +15,11 @@ def _prompt(**context) -> str:
 
 
 def test_prompt_with_all_sources():
-    prompt = _prompt(niche_brief="Reels cortos", outliers_summary="- \"Hook\"", audit_summary="- Bio sin CTA")
+    prompt = _prompt(
+        niche_brief="Reels cortos", outliers_summary="- \"Hook\"", audit_summary="- Bio sin CTA",
+        references_summary="- @chef: 3 posts/semana",
+    )
+    assert "Cuentas de referencia (qué publican y qué les funciona):\n- @chef: 3 posts/semana" in prompt
     assert "Tendencias del nicho:\nReels cortos" in prompt
     assert "Publicaciones que más destacaron el último mes:" in prompt
     assert "Puntos pendientes de la auditoría del perfil:\n- Bio sin CTA" in prompt
@@ -30,12 +34,14 @@ def test_prompt_without_sources_has_no_empty_blocks():
 def test_gather_context_survives_failing_source():
     with patch.object(monthly_strategy, "run_niche_research_for_account", side_effect=RuntimeError("boom")), \
             patch.object(monthly_strategy, "_monthly_outliers_summary", return_value="- \"Hook\" (x, 3.2x la mediana)"), \
-            patch.object(monthly_strategy, "_monthly_audit_summary", return_value=""):
+            patch.object(monthly_strategy, "_monthly_audit_summary", return_value=""), \
+            patch.object(monthly_strategy, "reference_summary_for_prompt", return_value="- @chef: 1000 seguidores"):
         context = monthly_strategy._gather_monthly_context(7)
     assert context == {
         "niche_brief": None,
         "outliers_summary": "- \"Hook\" (x, 3.2x la mediana)",
         "audit_summary": None,
+        "references_summary": "- @chef: 1000 seguidores",
     }
 
 

@@ -185,6 +185,7 @@ def get_system_prompt(
     account_id: int,
     niche_brief: Optional[str] = None,
     visual_perf_summary: Optional[str] = None,
+    references_summary: Optional[str] = None,
 ) -> str:
     """Construye el system prompt de Hermes para una cuenta: persona + instrucciones
     de la sesión + perfil de cuenta como contexto."""
@@ -200,6 +201,8 @@ def get_system_prompt(
         extra_context_parts.append(f"Tendencias del nicho:\n{niche_brief}")
     if visual_perf_summary:
         extra_context_parts.append(f"Rendimiento de contenido visual histórico:\n{visual_perf_summary}")
+    if references_summary:
+        extra_context_parts.append(f"Cuentas de referencia (qué publican y qué les funciona):\n{references_summary}")
     if extra_context_parts:
         captions_context = "\n\nContexto de captions e inteligencia de la cuenta:\n" + "\n\n".join(extra_context_parts)
 
@@ -369,6 +372,7 @@ def get_monthly_strategy_prompt(
     niche_brief: Optional[str] = None,
     outliers_summary: Optional[str] = None,
     audit_summary: Optional[str] = None,
+    references_summary: Optional[str] = None,
 ) -> str:
     """Construye el system prompt de la sesión mensual: persona acotada a redactar un
     borrador de campaña para target_month (YYYY-MM-01), reutilizando el perfil de cuenta
@@ -423,6 +427,8 @@ def get_monthly_strategy_prompt(
         performance_parts.append(f"Publicaciones que más destacaron el último mes:\n{outliers_summary}")
     if audit_summary:
         performance_parts.append(f"Puntos pendientes de la auditoría del perfil:\n{audit_summary}")
+    if references_summary:
+        performance_parts.append(f"Cuentas de referencia (qué publican y qué les funciona):\n{references_summary}")
     performance_context = (
         "\n\nContexto de rendimiento de la cuenta:\n" + "\n\n".join(performance_parts)
         if performance_parts else ""

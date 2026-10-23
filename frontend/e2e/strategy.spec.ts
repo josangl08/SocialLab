@@ -48,6 +48,17 @@ async function mockApi(page: Page): Promise<MockState> {
       return route.fulfill({ json: state.config });
     }
     if (path === '/api/agent/strategy/7/diagnostics') return route.fulfill({ json: diagnostics(state.config) });
+    if (path === '/api/agent/reference-accounts/7') {
+      return route.fulfill({ json: {
+        refreshed: false, summary: '',
+        references: state.config.reference_accounts.map(u => (u === 'amiga'
+          ? { username: u, status: 'not_professional', error_message: 'x' }
+          : { username: u, status: 'ok', followers: 12500, posts_per_week: 4.5,
+              format_mix: { REELS: 60, CAROUSEL_ALBUM: 20, IMAGE: 20 }, hook_formulas: ['Curiosidad'],
+              top_posts: [{ caption_first_line: 'Nadie te cuenta esto', media_type: 'REELS', engagement_rate: 8.2,
+                            permalink: 'https://instagram.com/p/abc' }] })),
+      } });
+    }
     if (path === '/api/agent/decisions') return route.fulfill({ json: { data: [], meta: { total: 0 } } });
 
     if (path === '/api/agent/campaign' && method === 'GET') {
@@ -110,3 +121,22 @@ test('el planner genera y aprueba la campaña del mes', async ({ page }) => {
   await expect(page.getByText('Otoño en la cocina')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Ver estrategia →' })).toHaveAttribute('href', '/strategy?account=7');
 });
+
+test('Referentes: añadir, guardar y ver el análisis con aviso para cuentas personales', async ({ page }) => {
+  const state = await mockApi(page);
+  await page.goto('/strategy?account=7&tab=referentes');
+
+  const input = page.getByPlaceholder('cuenta_referente');
+  for (const name of ['@chef_pro', 'amiga']) {
+    await input.fill(name);
+    await input.press('Enter');
+  }
+  await expect(page.getByText('Guarda los cambios para analizar la nueva lista.')).toBeVisible();
+  await page.getByRole('button', { name: 'Guardar' }).click();
+  expect(state.patches).toEqual([{ reference_accounts: ['chef_pro', 'amiga'] }]);
+
+  await expect(page.getByText('12.500 seguidores')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Nadie te cuenta esto' })).toHaveAttribute('href', 'https://instagram.com/p/abc');
+  await expect(page.getByText(/No es una cuenta profesional/)).toBeVisible();
+});
+

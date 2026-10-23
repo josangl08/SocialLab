@@ -63,6 +63,7 @@ export const StrategyPublishingTab: React.FC<StrategyPublishingTabProps> = ({
         <PendingSuggestionsList
           accountId={accountId}
           types={['suggest_schedule_change', 'suggest_mix_change']}
+          fromReferences={false}
           onAccepted={onSuggestionAccepted}
           emptyText="Hermes no tiene sugerencias pendientes sobre horarios ni mix."
         />
