@@ -16,7 +16,7 @@ COLLAB = {"id": "ig-x", "media_type": "IMAGE", "media_url": "https://cdn.test/x.
 def _sync(media: list[dict], collaborations=None) -> tuple[list[dict], MagicMock]:
     """Ejecuta el sync y devuelve las filas enviadas al upsert de `posts` y el cliente simulado.
     `collaborations`: respuesta de `collaborative_media` (o una excepción)."""
-    svc = InstagramInsightsService("token", "ig-1")
+    svc = InstagramInsightsService("token", "ig-1", "facebook")
     db = MagicMock()
     collab_response = {"data": collaborations or []}
     request = MagicMock(side_effect=collaborations) if isinstance(collaborations, Exception) \
@@ -41,7 +41,7 @@ def test_sync_stores_video_cover():
 
 
 def test_sync_requests_thumbnail_url_field():
-    svc = InstagramInsightsService("token", "ig-1")
+    svc = InstagramInsightsService("token", "ig-1", "facebook")
     with patch.object(svc, "_make_request", return_value={"data": []}) as req:
         svc._get_all_media_paginated()
     assert "thumbnail_url" in req.call_args.args[1]["fields"].split(",")
@@ -67,7 +67,7 @@ def test_collaborations_failure_keeps_own_posts():
 
 
 def test_collaborations_follow_pagination():
-    svc = InstagramInsightsService("token", "ig-1")
+    svc = InstagramInsightsService("token", "ig-1", "facebook")
     pages = [{"data": [COLLAB], "paging": {"next": "https://graph.test/next"}},
              {"data": [{**COLLAB, "id": "ig-y"}]}]
     with patch.object(svc, "_make_request", side_effect=pages) as request:
@@ -75,3 +75,50 @@ def test_collaborations_follow_pagination():
 
     assert [r["instagram_post_id"] for r in rows] == ["ig-x", "ig-y"]
     assert request.call_args_list[1].args[0] == "https://graph.test/next"
+
+
+def test_sync_endpoint_does_not_call_me_accounts():
+    """AD-4: /instagram/sync no debe llamar a me/accounts ni realizar descubrimiento por página."""
+    import pytest
+    from fastapi.testclient import TestClient
+    from main import app
+    from auth.dependencies import get_current_user
+    from models.schemas import User
+    from tests.conftest import USER_ID
+
+    async def mock_user():
+        return User(id=USER_ID, email="test@example.com")
+
+    app.dependency_overrides[get_current_user] = mock_user
+    test_client = TestClient(app)
+
+    mock_db = MagicMock()
+    mock_db.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+        {
+            "id": 7,
+            "login_type": "instagram",
+            "long_lived_access_token": "enc-token",
+            "instagram_business_account_id": "ig-business-7",
+            "username": "test_user",
+        }
+    ]
+
+    called_urls = []
+    def fake_get(url, *args, **kwargs):
+        called_urls.append(url)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"data": []}
+        return resp
+
+    with patch("routes.instagram_routes.get_supabase_admin_client", return_value=mock_db), \
+         patch("routes.instagram_routes.decrypt_token", return_value="plain-token"), \
+         patch("routes.instagram_routes.requests.get", side_effect=fake_get), \
+         patch("routes.instagram_routes.InstagramInsightsService"):
+        
+        test_client.get("/instagram/sync?instagram_account_id=7")
+
+    assert called_urls
+    assert not any("me/accounts" in url for url in called_urls)
+    assert all(url.startswith("https://graph.instagram.com/") for url in called_urls)
+

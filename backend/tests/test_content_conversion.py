@@ -177,6 +177,7 @@ class TestZeroWritesToGraphApi:
         sample_account = {
             "id": 10,
             "long_lived_access_token": "mock-token",
+            "login_type": "facebook",
             "instagram_business_account_id": "17841400000",
         }
         mock_db = MockSupabaseClient({
@@ -250,6 +251,7 @@ class TestCommentsTriageFallback:
         sample_account = {
             "id": 10,
             "long_lived_access_token": "mock-token",
+            "login_type": "facebook",
             "instagram_business_account_id": "17841400000",
         }
         mock_db = MockSupabaseClient({
@@ -316,6 +318,7 @@ class TestCommentsTriageCaching:
         sample_account = {
             "id": 10,
             "long_lived_access_token": "mock-token",
+            "login_type": "facebook",
             "instagram_business_account_id": "17841400000",
         }
         mock_db = MockSupabaseClient({
@@ -472,7 +475,7 @@ class TestConversionLogic:
     def test_403_does_not_log_access_token(self, auth_client, caplog):
         mock_db = MockSupabaseClient({
             "posts": [{"id": 5, "instagram_account_id": 10, "instagram_post_id": "1789"}],
-            "instagram_accounts": [{"id": 10, "long_lived_access_token": "tok"}],
+            "instagram_accounts": [{"id": 10, "long_lived_access_token": "tok", "login_type": "facebook"}],
         })
         prev_db = app.dependency_overrides.get(get_user_supabase_client)
         app.dependency_overrides[get_user_supabase_client] = lambda: mock_db

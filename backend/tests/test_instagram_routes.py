@@ -8,6 +8,7 @@ from auth.dependencies import get_current_user
 from models.schemas import User
 from tests.conftest import USER_ID
 from utils.oauth_state import generate_state_token
+from utils.graph_api import graph_base_url
 
 # Mock current user
 async def mock_get_current_user():
@@ -57,6 +58,8 @@ def test_get_instagram_accounts(mock_admin_supabase):
     assert response.json()[0]["drive_folder_id"] == "folder-111"
     selected_columns = mock_admin_supabase.table.return_value.select.call_args[0][0]
     assert "sector" in selected_columns
+    # AccountsPage usa este endpoint para el aviso de migración (AD-6)
+    assert "login_type" in selected_columns
 
 def test_update_account_config_success(mock_admin_supabase):
     mock_select = MagicMock()
@@ -300,7 +303,7 @@ def test_instagram_sync_expired_token_returns_401_not_500():
     # 500 instead of the intended 401 "reconecta tu cuenta" message.
     mock_admin_supabase = MagicMock()
     mock_admin_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
-        {"id": 7, "long_lived_access_token": "encrypted-token", "instagram_business_account_id": "ig-7"}
+        {"id": 7, "long_lived_access_token": "encrypted-token", "instagram_business_account_id": "ig-7", "login_type": "facebook"}
     ]
 
     error_response = MagicMock()
@@ -343,7 +346,8 @@ def test_publish_to_instagram_quota_exceeded_returns_429(mock_supabase, mock_adm
         "instagram_business_account_id": "ig-123",
         "long_lived_access_token": "valid-token",
         "expires_at": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
-        "is_active": True
+        "is_active": True,
+        "login_type": "instagram"
     }
     mock_acc_execute = MagicMock()
     mock_acc_execute.execute.return_value = MagicMock(data=[mock_account])
@@ -359,5 +363,34 @@ def test_publish_to_instagram_quota_exceeded_returns_429(mock_supabase, mock_adm
 
     assert response.status_code == 429
     assert response.json()["code"] == "PUBLISH_QUOTA_EXCEEDED"
-    mock_quota.assert_called_once_with("ig-123", "valid-token")
+    mock_quota.assert_called_once_with("ig-123", "valid-token", graph_base_url("instagram"))
     mock_post_req.assert_not_called()
+
+
+def test_instagram_status_includes_login_type(mock_admin_supabase):
+    """AD-6: /instagram/status devuelve login_type ('facebook' o 'instagram') para cada cuenta."""
+    mock_accounts = [
+        {
+            "id": 1,
+            "instagram_business_account_id": "ig-123",
+            "username": "test_user_1",
+            "account_name": "Test Account 1",
+            "followers_count": 100,
+            "profile_picture_url": "http://img.url/1.png",
+            "expires_at": "2026-12-31T23:59:59Z",
+            "is_active": True,
+            "login_type": "facebook",
+        }
+    ]
+    mock_execute = MagicMock()
+    mock_execute.execute.return_value = MagicMock(data=mock_accounts)
+    mock_admin_supabase.table.return_value.select.return_value.eq.return_value = mock_execute
+
+    with patch("routes.instagram_routes.get_supabase_admin_client", return_value=mock_admin_supabase):
+        response = client.get("/instagram/status")
+
+    assert response.status_code == 200
+    accounts = response.json()
+    assert len(accounts) == 1
+    assert accounts[0]["login_type"] == "facebook"
+

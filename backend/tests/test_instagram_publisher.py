@@ -16,6 +16,7 @@ def mock_account():
     return {
         "access_token": "mock-token-xyz",
         "instagram_user_id": "17841400000000",
+        "base_url": "https://graph.facebook.com/v26.0",
     }
 
 
@@ -207,3 +208,46 @@ def test_resolve_other_types(post, expected):
 
 def test_content_format_wins_over_post_type():
     assert resolve_publish_type({"post_type": "FEED", "content_format": "reel", "media_url": "u"})["post_type"] == "REELS"
+
+
+def test_publisher_base_url_by_account_login_type(publisher):
+    """AD-2: InstagramPublisher usa graph.instagram.com para cuenta 'instagram' y graph.facebook.com para 'facebook'."""
+    account_ig = {
+        "access_token": "token-ig",
+        "instagram_user_id": "ig-123",
+        "login_type": "instagram",
+        "base_url": "https://graph.instagram.com/v26.0",
+    }
+    with patch.object(publisher, "_get_instagram_account", return_value=account_ig), \
+         patch.object(publisher, "verify_media_url_accessibility", return_value=True), \
+         patch.object(publisher, "_wait_for_container"), \
+         patch.object(publisher, "_publish_container", return_value="pub-1"), \
+         patch.object(publisher, "_get_media_info", return_value={"permalink": "https://instagram.com/p/1"}), \
+         patch("services.publisher.instagram_publisher.requests.post") as mock_post:
+
+        mock_post.return_value.json.return_value = {"id": "c-1"}
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        publisher.publish_post(
+            media_url="https://example.com/img.jpg",
+            caption="Test login type instagram",
+            instagram_account_id=1,
+            post_type="FEED",
+        )
+
+        first_call_url = mock_post.call_args_list[0][0][0]
+        assert first_call_url == "https://graph.instagram.com/v26.0/ig-123/media"
+
+
+def test_get_instagram_account_resolves_base_url_from_login_type(publisher):
+    """AD-2: _get_instagram_account devuelve el host según login_type de la fila."""
+    query = publisher.supabase.table.return_value.select.return_value.eq.return_value.single.return_value
+    for login_type, host in [("facebook", "graph.facebook.com"), ("instagram", "graph.instagram.com")]:
+        query.execute.return_value.data = {
+            "long_lived_access_token": "enc",
+            "instagram_business_account_id": "ig-1",
+            "login_type": login_type,
+        }
+        with patch("services.publisher.instagram_publisher.decrypt_token", return_value="tok"):
+            account = publisher._get_instagram_account(1)
+        assert account["base_url"].startswith(f"https://{host}/")

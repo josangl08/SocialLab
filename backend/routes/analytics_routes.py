@@ -70,7 +70,7 @@ def get_instagram_service(
                 detail="Datos de Instagram incompletos en la base de datos."
             )
 
-        return InstagramInsightsService(access_token, instagram_id)
+        return InstagramInsightsService(access_token, instagram_id, instagram_account['login_type'])
 
     except HTTPException:
         raise
@@ -241,7 +241,7 @@ async def sync_instagram_analytics(
         # Usar admin client: RLS bloquea instagram_accounts con cliente anon
         admin_db = get_supabase_admin_client()
         result = admin_db.table('instagram_accounts').select(
-            'id, user_id, is_active, long_lived_access_token, instagram_business_account_id'
+            'id, user_id, is_active, long_lived_access_token, instagram_business_account_id, login_type'
         ).eq('id', instagram_account_id).single().execute()
 
         if not result.data:
@@ -266,7 +266,8 @@ async def sync_instagram_analytics(
 
         instagram_service = InstagramInsightsService(
             decrypt_token(account['long_lived_access_token']),
-            account['instagram_business_account_id']
+            account['instagram_business_account_id'],
+            account['login_type']
         )
 
         background_tasks.add_task(

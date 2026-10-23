@@ -5,7 +5,7 @@ from services.instagram_insights import InstagramInsightsService
 
 
 def _service():
-    return InstagramInsightsService("token", "ig-1")
+    return InstagramInsightsService("token", "ig-1", "facebook")
 
 
 def _values(**metrics):
@@ -80,3 +80,12 @@ def test_account_insights_growth_defaults_when_unavailable():
     with patch.object(svc, "_make_request", side_effect=fake_request):
         insights = svc.get_account_insights()
     assert (insights["follows"], insights["unfollows"], insights["profile_links_taps"]) == (0, 0, 0)
+
+
+def test_insights_service_base_url_by_login_type():
+    """AD-2: InstagramInsightsService(login_type) configura self.base_url según login_type."""
+    svc_fb = InstagramInsightsService("token", "ig-1", login_type="facebook")
+    svc_ig = InstagramInsightsService("token", "ig-1", login_type="instagram")
+
+    assert svc_fb.base_url.startswith("https://graph.facebook.com/")
+    assert svc_ig.base_url.startswith("https://graph.instagram.com/")

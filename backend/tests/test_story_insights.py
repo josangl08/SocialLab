@@ -62,7 +62,7 @@ def sample_story_insights():
 
 def test_get_live_stories_requests_correct_fields():
     """get_live_stories debe pedir id,media_type,media_url,thumbnail_url,permalink,timestamp."""
-    svc = InstagramInsightsService("test-token", "ig-acc-123")
+    svc = InstagramInsightsService("test-token", "ig-acc-123", "facebook")
     expected_stories = [{"id": "s1", "media_type": "IMAGE"}]
     with patch.object(svc, "_make_request", return_value={"data": expected_stories}) as mock_req:
         res = svc.get_live_stories("ig-acc-123")
@@ -77,7 +77,7 @@ def test_get_live_stories_requests_correct_fields():
 
 def test_get_story_insights_queries_metrics():
     """get_story_insights debe pedir las métricas de Story requeridas."""
-    svc = InstagramInsightsService("test-token", "ig-acc-123")
+    svc = InstagramInsightsService("test-token", "ig-acc-123", "facebook")
     mock_data = {
         "data": [
             {"name": "views", "values": [{"value": 100}]},
@@ -155,7 +155,7 @@ def test_sync_story_insights_inserts_external_and_preserves_sociallab():
     - Story de SocialLab ya existente conserva su content
     - Métricas se guardan en post_performance
     """
-    svc = InstagramInsightsService("test-token", "ig-acc-123")
+    svc = InstagramInsightsService("test-token", "ig-acc-123", "facebook")
 
     live_stories = [
         {
@@ -249,7 +249,7 @@ def test_sync_story_insights_inserts_external_and_preserves_sociallab():
 
 def test_sync_story_insights_graph_api_calls_count():
     """El coste de Graph API debe ser 1 llamada de listado + N de insights."""
-    svc = InstagramInsightsService("test-token", "ig-acc-123")
+    svc = InstagramInsightsService("test-token", "ig-acc-123", "facebook")
     mock_db = MagicMock()
     mock_db.table.return_value.select.return_value.in_.return_value.execute.return_value = MagicMock(data=[])
     mock_db.table.return_value.insert.return_value.execute.return_value = MagicMock(
@@ -279,8 +279,8 @@ def test_sync_story_insights_api_error_isolation():
         pytest.skip("sync_all_accounts_story_insights aún no implementado en main.py ([implementation])")
 
     accounts = [
-        {"id": 1, "user_id": "u1", "long_lived_access_token": "t1", "instagram_business_account_id": "ig1", "is_active": True},
-        {"id": 2, "user_id": "u2", "long_lived_access_token": "t2", "instagram_business_account_id": "ig2", "is_active": True},
+        {"id": 1, "user_id": "u1", "long_lived_access_token": "t1", "instagram_business_account_id": "ig1", "login_type": "facebook", "is_active": True},
+        {"id": 2, "user_id": "u2", "long_lived_access_token": "t2", "instagram_business_account_id": "ig2", "login_type": "instagram", "is_active": True},
     ]
 
     mock_supabase = MagicMock()

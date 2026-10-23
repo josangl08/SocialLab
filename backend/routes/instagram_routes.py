@@ -17,7 +17,7 @@ from services.publisher.instagram_publisher import fetch_publishing_quota
 from services.instagram_token import get_reconnect_deadline
 from utils.encryption import encrypt_token, decrypt_token
 from utils.oauth_state import generate_state_token, verify_state_token
-from utils.graph_api import graph_url
+from utils.graph_api import graph_base_url, graph_url
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/instagram", tags=["Instagram Integration"])
@@ -220,7 +220,7 @@ def instagram_sync(
     try:
         # Usar admin client: RLS bloquea instagram_accounts con cliente anon
         admin_db = get_supabase_admin_client()
-        query = admin_db.table('instagram_accounts').select('id, long_lived_access_token, instagram_business_account_id').eq('user_id', current_user.id)
+        query = admin_db.table('instagram_accounts').select('id, long_lived_access_token, instagram_business_account_id, login_type').eq('user_id', current_user.id)
         if instagram_account_id:
             query = query.eq('id', instagram_account_id)
         else:
@@ -233,37 +233,14 @@ def instagram_sync(
                 detail="No se encontraron credenciales de Instagram para este usuario."
             )
 
-        account_id = response.data[0]['id']
-        access_token = decrypt_token(response.data[0]['long_lived_access_token'])
-
-        user_accounts_url = graph_url(f"me/accounts?access_token={access_token}")
-        user_accounts_response = requests.get(user_accounts_url)
-        user_accounts_response.raise_for_status()
-        user_accounts_data = user_accounts_response.json()
-
-        if not user_accounts_data.get('data'):
-            raise HTTPException(
-                status_code=500,
-                detail="No se encontraron páginas de Facebook asociadas a esta cuenta."
-            )
-
-        facebook_page_id = user_accounts_data['data'][0]['id']
-
-        ig_account_url = graph_url(f"{facebook_page_id}?fields=instagram_business_account&access_token={access_token}")
-        ig_account_response = requests.get(ig_account_url)
-        ig_account_response.raise_for_status()
-        ig_account_data = ig_account_response.json()
-
-        if not ig_account_data.get('instagram_business_account'):
-            raise HTTPException(
-                status_code=500,
-                detail="No se encontró una cuenta de Instagram Business asociada."
-            )
-
-        instagram_user_id = ig_account_data['instagram_business_account']['id']
+        account = response.data[0]
+        account_id = account['id']
+        access_token = decrypt_token(account['long_lived_access_token'])
+        instagram_user_id = account['instagram_business_account_id']
+        base_url = graph_base_url(account['login_type'])
 
         all_media = []
-        next_url = graph_url(f"{instagram_user_id}/media?fields=id,caption,media_type,media_url,thumbnail_url,timestamp,permalink,media_product_type&limit=100&access_token={access_token}")
+        next_url = f"{base_url}/{instagram_user_id}/media?fields=id,caption,media_type,media_url,thumbnail_url,timestamp,permalink,media_product_type&limit=100&access_token={access_token}"
 
         logger.info("📦 Obteniendo posts de Instagram API con paginación...")
         page_count = 0
@@ -317,7 +294,7 @@ def instagram_sync(
             }
             posts_to_upsert.append(post_data)
         posts_to_upsert.extend(
-            InstagramInsightsService(access_token, instagram_user_id)
+            InstagramInsightsService(access_token, instagram_user_id, account['login_type'])
             .get_collaboration_post_rows(current_user.id, account_id)
         )
 
@@ -326,7 +303,7 @@ def instagram_sync(
             on_conflict='instagram_post_id'
         ).execute()
 
-        profile_url = graph_url(f"{instagram_user_id}?fields=followers_count,media_count,follows_count,name,username,profile_picture_url&access_token={access_token}")
+        profile_url = f"{base_url}/{instagram_user_id}?fields=followers_count,media_count,follows_count,name,username,profile_picture_url&access_token={access_token}"
         profile_response = requests.get(profile_url)
         profile_response.raise_for_status()
         profile_data = profile_response.json()
@@ -378,7 +355,7 @@ def instagram_status(current_user: User = Depends(get_current_user)):
             'account_type, sector, purpose, target_audience, style_guide, '
             'default_tone, default_language, posting_frequency, best_times, '
             'content_pillars, hashtag_strategy, reference_accounts, '
-            'posts_per_week, scheduling_mode, preferred_days, last_agent_sync'
+            'posts_per_week, scheduling_mode, preferred_days, last_agent_sync, login_type'
         ).eq('user_id', current_user.id).execute()
 
         accounts = []
@@ -407,6 +384,7 @@ def instagram_status(current_user: User = Depends(get_current_user)):
                 'drive_folder_id': account.get('drive_folder_id'),
                 'connected': connected,
                 'expired': expired,
+                'login_type': account.get('login_type', 'facebook'),
                 # Strategy fields
                 'account_type': account.get('account_type', 'personal'),
                 'sector': account.get('sector'),
@@ -445,7 +423,7 @@ def publish_to_instagram(post_id: int, current_user: User = Depends(get_current_
             raise HTTPException(status_code=400, detail="Este post ya está publicado en Instagram")
 
         post_account_id = post.get('instagram_account_id')
-        query = admin_supabase.table('instagram_accounts').select('instagram_business_account_id, long_lived_access_token, expires_at').eq('user_id', current_user.id)
+        query = admin_supabase.table('instagram_accounts').select('instagram_business_account_id, long_lived_access_token, expires_at, login_type').eq('user_id', current_user.id)
         if post_account_id:
             query = query.eq('id', post_account_id)
         else:
@@ -465,13 +443,14 @@ def publish_to_instagram(post_id: int, current_user: User = Depends(get_current_
 
         ig_account_id = ig_data['instagram_business_account_id']
         access_token = decrypt_token(ig_data['long_lived_access_token'])
+        base_url = graph_base_url(ig_data['login_type'])
 
         media_url = post.get('media_url')
         if not media_url:
             raise HTTPException(status_code=400, detail="El post debe tener una imagen o video")
 
         # Cupo de Instagram (100 posts/24 h); si no se puede consultar se publica igual
-        quota = fetch_publishing_quota(ig_account_id, access_token)
+        quota = fetch_publishing_quota(ig_account_id, access_token, base_url)
         if quota and quota['quota_usage'] >= quota['quota_total']:
             # Respuesta directa: HTTPException anidaría el código dentro de "detail"
             return JSONResponse(status_code=429, content={
@@ -493,7 +472,7 @@ def publish_to_instagram(post_id: int, current_user: User = Depends(get_current_
             container_params['video_url'] = media_url
             container_params['media_type'] = 'REELS' if post_type == 'reel' else 'VIDEO'
 
-        container_url = graph_url(f"{ig_account_id}/media")
+        container_url = f"{base_url}/{ig_account_id}/media"
         container_response = requests.post(container_url, data=container_params)
 
         if container_response.status_code != 200:
@@ -504,7 +483,7 @@ def publish_to_instagram(post_id: int, current_user: User = Depends(get_current_
 
         container_id = container_response.json().get('id')
 
-        status_url = graph_url(container_id)
+        status_url = f"{base_url}/{container_id}"
         status_params = {'fields': 'status_code', 'access_token': access_token}
 
         max_attempts = 10
@@ -518,7 +497,7 @@ def publish_to_instagram(post_id: int, current_user: User = Depends(get_current_
                     raise HTTPException(status_code=500, detail="Error al procesar media en Instagram")
             time.sleep(2)
 
-        publish_url = graph_url(f"{ig_account_id}/media_publish")
+        publish_url = f"{base_url}/{ig_account_id}/media_publish"
         publish_params = {'creation_id': container_id, 'access_token': access_token}
 
         publish_response = requests.post(publish_url, data=publish_params)
@@ -597,7 +576,7 @@ def get_instagram_accounts(current_user: User = Depends(get_current_user)):
     """
     try:
         response = admin_supabase.table('instagram_accounts')\
-            .select('id, instagram_business_account_id, username, account_name, followers_count, profile_picture_url, expires_at, is_active, telegram_chat_id, drive_folder_id, token_invalid, sector, primary_timezone, secondary_timezone, detected_timezone')\
+            .select('id, instagram_business_account_id, username, account_name, followers_count, profile_picture_url, expires_at, is_active, telegram_chat_id, drive_folder_id, token_invalid, sector, primary_timezone, secondary_timezone, detected_timezone, login_type')\
             .eq('user_id', current_user.id)\
             .execute()
         return response.data

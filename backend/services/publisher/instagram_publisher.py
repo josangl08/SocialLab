@@ -21,7 +21,7 @@ from requests.exceptions import RequestException
 
 from database.supabase_client import get_supabase_admin_client
 from utils.encryption import decrypt_token
-from utils.graph_api import GRAPH_BASE_URL
+from utils.graph_api import graph_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,11 @@ class PublishQuotaExceeded(Exception):
     pass
 
 
-def fetch_publishing_quota(ig_user_id: str, access_token: str) -> Optional[Dict[str, int]]:
+def fetch_publishing_quota(
+    ig_user_id: str,
+    access_token: str,
+    base_url: str
+) -> Optional[Dict[str, int]]:
     """
     Cupo de publicación de las últimas 24 h (límite de Instagram: 100 posts por API).
 
@@ -65,7 +69,7 @@ def fetch_publishing_quota(ig_user_id: str, access_token: str) -> Optional[Dict[
     """
     try:
         response = requests.get(
-            f"{GRAPH_BASE_URL}/{ig_user_id}/content_publishing_limit",
+            f"{base_url}/{ig_user_id}/content_publishing_limit",
             params={'fields': 'config,quota_usage', 'access_token': access_token},
             timeout=10
         )
@@ -95,7 +99,6 @@ class InstagramPublisher:
 
     def __init__(self):
         self.supabase = get_supabase_admin_client()
-        self.base_url = GRAPH_BASE_URL
         self.container_check_interval = 5  # seconds
         self.max_container_checks = 12  # 60 seconds total
 
@@ -198,6 +201,7 @@ class InstagramPublisher:
 
             access_token = account['access_token']
             ig_user_id = account['instagram_user_id']
+            base_url = account['base_url']
 
             # Verify media URLs are publicly accessible
             if is_carousel:
@@ -225,6 +229,7 @@ class InstagramPublisher:
             # Route to appropriate publishing method
             if is_carousel:
                 return self._publish_carousel(
+                    base_url,
                     ig_user_id,
                     access_token,
                     carousel_children,
@@ -236,6 +241,7 @@ class InstagramPublisher:
                         "video_url required for REELS"
                     )
                 return self._publish_reel(
+                    base_url,
                     ig_user_id,
                     access_token,
                     video_url,
@@ -245,12 +251,14 @@ class InstagramPublisher:
                 )
             elif post_type == 'STORY':
                 return self._publish_story(
+                    base_url,
                     ig_user_id,
                     access_token,
                     media_url
                 )
             else:  # FEED
                 return self._publish_feed_post(
+                    base_url,
                     ig_user_id,
                     access_token,
                     media_url,
@@ -267,6 +275,7 @@ class InstagramPublisher:
 
     def _publish_feed_post(
         self,
+        base_url: str,
         ig_user_id: str,
         access_token: str,
         image_url: str,
@@ -291,6 +300,7 @@ class InstagramPublisher:
 
         # Step 1: Create media container
         container_id = self._create_media_container(
+            base_url,
             ig_user_id,
             access_token,
             image_url,
@@ -299,17 +309,18 @@ class InstagramPublisher:
         )
 
         # Step 2: Wait for container to be ready
-        self._wait_for_container(container_id, access_token)
+        self._wait_for_container(base_url, container_id, access_token)
 
         # Step 3: Publish container
         media_id = self._publish_container(
+            base_url,
             ig_user_id,
             access_token,
             container_id
         )
 
         # Step 4: Get media details
-        media_info = self._get_media_info(media_id, access_token)
+        media_info = self._get_media_info(base_url, media_id, access_token)
 
         logger.info(
             f"Successfully published feed post: {media_info.get('permalink')}"
@@ -323,6 +334,7 @@ class InstagramPublisher:
 
     def _publish_reel(
         self,
+        base_url: str,
         ig_user_id: str,
         access_token: str,
         video_url: str,
@@ -348,6 +360,7 @@ class InstagramPublisher:
 
         # Create reel container
         container_id = self._create_media_container(
+            base_url,
             ig_user_id,
             access_token,
             video_url,
@@ -359,6 +372,7 @@ class InstagramPublisher:
 
         # Reels take longer to process
         self._wait_for_container(
+            base_url,
             container_id,
             access_token,
             max_checks=24  # 2 minutes for video processing
@@ -366,13 +380,14 @@ class InstagramPublisher:
 
         # Publish container
         media_id = self._publish_container(
+            base_url,
             ig_user_id,
             access_token,
             container_id
         )
 
         # Get media details
-        media_info = self._get_media_info(media_id, access_token)
+        media_info = self._get_media_info(base_url, media_id, access_token)
 
         logger.info(
             f"Successfully published reel: {media_info.get('permalink')}"
@@ -386,6 +401,7 @@ class InstagramPublisher:
 
     def _publish_story(
         self,
+        base_url: str,
         ig_user_id: str,
         access_token: str,
         media_url: str
@@ -404,7 +420,7 @@ class InstagramPublisher:
         logger.info(f"Publishing story to IG user {ig_user_id}")
 
         # Stories use a simplified process
-        url = f"{self.base_url}/{ig_user_id}/media"
+        url = f"{base_url}/{ig_user_id}/media"
 
         payload = {
             'image_url': media_url,
@@ -419,6 +435,7 @@ class InstagramPublisher:
 
         # Publish immediately
         media_id = self._publish_container(
+            base_url,
             ig_user_id,
             access_token,
             container_id
@@ -433,6 +450,7 @@ class InstagramPublisher:
 
     def _publish_carousel(
         self,
+        base_url: str,
         ig_user_id: str,
         access_token: str,
         image_urls: List[str],
@@ -459,7 +477,7 @@ class InstagramPublisher:
         children_ids = []
 
         for idx, image_url in enumerate(image_urls):
-            container_url = f"{self.base_url}/{ig_user_id}/media"
+            container_url = f"{base_url}/{ig_user_id}/media"
 
             params = {
                 'image_url': image_url,
@@ -475,7 +493,7 @@ class InstagramPublisher:
         logger.info(f"Created {len(children_ids)} carousel items")
 
         # Step 2: Create carousel container
-        carousel_url = f"{self.base_url}/{ig_user_id}/media"
+        carousel_url = f"{base_url}/{ig_user_id}/media"
 
         carousel_params = {
             'media_type': 'CAROUSEL',
@@ -493,6 +511,7 @@ class InstagramPublisher:
         time.sleep(3)
 
         media_id = self._publish_container(
+            base_url,
             ig_user_id,
             access_token,
             carousel_id
@@ -501,7 +520,7 @@ class InstagramPublisher:
         logger.info(f"Successfully published carousel: {media_id}")
 
         # Get permalink
-        media_info = self._get_media_info(media_id, access_token)
+        media_info = self._get_media_info(base_url, media_id, access_token)
         permalink = media_info.get('permalink', '')
 
         return {
@@ -511,6 +530,7 @@ class InstagramPublisher:
 
     def _create_media_container(
         self,
+        base_url: str,
         ig_user_id: str,
         access_token: str,
         media_url: str,
@@ -537,7 +557,7 @@ class InstagramPublisher:
         Raises:
             InstagramPublishError: If container creation fails
         """
-        url = f"{self.base_url}/{ig_user_id}/media"
+        url = f"{base_url}/{ig_user_id}/media"
 
         payload = {
             'access_token': access_token,
@@ -576,6 +596,7 @@ class InstagramPublisher:
 
     def _wait_for_container(
         self,
+        base_url: str,
         container_id: str,
         access_token: str,
         max_checks: int = 12
@@ -593,7 +614,7 @@ class InstagramPublisher:
         Raises:
             InstagramPublishError: If container fails or times out
         """
-        url = f"{self.base_url}/{container_id}"
+        url = f"{base_url}/{container_id}"
         params = {
             'fields': 'status_code,status',
             'access_token': access_token
@@ -638,6 +659,7 @@ class InstagramPublisher:
 
     def _publish_container(
         self,
+        base_url: str,
         ig_user_id: str,
         access_token: str,
         container_id: str
@@ -656,7 +678,7 @@ class InstagramPublisher:
         Raises:
             InstagramPublishError: If publishing fails
         """
-        url = f"{self.base_url}/{ig_user_id}/media_publish"
+        url = f"{base_url}/{ig_user_id}/media_publish"
 
         payload = {
             'creation_id': container_id,
@@ -687,10 +709,11 @@ class InstagramPublisher:
         account = self._get_instagram_account(instagram_account_id)
         if not account:
             return None
-        return fetch_publishing_quota(account['instagram_user_id'], account['access_token'])
+        return fetch_publishing_quota(account['instagram_user_id'], account['access_token'], account['base_url'])
 
     def _get_media_info(
         self,
+        base_url: str,
         media_id: str,
         access_token: str
     ) -> Dict:
@@ -704,7 +727,7 @@ class InstagramPublisher:
         Returns:
             Dict with media information (permalink, timestamp, etc.)
         """
-        url = f"{self.base_url}/{media_id}"
+        url = f"{base_url}/{media_id}"
         params = {
             'fields': 'id,media_type,permalink,timestamp',
             'access_token': access_token
@@ -729,13 +752,14 @@ class InstagramPublisher:
             instagram_account_id: Internal DB ID
 
         Returns:
-            Dict with access_token and instagram_user_id
+            Dict with access_token, instagram_user_id and base_url (host by login_type)
         """
         try:
             result = self.supabase.table('instagram_accounts')\
                 .select(
                     'long_lived_access_token, '
-                    'instagram_business_account_id'
+                    'instagram_business_account_id, '
+                    'login_type'
                 )\
                 .eq('id', instagram_account_id)\
                 .single()\
@@ -747,7 +771,8 @@ class InstagramPublisher:
                     'access_token': decrypt_token(result.data['long_lived_access_token']),
                     'instagram_user_id': result.data[
                         'instagram_business_account_id'
-                    ]
+                    ],
+                    'base_url': graph_base_url(result.data['login_type'])
                 }
 
             return None

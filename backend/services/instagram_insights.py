@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from httpx import ReadError
 
 from utils.encryption import decrypt_token
-from utils.graph_api import GRAPH_BASE_URL
+from utils.graph_api import LoginType, graph_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +22,10 @@ STORY_METRICS = ('views', 'reach', 'replies', 'shares', 'link_clicks', 'total_in
 class InstagramInsightsService:
     """Servicio para interactuar con Instagram Graph API y obtener insights"""
 
-    BASE_URL = GRAPH_BASE_URL
-
-    def __init__(self, access_token: str, instagram_account_id: str):
+    def __init__(self, access_token: str, instagram_account_id: str, login_type: LoginType):
         self.access_token = access_token
         self.instagram_account_id = instagram_account_id
+        self.base_url = graph_base_url(login_type)
 
     def _make_request(self, endpoint: str, params: Dict = None) -> Dict:
         """Hacer petición a Instagram Graph API"""
@@ -38,7 +37,7 @@ class InstagramInsightsService:
         if endpoint.startswith('http://') or endpoint.startswith('https://'):
             url = endpoint
         else:
-            url = f"{self.BASE_URL}/{endpoint}"
+            url = f"{self.base_url}/{endpoint}"
 
         try:
             response = requests.get(url, params=params)
@@ -945,6 +944,7 @@ def fetch_live_profile(account: Dict) -> Dict:
     service = InstagramInsightsService(
         decrypt_token(account.get('long_lived_access_token')),
         account.get('instagram_business_account_id'),
+        account['login_type'],
     )
     return service.get_profile()
 
@@ -955,7 +955,7 @@ def fetch_media_comments(account: Dict, instagram_media_id: str) -> List[Dict[st
     if not raw_token:
         raise ValueError("Cuenta sin access token configurado")
     token = decrypt_token(raw_token)
-    url = f"{InstagramInsightsService.BASE_URL}/{instagram_media_id}/comments"
+    url = f"{graph_base_url(account['login_type'])}/{instagram_media_id}/comments"
     resp = requests.get(
         url,
         params={"fields": "id,text,username,timestamp", "access_token": token},

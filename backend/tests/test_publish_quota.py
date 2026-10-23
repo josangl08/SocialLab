@@ -18,7 +18,7 @@ from services.scheduler.post_scheduler import publish_post_job
 def test_get_publishing_quota_queries_content_publishing_limit():
     """get_publishing_quota debe consultar content_publishing_limit con fields=config,quota_usage."""
     pub = InstagramPublisher()
-    pub._get_instagram_account = MagicMock(return_value={"access_token": "tok", "instagram_user_id": "ig-1"})
+    pub._get_instagram_account = MagicMock(return_value={"access_token": "tok", "instagram_user_id": "ig-1", "base_url": "https://graph.facebook.com/v26.0"})
     mock_resp = {
         "data": [
             {
@@ -42,7 +42,7 @@ def test_get_publishing_quota_queries_content_publishing_limit():
 def test_get_publishing_quota_returns_none_on_error():
     """Si la petición a content_publishing_limit falla, devuelve None (fail-open)."""
     pub = InstagramPublisher()
-    pub._get_instagram_account = MagicMock(return_value={"access_token": "tok", "instagram_user_id": "ig-1"})
+    pub._get_instagram_account = MagicMock(return_value={"access_token": "tok", "instagram_user_id": "ig-1", "base_url": "https://graph.facebook.com/v26.0"})
     with patch("requests.get", side_effect=Exception("API Error")):
         quota = pub.get_publishing_quota(instagram_account_id=1)
         assert quota is None

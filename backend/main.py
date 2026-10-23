@@ -81,7 +81,7 @@ def sync_all_accounts_metrics():
         from services.instagram_insights import InstagramInsightsService
 
         all_accounts = admin_supabase.table('instagram_accounts')\
-            .select('id, user_id, long_lived_access_token, instagram_business_account_id, is_active')\
+            .select('id, user_id, long_lived_access_token, instagram_business_account_id, login_type, is_active')\
             .execute()
 
         accounts_data = [
@@ -102,7 +102,8 @@ def sync_all_accounts_metrics():
             try:
                 instagram_service = InstagramInsightsService(
                     access_token=decrypt_token(account['long_lived_access_token']),
-                    instagram_account_id=account['instagram_business_account_id']
+                    instagram_account_id=account['instagram_business_account_id'],
+                    login_type=account['login_type']
                 )
 
                 instagram_service.sync_posts_to_database(
@@ -137,7 +138,7 @@ def sync_all_accounts_story_insights():
         from services.instagram_insights import InstagramInsightsService
 
         all_accounts = admin_supabase.table('instagram_accounts')\
-            .select('id, user_id, long_lived_access_token, instagram_business_account_id, is_active')\
+            .select('id, user_id, long_lived_access_token, instagram_business_account_id, login_type, is_active')\
             .execute()
 
         for account in all_accounts.data or []:
@@ -146,7 +147,8 @@ def sync_all_accounts_story_insights():
             try:
                 service = InstagramInsightsService(
                     access_token=decrypt_token(account['long_lived_access_token']),
-                    instagram_account_id=account['instagram_business_account_id']
+                    instagram_account_id=account['instagram_business_account_id'],
+                    login_type=account['login_type']
                 )
                 service.sync_story_insights(account=account, db_client=admin_supabase)
             except Exception as e:

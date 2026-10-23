@@ -48,6 +48,12 @@ def test_graph_url_helper():
     assert graph_api.graph_url("/me/accounts") == f"{graph_api.GRAPH_BASE_URL}/me/accounts"
 
 
+def test_graph_base_url_by_login_type():
+    """AD-2: graph_base_url('instagram') -> graph.instagram.com, 'facebook' -> graph.facebook.com."""
+    assert graph_api.graph_base_url("instagram") == f"https://graph.instagram.com/{graph_api.GRAPH_API_VERSION}"
+    assert graph_api.graph_base_url("facebook") == f"https://graph.facebook.com/{graph_api.GRAPH_API_VERSION}"
+
+
 def test_warn_if_outdated_warning_for_old_version(caplog, monkeypatch):
     """warn_if_outdated() emite logger.warning si major < 24 (ej. v18.0)."""
     if graph_api is None:

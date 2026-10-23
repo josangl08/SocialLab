@@ -5,6 +5,7 @@ Las URLs de OAuth (`oauth/authorize`, `oauth/access_token`) van sin versión y n
 """
 import logging
 import re
+from typing import Literal
 
 import config
 
@@ -14,6 +15,14 @@ GRAPH_API_VERSION: str = config.INSTAGRAM_GRAPH_API_VERSION
 GRAPH_BASE_URL: str = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 # Las versiones anteriores ya han caducado o caducan pronto: Meta reenvía a la más antigua disponible
 MIN_SUPPORTED_MAJOR = 24
+
+LoginType = Literal['facebook', 'instagram']
+
+
+def graph_base_url(login_type: LoginType) -> str:
+    """Host de la Graph API según cómo se conectó la cuenta (Instagram Login o Facebook Login)."""
+    host = 'graph.instagram.com' if login_type == 'instagram' else 'graph.facebook.com'
+    return f"https://{host}/{GRAPH_API_VERSION}"
 
 
 def graph_url(path: str) -> str:
