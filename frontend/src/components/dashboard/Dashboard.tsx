@@ -60,6 +60,13 @@ interface BestTimesByWeekday {
 }
 
 const WEEKDAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+// Cada sync hace muchas llamadas a la Graph API (límite 200/h por cuenta)
+const SYNC_COOLDOWN_MS = 5 * 60 * 1000;
+
+const formatCountdown = (ms: number): string => {
+  const totalSeconds = Math.ceil(ms / 1000);
+  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')}`;
+};
 
 const Dashboard: React.FC = () => {
   const {
@@ -88,6 +95,7 @@ const Dashboard: React.FC = () => {
   const [recentPostsData, setRecentPostsData] = useState<TopPost[]>([]);
   const [scheduledPosts, setScheduledPosts] = useState<ScheduledPost[]>([]);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+  const [now, setNow] = useState<number>(() => Date.now());
   const [instagramAccountId, setInstagramAccountId] = useState<number | null>(null);
   const [accounts, setAccounts] = useState<Array<{
     id: number;
@@ -199,8 +207,26 @@ const Dashboard: React.FC = () => {
     }
   }, [instagramAccountId]); // instagramAccountId usado como fallback cuando resolvedAccountId no se pasa
 
+  // Última sync: la de esta sesión o la del servidor (sobrevive a recargas). Una fecha futura
+  // (reloj desajustado) cuenta como ahora, así la espera nunca pasa de SYNC_COOLDOWN_MS.
+  const getSyncCooldownLeft = useCallback((at: number): number => {
+    const lastSyncMs = Math.min(
+      Math.max(lastSync?.getTime() ?? 0, lastSyncAt ? new Date(lastSyncAt).getTime() : 0),
+      at
+    );
+    return Math.max(0, lastSyncMs + SYNC_COOLDOWN_MS - at);
+  }, [lastSync, lastSyncAt]);
+
+  const syncCooldownLeft = getSyncCooldownLeft(now);
+
+  useEffect(() => {
+    if (syncCooldownLeft <= 0) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [syncCooldownLeft > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSync = useCallback(async () => {
-    if (isSyncing || (lastSync && new Date().getTime() - lastSync.getTime() < 5 * 60 * 1000)) {
+    if (isSyncing || getSyncCooldownLeft(Date.now()) > 0) {
       return;
     }
 
@@ -221,6 +247,7 @@ const Dashboard: React.FC = () => {
       try {
         await apiClient.post(`/api/analytics/sync/${instagramAccountId}`);
         setLastSync(new Date());
+        setNow(Date.now());
         setSyncCompleted(0);
         setTimeout(() => {
           fetchDashboardStats(true);
@@ -233,7 +260,7 @@ const Dashboard: React.FC = () => {
     } finally {
       setSyncing(false);
     }
-  }, [isSyncing, lastSync, setSyncing, setLastSync, setSyncCompleted, fetchDashboardStats, instagramAccountId]);
+  }, [isSyncing, getSyncCooldownLeft, setSyncing, setLastSync, setSyncCompleted, fetchDashboardStats, instagramAccountId]);
 
   useEffect(() => {
     if (hasInitialFetched.current) return;
@@ -250,6 +277,8 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);
     if (queryParams.get('instagram_connected') === 'true') {
+      // Quitar el parámetro: si no, cada recarga vuelve a lanzar la sync
+      window.history.replaceState(null, '', window.location.pathname);
       setInstagramConnected(true);
       handleSync();
     }
@@ -372,10 +401,15 @@ const Dashboard: React.FC = () => {
               <button
                 className={`sl-sync-btn${isSyncing ? ' syncing' : ''}`}
                 onClick={handleSync}
-                disabled={isSyncing}
+                disabled={isSyncing || syncCooldownLeft > 0}
+                title={syncCooldownLeft > 0 ? 'Entre sincronizaciones hay que esperar 5 minutos' : undefined}
               >
                 <i className="bi bi-arrow-clockwise"></i>
-                {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
+                {isSyncing
+                  ? 'Sincronizando...'
+                  : syncCooldownLeft > 0
+                    ? `Disponible en ${formatCountdown(syncCooldownLeft)}`
+                    : 'Sincronizar'}
               </button>
               {syncError && (
                 <span className="sl-sync-error" title={syncError}>

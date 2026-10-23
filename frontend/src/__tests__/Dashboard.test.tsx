@@ -235,4 +235,37 @@ describe('Dashboard Component', () => {
     expect(screen.queryByTestId('agent-status-card')).not.toBeInTheDocument();
     expect(screen.queryByTestId('calendar-proposal-view')).not.toBeInTheDocument();
   });
+
+  const withLastSyncAt = (lastSyncAt: string) => {
+    const baseFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      const response = await baseFetch(url);
+      if (!url.includes('/api/analytics/overview')) return response;
+      const body = await response.json();
+      return { ok: true, json: () => Promise.resolve({ ...body, last_sync_at: lastSyncAt }) };
+    });
+  };
+
+  test('el botón de sync se desactiva con cuenta atrás si la última sync fue hace < 5 min', async () => {
+    withLastSyncAt(new Date(Date.now() - 2 * 60 * 1000).toISOString());
+    render(<Dashboard />);
+
+    const button = await screen.findByRole('button', { name: /Disponible en [23]:\d{2}/ });
+    expect(button).toBeDisabled();
+  });
+
+  test('una fecha de sync futura no bloquea más de 5 minutos', async () => {
+    withLastSyncAt(new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString());
+    render(<Dashboard />);
+
+    const button = await screen.findByRole('button', { name: /Disponible en [45]:\d{2}/ });
+    expect(button).toBeDisabled();
+  });
+
+  test('el botón de sync está activo si la última sync fue hace más de 5 minutos', async () => {
+    render(<Dashboard />);
+
+    const button = await screen.findByRole('button', { name: /^Sincronizar$/ });
+    expect(button).toBeEnabled();
+  });
 });
