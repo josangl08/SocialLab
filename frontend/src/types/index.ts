@@ -273,6 +273,8 @@ export interface QualityReport {
   slop: SlopReport;
   hook: HookReport;
   warnings: QualityWarning[];
+  /** Hermes movió el post a un día permitido (días específicos, AD-3). Fechas en hora local de la cuenta. */
+  schedule_adjustment?: { from: string; to: string; reason: 'fixed_days' };
 }
 
 export interface HumanizeRequest {

@@ -114,3 +114,28 @@ describe('PostDetailModal — Stories (AD-2, AD-2b)', () => {
     await waitFor(() => expect(apiClient.get).toHaveBeenCalled());
   });
 });
+
+describe('PostDetailModal — días específicos (AD-3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(apiClient.get).mockResolvedValue(null);
+  });
+
+  test('avisa de que Hermes movió el post a un día permitido', () => {
+    const post = {
+      ...baseStoryPost, id: 11, post_type: 'post', status: 'draft', publication_date: null,
+      scheduled_at: '2026-11-05T19:00:00Z',
+      quality_report: {
+        schedule_adjustment: { from: '2026-11-06T20:00:00+01:00', to: '2026-11-05T20:00:00+01:00', reason: 'fixed_days' },
+      },
+    } as unknown as Post;
+    renderModal(post);
+    const notice = screen.getByTestId('schedule-adjustment');
+    expect(notice).toHaveTextContent(/viernes, 6 nov.*jueves, 5 nov/);
+  });
+
+  test('sin ajuste no muestra el aviso', () => {
+    renderModal({ ...baseStoryPost, id: 12, post_type: 'post', status: 'draft', publication_date: null });
+    expect(screen.queryByTestId('schedule-adjustment')).not.toBeInTheDocument();
+  });
+});

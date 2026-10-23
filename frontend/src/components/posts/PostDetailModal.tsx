@@ -58,6 +58,10 @@ const STORY_METRICS: { label: string; value: (m: StoryMetrics) => number | null 
   { label: 'Siguiente historia', value: m => m.story_navigation?.swipe_forward },
 ];
 
+// Día de la semana de una fecha ISO con offset, leído en la hora local de la cuenta
+const localWeekday = (iso: string) =>
+  new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' });
+
 const formatDate = (d: string) =>
   new Date(d).toLocaleDateString('es-ES', {
     day: 'numeric', month: 'long', year: 'numeric',
@@ -471,6 +475,15 @@ const PostDetailModal: React.FC<PostDetailModalProps> = ({
                 <i className="bi bi-calendar-event"></i>
                 <span className="pdm-meta-label">Scheduled</span>
                 <span className="pdm-meta-value">{formatInZones(post.scheduled_at, zones ?? {})}</span>
+              </div>
+            )}
+            {post.quality_report?.schedule_adjustment && (
+              <div className="pdm-meta-row pdm-schedule-adjusted" data-testid="schedule-adjustment">
+                <i className="bi bi-arrow-left-right"></i>
+                <span>
+                  Hermes lo movió del {localWeekday(post.quality_report.schedule_adjustment.from)} al{' '}
+                  {localWeekday(post.quality_report.schedule_adjustment.to)} para respetar tus días de publicación.
+                </span>
               </div>
             )}
             {post.publication_date && (
