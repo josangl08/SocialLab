@@ -55,6 +55,7 @@ def test_publish_post_job_quota_exceeded_defers_and_notifies_telegram_first_time
 
     mock_post_data = {
         "id": post_id,
+        "status": "scheduled",
         "user_id": "u1",
         "media_url": "https://img.url/photo.jpg",
         "content": "Test caption",
@@ -133,6 +134,7 @@ def test_publish_post_job_quota_exceeded_24th_deferral_fails():
 
     mock_post_data = {
         "id": post_id,
+        "status": "scheduled",
         "user_id": "u1",
         "media_url": "https://img.url/photo.jpg",
         "content": "Test caption",
@@ -209,6 +211,7 @@ def test_publish_post_job_quota_check_fails_open_and_publishes():
 
     mock_post_data = {
         "id": post_id,
+        "status": "scheduled",
         "user_id": "u1",
         "media_url": "https://img.url/photo.jpg",
         "content": "Test caption",
@@ -258,6 +261,7 @@ def test_publish_post_job_with_available_quota_publishes_normally():
 
     mock_post_data = {
         "id": post_id,
+        "status": "scheduled",
         "user_id": "u1",
         "media_url": "https://img.url/photo.jpg",
         "content": "Test caption",
@@ -308,7 +312,7 @@ def test_publish_post_job_quota_exceeded_later_deferral_does_not_notify_again():
         t = tables[name] = MagicMock()
         if name == "posts":
             t.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
-                data={"id": 104, "user_id": "u1", "media_url": "https://img.url/p.jpg", "content": "", "post_type": "image"}
+                data={"id": 104, "status": "scheduled", "user_id": "u1", "media_url": "https://img.url/p.jpg", "content": "", "post_type": "image"}
             )
         elif name == "instagram_accounts":
             t.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(

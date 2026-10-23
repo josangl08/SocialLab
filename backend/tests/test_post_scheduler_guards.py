@@ -194,6 +194,7 @@ def test_publish_post_job_publishes_when_scheduled():
     db, posts_mock, jobs_mock, accounts_mock = _make_mock_supabase_client(scheduled_post, account_data)
     publisher = MagicMock()
     publisher.publish_post.return_value = {"id": "ig-12345", "permalink": "https://instagram.com/p/12345"}
+    publisher.get_publishing_quota.return_value = None  # cupo no consultable: se publica igual
 
     with patch("services.scheduler.post_scheduler.get_supabase_admin_client", return_value=db), \
          patch("services.scheduler.post_scheduler.InstagramPublisher", return_value=publisher), \
