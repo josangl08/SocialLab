@@ -20,6 +20,7 @@ const Sidebar: React.FC = () => {
     { path: '/generate', label: 'Content Studio', icon: 'bi-palette2' },
     { path: '/analytics', label: 'Analytics', icon: 'bi-bar-chart-line' },
     { path: '/hermes-mind', label: 'Hermes Mind', icon: 'bi-cpu' },
+    { path: '/strategy', label: 'Estrategia', icon: 'bi-compass' },
     { path: '/settings', label: 'Settings', icon: 'bi-gear' },
   ];
 

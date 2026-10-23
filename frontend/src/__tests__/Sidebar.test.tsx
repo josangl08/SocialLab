@@ -19,7 +19,7 @@ describe('Sidebar', () => {
 
     const items = within(screen.getByRole('list')).getAllByRole('link');
     expect(items.map((item) => item.textContent)).toEqual([
-      'Dashboard', 'Planner', 'Content Studio', 'Analytics', 'Hermes Mind', 'Settings',
+      'Dashboard', 'Planner', 'Content Studio', 'Analytics', 'Hermes Mind', 'Estrategia', 'Settings',
     ]);
     expect(screen.getByRole('link', { name: 'Content Studio' })).toHaveAttribute('href', '/generate');
   });
