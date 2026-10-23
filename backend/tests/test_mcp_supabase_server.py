@@ -769,3 +769,52 @@ def test_supabase_get_next_planning_week_uses_account_local_date():
         result = supabase_get_next_planning_week(instagram_account_id=123)
 
         assert result == "2026-10-19"
+
+
+# --- Días específicos estrictos (AD-3) ---
+
+def _create_post_with_account(account: dict, scheduled: str) -> dict:
+    with patch("mcp.supabase_server.get_supabase_admin_client") as mock_get_client, \
+            patch("mcp.supabase_server.local_today", return_value=date(2026, 11, 2)):
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[{"id": 1}])
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{"user_id": "user-abc", "primary_timezone": "Europe/Madrid", **account}]
+        )
+        occupied = mock_client.table.return_value.select.return_value.eq.return_value \
+            .neq.return_value.eq.return_value.gte.return_value.lt.return_value
+        occupied.execute.return_value = MagicMock(data=[])
+        supabase_create_post(instagram_account_id=7, caption="Post", scheduled_publish_time=scheduled)
+        return mock_client.table.return_value.insert.call_args[0][0]
+
+
+def test_supabase_create_post_moves_post_to_allowed_day():
+    inserted = _create_post_with_account(
+        {"scheduling_mode": "fixed", "preferred_days": ["Tuesday", "Thursday"]},
+        "2026-11-06T20:00:00+01:00",  # viernes
+    )
+    assert inserted["scheduled_at"] == "2026-11-05T19:00:00Z"  # jueves, misma hora local
+    assert inserted["quality_report"]["schedule_adjustment"] == {
+        "from": "2026-11-06T20:00:00+01:00",
+        "to": "2026-11-05T20:00:00+01:00",
+        "reason": "fixed_days",
+    }
+
+
+def test_supabase_create_post_allowed_day_has_no_adjustment():
+    inserted = _create_post_with_account(
+        {"scheduling_mode": "fixed", "preferred_days": ["Tuesday", "Thursday"]},
+        "2026-11-05T20:00:00+01:00",
+    )
+    assert inserted["scheduled_at"] == "2026-11-05T19:00:00Z"
+    assert "schedule_adjustment" not in inserted["quality_report"]
+
+
+def test_supabase_create_post_flexible_mode_not_corrected():
+    inserted = _create_post_with_account(
+        {"scheduling_mode": "flexible", "preferred_days": ["Tuesday"]},
+        "2026-11-06T20:00:00+01:00",
+    )
+    assert inserted["scheduled_at"] == "2026-11-06T19:00:00Z"
+    assert "schedule_adjustment" not in inserted["quality_report"]

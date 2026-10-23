@@ -106,6 +106,15 @@ export interface AgentLog {
 // --- Content Studio & Content Quality Types ---
 
 export type StrategyMode = 'commercial_campaign' | 'personal_storyline';
+
+export type HashtagStrategy = 'minimal' | 'moderate' | 'maximum';
+
+/** Rangos de hashtags que usa el agente (AD-2); única fuente para la UI. */
+export const HASHTAG_LEVELS: { value: HashtagStrategy; label: string; range: string }[] = [
+  { value: 'minimal',  label: 'Mínimos',   range: '1–2' },
+  { value: 'moderate', label: 'Moderados', range: '3–4' },
+  { value: 'maximum',  label: 'Máximos',   range: '5'   },
+];
 export type ContentFormat = 'post' | 'reel' | 'carousel' | 'story';
 
 export interface LintRequest {

@@ -23,6 +23,7 @@ Las migraciones deben ejecutarse en orden cronológico:
 41. `041_posts_is_collaboration.sql` - Columna posts.is_collaboration: publicaciones de otros autores en las que la cuenta colabora
 42. `042_story_insights_and_publish_quota.sql` - Métricas de Stories en post_performance, scheduled_jobs.quota_deferrals y status 'deferred_quota'
 43. `043_instagram_accounts_login_type.sql` - Columna login_type en instagram_accounts ('facebook' | 'instagram') (AD-1)
+44. `044_agent_strategy_redesign.sql` - Estrategia del agente: default `[]` de best_times ("Usar mis datos")
 
 ## Cómo Ejecutar
 

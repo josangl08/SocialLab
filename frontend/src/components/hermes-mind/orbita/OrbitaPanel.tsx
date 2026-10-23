@@ -337,12 +337,6 @@ export const OrbitaPanel: React.FC<OrbitaPanelProps> = ({ decision, graph, token
                         <dd>{strategyData.style_guide}</dd>
                       </>
                     ) : null}
-                    {strategyData.posting_frequency ? (
-                      <>
-                        <dt>Frecuencia</dt>
-                        <dd>{strategyData.posting_frequency}</dd>
-                      </>
-                    ) : null}
                     {strategyData.hashtag_strategy ? (
                       <>
                         <dt>Hashtags</dt>

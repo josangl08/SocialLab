@@ -1,11 +1,12 @@
 import logging
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from typing import Optional, List, Dict, Any, Literal
 from mcp.server.mcpserver import MCPServer
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import CalendarSlot
 from services.content_quality import humanize, enforce_hashtag_limit, lint_caption
-from utils.timezones import effective_timezone, local_today, parse_schedule_time
+from utils.timezones import effective_timezone, get_zone_info, local_today, parse_schedule_time, to_local
+from services.scheduler.fixed_days import resolve_allowed_day, weekdays_from_names
 from services.account_timezone import get_account_timezone
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,49 @@ def _schedule_to_utc(
     return parse_schedule_time(value, tz).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _apply_fixed_days(
+    supabase: Any, instagram_account_id: int, account: Dict[str, Any], scheduled_at: str
+) -> tuple[str, Optional[Dict[str, str]]]:
+    """Red de seguridad de días específicos (AD-3): con scheduling_mode='fixed', un post
+    en un día no permitido se mueve (misma hora local) al día permitido más adecuado.
+    Devuelve (scheduled_at UTC final, schedule_adjustment | None)."""
+    allowed = weekdays_from_names(account.get("preferred_days") or [])
+    if account.get("scheduling_mode") != "fixed" or not allowed:
+        return scheduled_at, None
+
+    tz = effective_timezone(account)
+    zone = get_zone_info(tz)
+    local_dt = to_local(datetime.fromisoformat(scheduled_at.replace("Z", "+00:00")), tz)
+    if local_dt.weekday() in allowed:
+        return scheduled_at, None
+
+    week_start = datetime.combine(local_dt.date() - timedelta(days=local_dt.weekday()), datetime.min.time(), zone)
+    week_end = week_start + timedelta(days=7)
+    occupied_res = supabase.table("posts").select("scheduled_at")\
+        .eq("instagram_account_id", instagram_account_id)\
+        .neq("status", "cancelled")\
+        .eq("is_collaboration", False)\
+        .gte("scheduled_at", week_start.astimezone(timezone.utc).isoformat())\
+        .lt("scheduled_at", week_end.astimezone(timezone.utc).isoformat())\
+        .execute()
+    occupied = {
+        to_local(datetime.fromisoformat(str(p["scheduled_at"]).replace("Z", "+00:00")), tz).date()
+        for p in (occupied_res.data or []) if p.get("scheduled_at")
+    }
+
+    def _scores() -> Dict[int, float]:
+        from services.analytics.analytics_service import AnalyticsService
+        return AnalyticsService(db_client=supabase).get_weekday_engagement_scores(instagram_account_id)
+
+    new_local, reason = resolve_allowed_day(local_dt, allowed, occupied, _scores, local_today(tz))
+    if reason is None:
+        return scheduled_at, None
+    return (
+        new_local.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        {"from": local_dt.isoformat(), "to": new_local.isoformat(), "reason": reason},
+    )
+
+
 @mcp.tool()
 def supabase_create_post(
     instagram_account_id: int,
@@ -102,7 +146,8 @@ def supabase_create_post(
     # client (RLS: user_id = auth.uid()), so a post without user_id is invisible
     # in the calendar even though it exists.
     acc_res = supabase.table("instagram_accounts").select(
-        "user_id, humanizer_enabled, banned_phrases, primary_timezone, detected_timezone"
+        "user_id, humanizer_enabled, banned_phrases, primary_timezone, detected_timezone, "
+        "scheduling_mode, preferred_days"
     ).eq("id", instagram_account_id).execute()
     account: Dict[str, Any] = acc_res.data[0] if acc_res.data else {}
     user_id: Optional[str] = account.get("user_id")
@@ -115,15 +160,21 @@ def supabase_create_post(
         caption, format=content_format or "post", extra_banned=account.get("banned_phrases") or []
     )
 
+    scheduled_at: Optional[str] = None
+    if scheduled_publish_time:
+        scheduled_at, adjustment = _apply_fixed_days(
+            supabase, instagram_account_id, account,
+            _schedule_to_utc(supabase, instagram_account_id, scheduled_publish_time, account),
+        )
+        if adjustment:
+            quality_report["schedule_adjustment"] = adjustment
+
     post_data = {
         "instagram_account_id": instagram_account_id,
         "user_id": user_id,
         "content": caption,
         "media_url": media_url,
-        "scheduled_at": (
-            _schedule_to_utc(supabase, instagram_account_id, scheduled_publish_time, account)
-            if scheduled_publish_time else None
-        ),
+        "scheduled_at": scheduled_at,
         "post_type": media_product_type,
         "drive_file_id": drive_file_id,
         "status": "draft",

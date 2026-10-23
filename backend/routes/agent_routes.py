@@ -297,7 +297,8 @@ def get_agent_config(
             'default_tone': row.get('default_tone', 'energetic'),
             'default_language': row.get('default_language', 'es'),
             'posting_frequency': row.get('posting_frequency', 'few_times_week'),
-            'best_times': row.get('best_times') or ['09:00', '18:00'],
+            # [] = "Usar mis datos" (AD-4); solo un NULL cae al antiguo default
+            'best_times': row['best_times'] if row.get('best_times') is not None else ['09:00', '18:00'],
             'content_pillars': row.get('content_pillars') or [],
             'hashtag_strategy': row.get('hashtag_strategy', 'moderate'),
             'caption_voice': row.get('caption_voice'),
@@ -445,7 +446,7 @@ async def generate_strategy(
 CONTEXTO ALGORÍTMICO 2026:
 - Cuentas PERSONALES/CREATOR: acceso a audio trending completo → Reels tienen mayor distribución orgánica. Prioriza Reels (60%+ del mix).
 - Cuentas PROFESIONALES/BUSINESS: acceso solo a audio licenciado → 7-12% menos reach orgánico en Reels. Compensar con Carousels (40%+ del mix, +109% engagement/persona).
-- Hashtags: cap de 5 máx desde dic 2025. Usa 3-5 muy relevantes.
+- Hashtags: cap de 5 máx desde dic 2025. Niveles de hashtag_strategy: "minimal" = 1-2, "moderate" = 3-4, "maximum" = 5. Prefiere "minimal" o "moderate" con hashtags muy relevantes.
 - Captions importan más que hashtags para discoverability desde 2026.
 - Instagram indexa contenido en Google desde 2025 → keywords SEO en captions para cuentas profesionales.
 - Algorithm premia: watch time en Reels, saves, sends (compartir por DM).
@@ -470,11 +471,10 @@ Genera la estrategia completa. Devuelve SOLO este JSON:
   "style_guide": "guía de tono y voz con instrucciones concretas en 2-3 frases",
   "default_tone": "energetic" | "professional" | "casual" | "inspirational",
   "default_language": "es" | "en",
-  "posting_frequency": "daily" | "few_times_week" | "once_or_twice_week" | "weekly",
   "posts_per_week": <número entre 3 y 7>,
   "best_times": ["HH:MM", "HH:MM"],
   "content_pillars": ["pilar1", "pilar2", "pilar3", "pilar4"],
-  "hashtag_strategy": "minimal",
+  "hashtag_strategy": "minimal" | "moderate" | "maximum",
   "scheduling_mode": "flexible" | "fixed",
   "content_type_mix": {{"post": <n>, "reel": <n>, "carousel": <n>, "story": <n>}}
 }}

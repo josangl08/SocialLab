@@ -20,6 +20,9 @@ _CAPTION_QUALITY_RULES = (
     "que se ve antes del '… más' en móvil. Máximo 5 hashtags por post, nunca más."
 )
 
+_ACCOUNT_TYPE_LABELS = {"personal": "personal", "professional": "profesional"}
+_LANGUAGE_LABELS = {"es": "español", "en": "inglés"}
+
 
 def _build_strategy_context(account: dict) -> str:
     """Describe el perfil de la cuenta (tono, audiencia, mix de contenido, cadencia)
@@ -43,6 +46,17 @@ def _build_strategy_context(account: dict) -> str:
     ref_raw = account.get('reference_accounts') or []
     reference_accounts = ', '.join(str(r) for r in ref_raw if r) if isinstance(ref_raw, list) else str(ref_raw).strip()
 
+    # Perfil explícito (AD-1): tipo, idioma y audiencia llegan siempre, sea cual sea la voz.
+    profile = [f"Tipo de cuenta: {_ACCOUNT_TYPE_LABELS.get(account_type, account_type)}."]
+    if voice_mode != account_type:
+        profile.append(
+            f"Voz de los captions: {_ACCOUNT_TYPE_LABELS.get(voice_mode, voice_mode)} "
+            f"(elegida por el usuario aunque la cuenta sea {_ACCOUNT_TYPE_LABELS.get(account_type, account_type)})."
+        )
+    language = account.get('default_language') or 'es'
+    profile.append(f"Idioma de los captions: {_LANGUAGE_LABELS.get(language, language)}.")
+    profile.append(f"Audiencia: {target_audience or 'comunidad general'}.")
+
     hashtag_playbook = load_playbook("hashtag-layering")
     hooks_playbook = load_playbook("hooks")
     if voice_mode == 'professional':
@@ -65,7 +79,6 @@ def _build_strategy_context(account: dict) -> str:
             f"pregunta al final en cada post — a veces encaja invitar a comentar u opinar, "
             f"a veces no; decide según lo que pide la imagen, priorizando brevedad y "
             f"naturalidad sobre estructura. "
-            f"Audiencia: {target_audience or 'comunidad general'}. "
             f"{hashtag_playbook}\n"
             f"Ajusta el total a {hashtag_range} hashtags. "
             f"Guía de estilo: {style_guide or 'cercano, casual y breve — como hablarías con un amigo'}."
@@ -81,39 +94,41 @@ def _build_strategy_context(account: dict) -> str:
     if reference_accounts:
         extra.append(f"Cuentas de referencia: {reference_accounts}.")
 
-    freq = account.get('posting_frequency', 'few_times_week')
-    freq_text = {
-        "daily": "todos los días (7 posts)",
-        "few_times_week": "3 a 5 veces por semana",
-        "once_or_twice_week": "1 a 2 veces por semana",
-        "weekly": "una vez por semana",
-    }.get(freq, "3 a 5 veces por semana")
-    extra.append(f"Frecuencia de publicación objetivo: {freq_text}.")
-
-    posts_per_week = account.get('posts_per_week')
-    if posts_per_week:
-        extra.append(f"Publicaciones por semana objetivo: {posts_per_week}.")
-
-    scheduling_mode = account.get('scheduling_mode')
-    if scheduling_mode == 'fixed':
-        extra.append("Modo de programación: fijo — mantén una cadencia y días consistentes cada semana.")
-    elif scheduling_mode == 'flexible':
-        extra.append("Modo de programación: flexible — adapta los días según el contenido y el rendimiento esperado.")
-
-    preferred_days = account.get('preferred_days') or []
-    if preferred_days:
-        extra.append(f"Días preferidos por la cuenta: {', '.join(preferred_days)}.")
-
+    # El objetivo semanal es la suma del mix; posts_per_week solo si el mix está vacío (AD-1).
     raw_mix = account.get('content_type_mix') or {}
-    mix_desc = ', '.join(f"{k}: {v}" for k, v in raw_mix.items() if isinstance(v, int) and v > 0)
-    if mix_desc:
-        extra.append(f"Mix de tipos de contenido preferido: {mix_desc}.")
+    mix_quota = {k: v for k, v in raw_mix.items() if isinstance(v, int) and v > 0}
+    weekly_target = sum(mix_quota.values()) or account.get('posts_per_week')
+    if weekly_target:
+        extra.append(f"Publicaciones por semana objetivo: {weekly_target}.")
+    if mix_quota:
+        extra.append(f"Mix de tipos de contenido preferido: {', '.join(f'{k}: {v}' for k, v in mix_quota.items())}.")
+
+    # Días específicos estrictos (AD-3); en flexible, los días son una preferencia.
+    preferred_days = account.get('preferred_days') or []
+    scheduling_mode = account.get('scheduling_mode')
+    if scheduling_mode == 'fixed' and preferred_days:
+        extra.append(
+            f"Publica SOLO en estos días: {', '.join(preferred_days)}. Nunca programes un post en otro día."
+        )
+    elif scheduling_mode == 'fixed':
+        extra.append("Modo de programación: fijo — mantén una cadencia y días consistentes cada semana.")
+    else:
+        if scheduling_mode == 'flexible':
+            extra.append("Modo de programación: flexible — adapta los días según el contenido y el rendimiento esperado.")
+        if preferred_days:
+            extra.append(f"Días preferidos por la cuenta: {', '.join(preferred_days)}.")
 
     raw_best_times = account.get('best_times')
     if isinstance(raw_best_times, list) and raw_best_times:
         extra.append(
             f"Horarios de publicación personalizados por esta cuenta: {', '.join(str(t) for t in raw_best_times)}. "
             "Úsalos para programar los posts — no es necesario consultar el histórico de rendimiento."
+        )
+    else:
+        # "Usar mis datos" (AD-4): sin horarios fijos, decide el histórico.
+        extra.append(
+            "Sin horarios fijos: llama a analytics_get_empirical_scheduling_data y usa "
+            "best_times_by_weekday; si has_data es false, usa 09:00 y 19:00 en hora local."
         )
 
     banned_phrases = account.get('banned_phrases') or []
@@ -124,7 +139,7 @@ def _build_strategy_context(account: dict) -> str:
     if memory_summary:
         extra.append(f"Aprendizajes de sesiones anteriores: {memory_summary}")
 
-    return f"{voice}\n{_CAPTION_QUALITY_RULES} {' '.join(extra)}".strip()
+    return f"{' '.join(profile)}\n{voice}\n{_CAPTION_QUALITY_RULES} {' '.join(extra)}".strip()
 
 
 def _build_brand_rules_context(account_id: int) -> str:
@@ -203,8 +218,8 @@ def get_system_prompt(
         "Para cada imagen nueva, llama a vision_analyze_image y luego "
         "supabase_save_visual_analysis con el resultado.\n"
         "5. Decide día de la semana y tipo de post (reel, carousel, post, story) para cada "
-        "imagen que uses, respetando la frecuencia y el mix de contenido de esta cuenta (ver "
-        "perfil abajo). No repitas día. Usa siempre el nombre del día en inglés y en formato "
+        "imagen que uses, respetando el objetivo semanal, el mix de contenido y los días de "
+        "esta cuenta (ver perfil abajo). No repitas día. Usa siempre el nombre del día en inglés y en formato "
         "capitalizado exacto — Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday — "
         "nunca en español (ni 'lunes', ni 'Lunes'): el planner y el calendario del frontend "
         "comparan ese valor literalmente contra esos siete nombres en inglés.\n"
@@ -343,10 +358,17 @@ def get_edit_prompt(edit_type: str, context: dict, account_id: int) -> str:
     return f"Hermes edit prompt for {edit_type}"
 
 
-def get_monthly_strategy_prompt(account_id: int, target_month: str) -> str:
+def get_monthly_strategy_prompt(
+    account_id: int,
+    target_month: str,
+    niche_brief: Optional[str] = None,
+    outliers_summary: Optional[str] = None,
+    audit_summary: Optional[str] = None,
+) -> str:
     """Construye el system prompt de la sesión mensual: persona acotada a redactar un
     borrador de campaña para target_month (YYYY-MM-01), reutilizando el perfil de cuenta
-    (_build_strategy_context) como contexto de razonamiento, igual que get_system_prompt."""
+    (_build_strategy_context) como contexto de razonamiento, igual que get_system_prompt.
+    Los bloques de rendimiento (AD-6) solo se añaden si traen contenido."""
     supabase = get_supabase_admin_client()
     res = supabase.table('instagram_accounts').select('*').eq('id', account_id).execute()
     account = res.data[0] if res.data else {}
@@ -365,8 +387,8 @@ def get_monthly_strategy_prompt(account_id: int, target_month: str) -> str:
         "pendiente de aprobación— que debas continuar o evitar repetir.\n"
         "2. Decide strategy_mode: usa 'commercial_campaign' para cuentas profesionales/de "
         "negocio con un objetivo de conversión claro este mes, o 'personal_storyline' para "
-        "cuentas personales/creador que van a hilar una narrativa en primera persona. El "
-        "tipo de cuenta y el objetivo en el perfil de abajo deberían bastar para decidir sin "
+        "cuentas personales/creador que van a hilar una narrativa en primera persona. Decide "
+        "con el tipo de cuenta y el objetivo que vienen escritos en el perfil de abajo, sin "
         "preguntar al usuario.\n"
         "3. Escribe un title corto (3-6 palabras) y una description de 1-2 frases que resuma "
         "el enfoque del mes, coherentes con el sector, los pilares de contenido y el "
@@ -389,5 +411,17 @@ def get_monthly_strategy_prompt(account_id: int, target_month: str) -> str:
         "para señalar que la sesión terminó."
     )
 
-    return f"{task_instructions}\n\n{strategy_context}{_build_brand_rules_context(account_id)}".strip()
+    performance_parts = []
+    if niche_brief:
+        performance_parts.append(f"Tendencias del nicho:\n{niche_brief}")
+    if outliers_summary:
+        performance_parts.append(f"Publicaciones que más destacaron el último mes:\n{outliers_summary}")
+    if audit_summary:
+        performance_parts.append(f"Puntos pendientes de la auditoría del perfil:\n{audit_summary}")
+    performance_context = (
+        "\n\nContexto de rendimiento de la cuenta:\n" + "\n\n".join(performance_parts)
+        if performance_parts else ""
+    )
+
+    return f"{task_instructions}\n\n{strategy_context}{performance_context}{_build_brand_rules_context(account_id)}".strip()
 

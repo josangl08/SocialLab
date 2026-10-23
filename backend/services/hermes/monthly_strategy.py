@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import date
 from typing import Optional
@@ -9,6 +10,12 @@ from services.hermes.prompts import get_monthly_strategy_prompt
 from mcp.supabase_server import mcp as supabase_mcp
 from services.account_timezone import get_account_timezone
 from utils.timezones import local_today
+from database.supabase_client import get_supabase_admin_client
+from services.analytics.analytics_service import AnalyticsService
+from services.content_quality import audit_profile
+from services.hermes.skills import run_niche_research_for_account
+
+logger = logging.getLogger(__name__)
 
 
 class MonthlyStrategyResult(BaseModel):
@@ -24,6 +31,45 @@ def next_month_date(today: Optional[date] = None) -> str:
     if today.month == 12:
         return date(today.year + 1, 1, 1).isoformat()
     return date(today.year, today.month + 1, 1).isoformat()
+
+
+def _monthly_outliers_summary(account_id: int) -> str:
+    """Top 5 del Swipe File del último mes con Outlier Multiple (AD-6)."""
+    swipe = AnalyticsService(db_client=get_supabase_admin_client()).get_swipe_file(account_id, days=30)
+    top = [it for it in swipe.get("items", []) if it.get("outlier_multiple") is not None][:5]
+    return "\n".join(
+        f"- \"{it['hook_text']}\" ({it.get('formula_name') or 'sin fórmula'}, {it['outlier_multiple']}x la mediana)"
+        for it in top
+    )
+
+
+def _monthly_audit_summary(account_id: int) -> str:
+    """Puntos de la auditoría de perfil que no se cumplen, con su peso (AD-6). Usa
+    los datos guardados de la cuenta, sin llamar a Instagram."""
+    res = get_supabase_admin_client().table("instagram_accounts").select("*").eq("id", account_id).execute()
+    if not res.data:
+        return ""
+    audit = audit_profile(res.data[0])
+    return "\n".join(
+        f"- {it['label']} (peso {it['weight']}): {it['tip']}" for it in audit["items"] if not it["passed"]
+    )
+
+
+def _gather_monthly_context(account_id: int) -> dict:
+    """Cada fuente es opcional: si falla se registra y se omite, nunca aborta la sesión."""
+    sources = {
+        "niche_brief": lambda: run_niche_research_for_account(account_id).get("brief"),
+        "outliers_summary": lambda: _monthly_outliers_summary(account_id),
+        "audit_summary": lambda: _monthly_audit_summary(account_id),
+    }
+    context = {}
+    for key, fetch in sources.items():
+        try:
+            context[key] = fetch() or None
+        except Exception as e:
+            logger.warning(f"Contexto mensual sin {key} para cuenta {account_id}: {e}")
+            context[key] = None
+    return context
 
 
 _MONTHLY_TOOLS = [
@@ -48,7 +94,7 @@ async def run_monthly_strategy_session(account_id: int, target_month: Optional[s
     bridge = ToolBridge([supabase_mcp], allowed_tools=_MONTHLY_TOOLS)
     declarations = await bridge.discover_tools()
 
-    system_prompt = get_monthly_strategy_prompt(account_id, target_month)
+    system_prompt = get_monthly_strategy_prompt(account_id, target_month, **_gather_monthly_context(account_id))
     model = _FallbackGenerativeModel(system_prompt, declarations)
 
     history = [{"role": "user", "parts": [{"text": "Redacta el borrador de campaña del próximo mes."}]}]

@@ -3,6 +3,7 @@ import { HybridSelect } from './HybridSelect';
 import { CampaignChatBox } from './CampaignChatBox';
 import { apiClient, ApiError } from '../../api/client';
 import { ProfileAudit } from '../../components/studio/ProfileAudit';
+import { HASHTAG_LEVELS } from '../../types';
 
 export interface ContentTypeMix {
   post: number;
@@ -89,7 +90,7 @@ interface Props {
 const PERSONAL_STRATEGY_DEFAULTS = {
   default_tone: 'energetic' as const,
   best_times: ['09:00', '18:00', '21:00'],  // Thu 9am + eves (Buffer 9.6M posts)
-  hashtag_strategy: 'minimal' as const,      // 3-5 cap enforced Dec 2025
+  hashtag_strategy: 'minimal' as const,      // 1–2 (cap de 5 desde dic 2025)
   content_type_mix: { post: 1, reel: 3, carousel: 2, story: 2 }, // reel-heavy: trending audio access
   posts_per_week: 5,
   scheduling_mode: 'flexible' as const,
@@ -98,7 +99,7 @@ const PERSONAL_STRATEGY_DEFAULTS = {
 const PROFESSIONAL_STRATEGY_DEFAULTS = {
   default_tone: 'professional' as const,
   best_times: ['13:00', '17:00'],            // Tue 13-19h, decision-maker window
-  hashtag_strategy: 'minimal' as const,      // 3-5 cap, industry+branded
+  hashtag_strategy: 'minimal' as const,      // 1–2, sector + marca
   content_type_mix: { post: 2, reel: 1, carousel: 2, story: 1 }, // carousel-heavy: compensates -12% reel reach
   posts_per_week: 5,
   scheduling_mode: 'fixed' as const,
@@ -111,11 +112,8 @@ const TONES = [
   { value: 'inspirational' as const, label: 'Inspiracional', emoji: '✨', color: '#a855f7', bg: 'rgba(168,85,247,0.12)'  },
 ];
 
-const HASHTAG_OPTS = [
-  { value: 'minimal'  as const, label: 'Mínimos',   desc: '3–5'   },
-  { value: 'moderate' as const, label: 'Moderados', desc: '6–10'  },
-  { value: 'maximum'  as const, label: 'Máximos',   desc: '11–15' },
-];
+// Al desactivar "Usar mis datos" sin horarios previos
+const FALLBACK_BEST_TIMES = ['09:00', '19:00'];
 
 const CAPTION_VOICE_OPTS: { value: AgentStrategyConfig['caption_voice']; label: string; desc: string }[] = [
   { value: null,           label: 'Automático', desc: 'hereda de la cuenta' },
@@ -220,6 +218,7 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [newPillar, setNewPillar] = useState('');
   const [newTime, setNewTime] = useState('');
+  const [lastBestTimes, setLastBestTimes] = useState<string[]>([]);
   const [newRef, setNewRef] = useState('');
   const [visible, setVisible] = useState(false);
   const [animate, setAnimate] = useState(false);
@@ -420,6 +419,17 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
   const addRef = () => {
     const t = newRef.trim().replace(/^@/, '');
     if (t && !cfg.reference_accounts.includes(t)) { set('reference_accounts', [...cfg.reference_accounts, t]); setNewRef(''); }
+  };
+
+  // "Usar mis datos" (AD-4): lista vacía → el agente decide con el histórico
+  const useHistoricalTimes = cfg.best_times.length === 0;
+  const toggleHistoricalTimes = () => {
+    if (useHistoricalTimes) {
+      set('best_times', lastBestTimes.length ? lastBestTimes : FALLBACK_BEST_TIMES);
+    } else {
+      setLastBestTimes(cfg.best_times);
+      set('best_times', []);
+    }
   };
 
   const handleSuggestTimes = async () => {
@@ -759,9 +769,9 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
               <div className="mb-4">
                 <FL icon="bi-hash" label="Hashtags por Post" />
                 <div className="d-flex gap-2">
-                  {HASHTAG_OPTS.map(o => (
+                  {HASHTAG_LEVELS.map(o => (
                     <button key={o.value} type="button" onClick={() => set('hashtag_strategy', o.value)} className={`btn btn-sm flex-grow-1 ${cfg.hashtag_strategy === o.value ? 'btn-primary' : 'btn-outline-secondary'}`}>
-                      {o.label}<div style={{ fontSize: '0.62rem', opacity: 0.65, fontWeight: 400 }}>{o.desc}</div>
+                      {o.label}<div style={{ fontSize: '0.62rem', opacity: 0.65, fontWeight: 400 }}>{o.range}</div>
                     </button>
                   ))}
                 </div>
@@ -841,6 +851,15 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
                     Sugerir con IA
                   </button>
                 </div>
+                <div className="form-check form-switch mb-2">
+                  <input className="form-check-input" type="checkbox" role="switch" id="use-historical-times"
+                    checked={useHistoricalTimes} onChange={toggleHistoricalTimes} />
+                  <label className="form-check-label" htmlFor="use-historical-times" style={{ fontSize: '0.78rem' }}>
+                    Usar mis datos <span style={{ opacity: 0.6 }}>— Hermes elige la hora con tu histórico</span>
+                  </label>
+                </div>
+                {!useHistoricalTimes && (
+                  <>
                 <div className="d-flex flex-wrap gap-2 mb-2">
                   {cfg.best_times.map((t, i) => (
                     <span key={i} style={{ backgroundColor: 'rgba(59,130,246,0.12)', color: '#93c5fd', border: '1px solid rgba(59,130,246,0.25)', borderRadius: 20, padding: '4px 10px', fontSize: '0.76rem', display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -853,6 +872,8 @@ export const AgentStrategyDrawer: React.FC<Props> = ({
                   <input type="time" className="form-control form-control-sm" style={{ ...inp, colorScheme: 'dark', maxWidth: 120 }} value={newTime} onChange={e => setNewTime(e.target.value)} onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTime())} />
                   <button type="button" className="btn btn-sm btn-outline-secondary" onClick={addTime}><i className="bi bi-plus" /> Añadir</button>
                 </div>
+                  </>
+                )}
               </div>
 
               <Sep />

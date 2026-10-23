@@ -134,14 +134,14 @@ class AnalyticsService:
             'contact_button_taps': sum(int(r.get('profile_links_taps') or 0) for r in rows),
         }
 
-    def get_swipe_file(self, instagram_account_id: int) -> Dict:
+    def get_swipe_file(self, instagram_account_id: int, days: int = 90) -> Dict:
         """
-        Swipe File: primera línea de los posts publicados en los últimos 90 días,
+        Swipe File: primera línea de los posts publicados en los últimos `days` días (90),
         clasificada por fórmula de gancho y ordenada por Outlier Multiple, más el
         agregado por fórmula. Sin Gemini (score_hook es determinista).
         Los Trial Reels llevan su reels_skip_rate para comparar ganchos (AD-10).
         """
-        cutoff = utc_now_naive() - timedelta(days=90)
+        cutoff = utc_now_naive() - timedelta(days=days)
         result = self.db.table('posts').select(
             'id, content, trial_graduation, '
             'post_performance(impressions, reach, shares, reels_skip_rate)'
@@ -1152,6 +1152,18 @@ class AnalyticsService:
             result[weekday] = slots[:3]
 
         return result
+
+    def get_weekday_engagement_scores(self, instagram_account_id: int, days: int = 90) -> Dict[int, float]:
+        """Mejor engagement medio por día de la semana (0=lunes), para desempatar días
+        en la corrección de días específicos (AD-3). Vacío si no hay histórico."""
+        posts = self._get_posts_from_db(instagram_account_id, days)
+        if not posts:
+            return {}
+        weekday_slots = self._calculate_best_times_by_weekday(posts, self._account_timezone(instagram_account_id))
+        return {
+            day: max(s['avg_engagement'] for s in slots)
+            for day, slots in weekday_slots.items() if slots
+        }
 
     def get_empirical_scheduling_data(
         self,

@@ -145,6 +145,14 @@ def test_supabase_create_monthly_campaign_rejected():
         assert result["campaign"]["status"] == "pending_approval"
 
 # 2. Cover run_monthly_strategy_session (mocked Gemini)
+@pytest.fixture(autouse=True)
+def _no_monthly_context():
+    """El contexto de rendimiento (nicho, outliers, auditoría) se prueba en
+    test_monthly_strategy_context.py; aquí no debe llamar a Gemini ni a la BD."""
+    with patch("services.hermes.monthly_strategy._gather_monthly_context", return_value={}):
+        yield
+
+
 @pytest.mark.asyncio
 @patch("services.hermes.monthly_strategy.ToolBridge")
 @patch("services.hermes.orchestrator.get_gemini_client")

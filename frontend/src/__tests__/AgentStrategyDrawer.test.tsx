@@ -352,5 +352,46 @@ describe('MonthlyCampaignSection in AgentStrategyDrawer', () => {
       expect(savedPayload.banned_phrases).toContain('holístico');
     });
   });
-});
 
+  test('shows the agent hashtag ranges (1–2 / 3–4 / 5)', async () => {
+    render(<AgentStrategyDrawer accountId={12} show={true} onHide={mockOnHide} onSave={mockOnSave} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Hashtags por Post')).toBeInTheDocument();
+    });
+    expect(screen.getByText('1–2')).toBeInTheDocument();
+    expect(screen.getByText('3–4')).toBeInTheDocument();
+    expect(screen.getByText('5')).toBeInTheDocument();
+    expect(screen.queryByText('11–15')).not.toBeInTheDocument();
+  });
+
+  test('"Usar mis datos" empties best_times and restores them when turned off', async () => {
+    let savedPayload: any = null;
+    const baseFetch = (globalThis.fetch as any).getMockImplementation();
+    (globalThis.fetch as any).mockImplementation((url: string, options?: any) => {
+      if (url.includes('/api/agent/config/12') && options?.method === 'PUT') {
+        savedPayload = JSON.parse(options.body);
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
+      }
+      return baseFetch(url, options);
+    });
+
+    render(<AgentStrategyDrawer accountId={12} show={true} onHide={mockOnHide} onSave={mockOnSave} />);
+
+    const toggle = await screen.findByLabelText(/Usar mis datos/i);
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText('10:00')).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toBeChecked();
+    expect(screen.queryByText('10:00')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/Guardar Estrategia/i));
+    await waitFor(() => {
+      expect(savedPayload?.best_times).toEqual([]);
+    });
+
+    fireEvent.click(toggle);
+    expect(screen.getByText('10:00')).toBeInTheDocument();
+  });
+});

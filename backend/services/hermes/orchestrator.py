@@ -27,6 +27,7 @@ from mcp.vision_server import mcp as vision_mcp
 from mcp.analytics_server import mcp as analytics_mcp
 from mcp.skills_server import mcp as skills_mcp
 from services.hermes.skills import run_niche_research_for_account, run_visual_performance_skill
+from services.content_quality import schedule_disagreement
 from utils.timezones import utc_now_naive
 
 logger = logging.getLogger(__name__)
@@ -428,43 +429,7 @@ def _rank_drive_files(files: List[Any], focus_text: Optional[str], account_id: i
 _rank_drive_files_by_focus = _rank_drive_files
 
 
-def _schedule_disagreement(configured_best_times: List[Any], empirical: Dict[str, Any]) -> Optional[str]:
-    """Decide si los horarios reales del histórico difieren *de forma significativa*
-    de los que el usuario configuró a mano, y devuelve la razón concreta (para el
-    rationale de la sugerencia) o None si no hay discrepancia relevante.
-
-    `empirical` es el dict de AnalyticsService.get_empirical_scheduling_data:
-    {has_data, top_times: ["HH:00", ...], best_times_by_weekday, summary_text}.
-    La configuración manual del usuario NO se toca — esto solo alimenta una
-    sugerencia visible en el timeline.
-
-    Criterio: se sugiere solo cuando NINGUNA de las horas top del histórico cae a
-    ±1h de alguna hora configurada — así "09:00 vs 10:00" no dispara nada, pero
-    "mañanas configuradas vs. histórico que rinde de noche" sí. Barra alta a
-    propósito: pocas sugerencias, todas con señal real."""
-    def _hour(hhmm: Any) -> Optional[int]:
-        try:
-            return int(str(hhmm).split(":")[0])
-        except (ValueError, IndexError):
-            return None
-
-    configured_hours = {h for h in (_hour(t) for t in configured_best_times) if h is not None}
-    empirical_hours = [h for h in (_hour(t) for t in empirical.get("top_times", [])) if h is not None]
-    if not configured_hours or not empirical_hours:
-        return None
-
-    if any(min(abs(eh - ch) for ch in configured_hours) <= 1 for eh in empirical_hours):
-        return None
-
-    configured_label = ", ".join(str(t) for t in configured_best_times)
-    empirical_label = empirical.get("summary_text") or ", ".join(
-        f"{h:02d}:00" for h in empirical_hours
-    )
-    return (
-        f"Tus horarios configurados ({configured_label}) no coinciden con las mejores "
-        f"horas de tu histórico real ({empirical_label}). Considera revisarlos en "
-        "Ajustes. Esta sesión respetó tu configuración sin cambios."
-    )
+_schedule_disagreement = schedule_disagreement
 
 
 def _maybe_record_schedule_mix_suggestions(
