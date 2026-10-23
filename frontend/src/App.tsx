@@ -8,6 +8,7 @@ import PlannerPage from './components/planner/PlannerPage';
 import Analytics from './components/analytics/Analytics';
 import SettingsPage from './components/settings/SettingsPage';
 import HermesMind from './components/hermes-mind/HermesMind';
+import StrategyPage from './components/strategy/StrategyPage';
 import MainLayout from './components/layout/MainLayout';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import './App.css';
@@ -85,6 +86,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <HermesMind />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/strategy"
+            element={
+              <ProtectedRoute>
+                <StrategyPage />
               </ProtectedRoute>
             }
           />

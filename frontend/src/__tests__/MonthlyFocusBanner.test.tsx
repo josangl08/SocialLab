@@ -50,7 +50,7 @@ describe('MonthlyFocusBanner Component', () => {
     await waitFor(() => {
       expect(screen.getByText(/Sin campaña mensual configurada/i)).toBeInTheDocument();
     });
-    expect(screen.getByText(/Configurar en Estrategia del Agente/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Ver estrategia/i })).toHaveAttribute('href', '/strategy?account=12');
   });
 
   test('renders nothing when no account is selected', async () => {

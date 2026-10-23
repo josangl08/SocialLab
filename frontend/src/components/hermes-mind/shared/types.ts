@@ -18,7 +18,7 @@ export interface DecisionSummary {
   confidence_score: number;
   applied_rule_labels: string[];
   rationale: string;
-  status: 'active' | 'overridden' | 'suggested' | 'accepted';
+  status: 'active' | 'overridden' | 'suggested' | 'accepted' | 'dismissed';
   created_at: string;
   target_label?: string | null;
   campaign_label?: string | null;
@@ -152,13 +152,15 @@ const STATUS_LABEL: Record<DecisionSummary['status'], string> = {
   overridden: 'anulada',
   suggested: 'sugerencia',
   accepted: 'aceptada',
+  dismissed: 'descartada',
 };
 export function statusLabel(s: DecisionSummary['status']): string {
   return STATUS_LABEL[s] ?? s;
 }
 
 export function isSuggestion(d: { decision_type: string }): boolean {
-  return d.decision_type === 'suggest_schedule_change' || d.decision_type === 'suggest_mix_change';
+  return d.decision_type === 'suggest_schedule_change' || d.decision_type === 'suggest_mix_change'
+    || d.decision_type === 'suggest_pillars_change';
 }
 
 const RELATIVE = new Intl.RelativeTimeFormat('es', { numeric: 'auto' });

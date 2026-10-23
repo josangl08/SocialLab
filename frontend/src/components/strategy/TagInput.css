@@ -1,0 +1,33 @@
+.sti-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 0.76rem;
+  border: 1px solid;
+}
+
+.sti-tag--accent { background: rgba(99, 102, 241, 0.14); color: #a5b4fc; border-color: rgba(99, 102, 241, 0.28); }
+.sti-tag--danger { background: rgba(239, 68, 68, 0.12); color: #fca5a5; border-color: rgba(239, 68, 68, 0.25); }
+.sti-tag--info   { background: rgba(59, 130, 246, 0.12); color: #93c5fd; border-color: rgba(59, 130, 246, 0.25); }
+
+.sti-tag .sti-remove {
+  background: none;
+  border: none;
+  color: inherit;
+  padding: 0;
+  line-height: 1;
+  font-size: 1rem;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.form-control.sti-input {
+  background: var(--sl-surface);
+  border: 1px solid var(--sl-border);
+  color: #fff;
+  color-scheme: dark;
+}
+
+.form-control.sti-input::placeholder { color: var(--sl-text-dim); }

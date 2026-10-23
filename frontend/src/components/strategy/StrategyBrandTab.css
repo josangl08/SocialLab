@@ -1,0 +1,2 @@
+.sbt .stg-option-card i { font-size: 1.25rem; color: var(--sl-text-dim); }
+.sbt .stg-option-card.is-active i { color: var(--sl-purple-light); }

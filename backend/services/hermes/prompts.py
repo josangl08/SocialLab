@@ -24,11 +24,12 @@ _ACCOUNT_TYPE_LABELS = {"personal": "personal", "professional": "profesional"}
 _LANGUAGE_LABELS = {"es": "español", "en": "inglés"}
 
 
-def _build_strategy_context(account: dict) -> str:
+def _build_strategy_context(account: dict, include_playbooks: bool = True) -> str:
     """Describe el perfil de la cuenta (tono, audiencia, mix de contenido, cadencia)
     como texto de prompt. Portado de agent_service.py._build_strategy_context —
     ver design.md §Architecture Decisions #3: esta info es contexto para que Hermes
-    razone, no una decisión que tome Python."""
+    razone, no una decisión que tome Python. Sin playbooks es la vista legible de
+    "Cómo te entiende Hermes" (AD-7)."""
     account_type = account.get('account_type', 'personal')
     voice_mode = account.get('caption_voice') or account_type
     tone = account.get('default_tone', 'energetic')
@@ -57,8 +58,12 @@ def _build_strategy_context(account: dict) -> str:
     profile.append(f"Idioma de los captions: {_LANGUAGE_LABELS.get(language, language)}.")
     profile.append(f"Audiencia: {target_audience or 'comunidad general'}.")
 
-    hashtag_playbook = load_playbook("hashtag-layering")
-    hooks_playbook = load_playbook("hooks")
+    if include_playbooks:
+        hashtag_playbook = load_playbook("hashtag-layering")
+        hooks_playbook = load_playbook("hooks")
+    else:
+        hashtag_playbook = "[playbook de hashtags por capas]"
+        hooks_playbook = "[playbook de fórmulas de gancho]"
     if voice_mode == 'professional':
         voice = (
             f"Voz de marca de tono {tone}, semiformal, emojis mínimos (0-1). "

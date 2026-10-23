@@ -1,0 +1,7 @@
+.atc-intro,
+.atc-note { color: var(--sl-text-muted); }
+
+.atc-table { font-size: 0.8rem; }
+.atc-table th { color: var(--sl-text-dim); font-weight: 600; }
+.atc-from { color: var(--sl-text-muted); }
+.atc-to { color: var(--sl-purple-light); }

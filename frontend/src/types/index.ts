@@ -109,6 +109,91 @@ export type StrategyMode = 'commercial_campaign' | 'personal_storyline';
 
 export type HashtagStrategy = 'minimal' | 'moderate' | 'maximum';
 
+export interface ContentTypeMix {
+  post: number;
+  reel: number;
+  carousel: number;
+  story: number;
+}
+
+export interface StrategyWizardAnswers {
+  dedica: string[];
+  contenido: string[];
+  objetivo: string[];
+  referentes: string[];
+  answered_at?: string;
+}
+
+/** Configuración de estrategia del agente (GET /api/agent/config/{id}). */
+export interface AgentStrategyConfig {
+  account_type: 'personal' | 'professional';
+  sector: string;
+  purpose: string;
+  target_audience: string;
+  style_guide: string;
+  default_tone: 'energetic' | 'professional' | 'casual' | 'inspirational';
+  default_language: 'es' | 'en';
+  best_times: string[];
+  content_pillars: string[];
+  hashtag_strategy: HashtagStrategy;
+  caption_voice: 'personal' | 'professional' | null;
+  reference_accounts: string[];
+  posts_per_week: number;
+  scheduling_mode: 'fixed' | 'flexible';
+  preferred_days: string[];
+  content_type_mix: ContentTypeMix;
+  humanizer_enabled: boolean;
+  banned_phrases: string[];
+  strategy_wizard_answers?: StrategyWizardAnswers | null;
+}
+
+export type AgentConfigPatch = Partial<Omit<AgentStrategyConfig, 'strategy_wizard_answers' | 'posts_per_week'>>;
+
+export type StrategyTab = 'marca' | 'publicacion' | 'referentes' | 'diagnostico';
+
+export interface StrategyIssue {
+  code: string;
+  severity: 'error' | 'warning' | 'info';
+  field: string;
+  tab: Exclude<StrategyTab, 'diagnostico'>;
+  message: string;
+}
+
+export interface StrategyDiagnostics {
+  issues: StrategyIssue[];
+  context_preview: string;
+  profile_audit: ProfileAuditResponse;
+}
+
+/** Sugerencia pendiente de Hermes (agent_decisions con status='suggested'). */
+export interface AgentSuggestion {
+  id: number;
+  decision_type: string;
+  rationale: string | null;
+  status: string;
+  created_at: string;
+  tool_args?: Record<string, unknown> | null;
+}
+
+export interface Milestone {
+  date: string;
+  event: string;
+}
+
+export interface MonthlyCampaign {
+  id?: string;
+  account_id: number;
+  month_date: string;
+  strategy_mode: StrategyMode;
+  title: string;
+  description: string;
+  milestones: Milestone[];
+  weekly_focus: Record<string, string>;
+  status?: 'pending_approval' | 'approved' | 'rejected';
+  generated_by?: 'manual' | 'hermes';
+  resolved_at?: string | null;
+}
+
 /** Rangos de hashtags que usa el agente (AD-2); única fuente para la UI. */
 export const HASHTAG_LEVELS: { value: HashtagStrategy; label: string; range: string }[] = [
   { value: 'minimal',  label: 'Mínimos',   range: '1–2' },

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { apiClient } from '../../api/client';
-import type { MonthlyCampaign } from './AgentStrategyDrawer';
+import type { MonthlyCampaign } from '../../types';
 import './CampaignChatBox.css';
 
 export interface CampaignChatBoxProps {

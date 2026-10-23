@@ -36,3 +36,14 @@
   font-size: 11px;
   color: var(--sl-muted);
 }
+
+.st-strategy-link {
+  width: 100%;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.st-strategy-badge {
+  font-size: 0.65rem;
+  margin-left: 4px;
+}

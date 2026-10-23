@@ -1,0 +1,16 @@
+.psl { display: flex; flex-direction: column; gap: 10px; }
+
+.psl-item {
+  background: var(--sl-purple-bg);
+  border: 1px solid var(--sl-purple-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.psl-icon { color: #fbbf24; }
+.psl-label { font-weight: 600; font-size: 0.85rem; color: #fff; }
+.psl-badge { background: rgba(59, 130, 246, 0.2); color: #93c5fd; font-weight: 500; }
+.psl-rationale,
+.psl-empty { color: var(--sl-text-muted); }
+.psl-value { color: var(--sl-text-muted); }
+.psl-value strong { color: #fff; font-weight: 600; }

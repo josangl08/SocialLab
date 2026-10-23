@@ -55,3 +55,8 @@
   font-size: 0.85rem;
   margin-top: 2px;
 }
+
+.banner-strategy-link {
+  color: #a78bfa;
+  white-space: nowrap;
+}

@@ -1,9 +1,12 @@
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 from typing import Literal, Optional
 from database.supabase_client import get_supabase_admin_client
-from models.schemas import User, AgentConfig, ContentProposal, MonthlyCampaign
+from models.schemas import (
+    User, AgentConfig, AgentConfigPatch, ContentProposal, MonthlyCampaign,
+    StrategyDiagnosticsResponse, ProfileAuditResponse,
+)
 from auth.dependencies import get_current_user, get_user_supabase_client
 from supabase import Client
 from datetime import datetime, timezone, timedelta
@@ -16,6 +19,8 @@ from services.gemini_service import generate_gemini_content, clean_and_parse_jso
 from services.analytics.analytics_service import AnalyticsService
 from services.hermes.orchestrator import run_edit_session
 from services.hermes.memory import append_correction
+from services.hermes.prompts import _build_strategy_context
+from services.content_quality import audit_profile, lint_strategy
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["Agent"])
@@ -273,8 +278,38 @@ STRATEGY_FIELDS = (
     'default_tone, default_language, posting_frequency, best_times, '
     'content_pillars, hashtag_strategy, caption_voice, reference_accounts, '
     'posts_per_week, scheduling_mode, preferred_days, content_type_mix, last_agent_sync, '
-    'humanizer_enabled, banned_phrases'
+    'humanizer_enabled, banned_phrases, strategy_wizard_answers'
 )
+
+
+def _serialize_agent_config(row: dict) -> dict:
+    return {
+        'account_type': row.get('account_type', 'personal'),
+        'sector': row.get('sector') or '',
+        'purpose': row.get('purpose') or '',
+        'target_audience': row.get('target_audience') or '',
+        'style_guide': row.get('style_guide') or '',
+        'default_tone': row.get('default_tone', 'energetic'),
+        'default_language': row.get('default_language', 'es'),
+        'posting_frequency': row.get('posting_frequency', 'few_times_week'),
+        # [] = "Usar mis datos" (AD-4); solo un NULL cae al antiguo default
+        'best_times': row['best_times'] if row.get('best_times') is not None else ['09:00', '18:00'],
+        'content_pillars': row.get('content_pillars') or [],
+        'hashtag_strategy': row.get('hashtag_strategy', 'moderate'),
+        'caption_voice': row.get('caption_voice'),
+        'reference_accounts': row.get('reference_accounts') or [],
+        'posts_per_week': row.get('posts_per_week', 3),
+        'scheduling_mode': row.get('scheduling_mode', 'flexible'),
+        'preferred_days': row.get('preferred_days') or [],
+        'content_type_mix': row.get('content_type_mix') or {'post': 2, 'reel': 1, 'carousel': 1, 'story': 0},
+        'humanizer_enabled': row.get('humanizer_enabled', True) is not False,
+        'banned_phrases': row.get('banned_phrases') or [],
+        'strategy_wizard_answers': row.get('strategy_wizard_answers'),
+    }
+
+
+def _clean_banned_phrases(phrases: list[str]) -> list[str]:
+    return list(dict.fromkeys(p.strip() for p in phrases if p.strip()))
 
 @router.get("/config/{account_id}")
 def get_agent_config(
@@ -288,28 +323,7 @@ def get_agent_config(
         row = acc_res.data[0]
         if str(row.get('user_id')) != str(current_user.id):
             raise HTTPException(status_code=403, detail="No tienes acceso a esta cuenta")
-        return {
-            'account_type': row.get('account_type', 'personal'),
-            'sector': row.get('sector') or '',
-            'purpose': row.get('purpose') or '',
-            'target_audience': row.get('target_audience') or '',
-            'style_guide': row.get('style_guide') or '',
-            'default_tone': row.get('default_tone', 'energetic'),
-            'default_language': row.get('default_language', 'es'),
-            'posting_frequency': row.get('posting_frequency', 'few_times_week'),
-            # [] = "Usar mis datos" (AD-4); solo un NULL cae al antiguo default
-            'best_times': row['best_times'] if row.get('best_times') is not None else ['09:00', '18:00'],
-            'content_pillars': row.get('content_pillars') or [],
-            'hashtag_strategy': row.get('hashtag_strategy', 'moderate'),
-            'caption_voice': row.get('caption_voice'),
-            'reference_accounts': row.get('reference_accounts') or [],
-            'posts_per_week': row.get('posts_per_week', 3),
-            'scheduling_mode': row.get('scheduling_mode', 'flexible'),
-            'preferred_days': row.get('preferred_days') or [],
-            'content_type_mix': row.get('content_type_mix') or {'post': 2, 'reel': 1, 'carousel': 1, 'story': 0},
-            'humanizer_enabled': row.get('humanizer_enabled', True) is not False,
-            'banned_phrases': row.get('banned_phrases') or [],
-        }
+        return _serialize_agent_config(row)
     except HTTPException:
         raise
     except Exception as e:
@@ -341,7 +355,6 @@ def update_agent_config(
             'style_guide': config.style_guide,
             'default_tone': config.default_tone,
             'default_language': config.default_language,
-            'posting_frequency': config.posting_frequency,
             'best_times': config.best_times,
             'content_pillars': config.content_pillars,
             'hashtag_strategy': config.hashtag_strategy,
@@ -356,9 +369,7 @@ def update_agent_config(
         if config.humanizer_enabled is not None:
             update_data['humanizer_enabled'] = config.humanizer_enabled
         if config.banned_phrases is not None:
-            update_data['banned_phrases'] = list(dict.fromkeys(
-                p.strip() for p in config.banned_phrases if p.strip()
-            ))
+            update_data['banned_phrases'] = _clean_banned_phrases(config.banned_phrases)
         admin_supabase.table('instagram_accounts').update(update_data).eq('id', account_id).execute()
 
         return {"updated": True}
@@ -367,6 +378,56 @@ def update_agent_config(
     except Exception as e:
         logger.error(f"Error updating agent config: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error al actualizar la configuración: {str(e)}")
+
+
+@router.patch("/config/{account_id}")
+def patch_agent_config(
+    account_id: int,
+    patch: AgentConfigPatch,
+    current_user: User = Depends(get_current_user)
+):
+    """Guardado por pestaña de /strategy (AD-7): escribe solo los campos enviados y
+    devuelve la configuración completa."""
+    _verify_account_owner(account_id, str(current_user.id))
+    update_data = patch.model_dump(exclude_unset=True)
+    if update_data.get('banned_phrases') is not None:
+        update_data['banned_phrases'] = _clean_banned_phrases(update_data['banned_phrases'])
+    if 'reference_accounts' in update_data:
+        update_data['reference_accounts'] = list(dict.fromkeys(
+            r.strip().lstrip('@') for r in (update_data['reference_accounts'] or []) if r.strip()
+        ))
+    try:
+        if update_data:
+            admin_supabase.table('instagram_accounts').update(update_data).eq('id', account_id).execute()
+        res = admin_supabase.table('instagram_accounts').select(STRATEGY_FIELDS).eq('id', account_id).execute()
+        return _serialize_agent_config(res.data[0] if res.data else {})
+    except Exception as e:
+        logger.error(f"Error patching agent config: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error al actualizar la configuración")
+
+
+@router.get("/strategy/{account_id}/diagnostics", response_model=StrategyDiagnosticsResponse)
+def get_strategy_diagnostics(
+    account_id: int,
+    current_user: User = Depends(get_current_user)
+) -> StrategyDiagnosticsResponse:
+    """Pestaña Diagnóstico (AD-5, AD-7): contradicciones del perfil, el texto con el que
+    Hermes entiende la cuenta y la auditoría de perfil con los datos guardados."""
+    _verify_account_owner(account_id, str(current_user.id))
+    account = admin_supabase.table('instagram_accounts').select('*').eq('id', account_id).execute().data[0]
+
+    empirical = None
+    try:
+        empirical = AnalyticsService(db_client=admin_supabase).get_empirical_scheduling_data(account_id)
+    except Exception as e:
+        logger.warning(f"Diagnóstico sin datos empíricos para cuenta {account_id}: {e}")
+
+    audit = audit_profile(account)
+    return StrategyDiagnosticsResponse(
+        issues=lint_strategy(account, empirical),
+        context_preview=_build_strategy_context(account, include_playbooks=False),
+        profile_audit=ProfileAuditResponse(score=audit['score'], items=audit['items']),
+    )
 
 
 class SuggestTimesRequest(BaseModel):
@@ -432,6 +493,8 @@ class GenerateStrategyRequest(BaseModel):
     contenido: list[str] = []
     objetivo: list[str] = []
     referentes: list[str] = []
+    # Si llega, se guardan las respuestas en la cuenta (AD-8); la config no se toca
+    account_id: Optional[int] = None
 
 
 @router.post("/generate-strategy")
@@ -439,6 +502,18 @@ async def generate_strategy(
     request: GenerateStrategyRequest,
     current_user: User = Depends(get_current_user)
 ):
+    if request.account_id is not None:
+        _verify_account_owner(request.account_id, str(current_user.id))
+        admin_supabase.table('instagram_accounts').update({
+            'strategy_wizard_answers': {
+                'dedica': request.dedica,
+                'contenido': request.contenido,
+                'objetivo': request.objetivo,
+                'referentes': request.referentes,
+                'answered_at': datetime.now(timezone.utc).isoformat(),
+            },
+        }).eq('id', request.account_id).execute()
+
     referentes_text = ", ".join(f"@{r}" for r in request.referentes) if request.referentes else "Ninguna"
 
     prompt = f"""Eres un experto en estrategia de contenido para Instagram, con conocimiento de los datos de rendimiento de 2026.
@@ -483,7 +558,10 @@ Solo el JSON, sin texto adicional."""
 
     try:
         text = await generate_gemini_content(prompt)
-        return await clean_and_parse_json(text)
+        proposal = await clean_and_parse_json(text)
+        # Propuesta, no config: la frecuencia la marca el mix (AD-1)
+        proposal.pop('posting_frequency', None)
+        return proposal
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail="La IA devolvió una respuesta inválida")
     except Exception as e:
@@ -1027,6 +1105,9 @@ async def list_decisions(
     page: int = 1,
     per_page: int = 20,
     proposal_id: Optional[str] = None,
+    status_filter: Optional[Literal['active', 'overridden', 'suggested', 'accepted', 'dismissed']] = Query(
+        None, alias='status'
+    ),
     current_user: User = Depends(get_current_user)
 ):
     _verify_account_owner(account_id, str(current_user.id))
@@ -1036,10 +1117,12 @@ async def list_decisions(
     query = admin_supabase.table('agent_decisions')\
         .select(
             'id, decision_type, confidence_score, applied_rule_labels, rationale, status, '
-            'created_at, related_post_id, related_proposal_id, campaign_id',
+            'created_at, related_post_id, related_proposal_id, campaign_id, tool_args',
             count='exact',
         )\
         .eq('account_id', account_id)
+    if status_filter:
+        query = query.eq('status', status_filter)
     query = _apply_proposal_filter(query, scoped_proposal_id, scoped_post_ids)
     orphan_ids = _orphan_decision_ids(account_id)
     if orphan_ids:
@@ -1408,6 +1491,20 @@ async def accept_suggestion(decision_id: int, current_user: User = Depends(get_c
     }).eq('id', decision_id).execute()
 
     return {"accepted": True, "config_column": config_column, "applied_value": suggested_value}
+
+
+@router.post("/decisions/{decision_id}/dismiss-suggestion")
+async def dismiss_suggestion(decision_id: int, current_user: User = Depends(get_current_user)):
+    """Descarta una sugerencia pendiente sin tocar la configuración (AD-11)."""
+    decision = _get_decision_and_verify_owner(decision_id, str(current_user.id))
+    if decision.get("status") != "suggested":
+        raise HTTPException(status_code=409, detail="Esta decisión no es una sugerencia pendiente")
+
+    admin_supabase.table('agent_decisions').update({
+        "status": "dismissed",
+        "dismissed_at": datetime.now(timezone.utc).isoformat(),
+    }).eq('id', decision_id).execute()
+    return {"dismissed": True}
 
 
 class VisualBackfillRequest(BaseModel):

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import './OrbitaPanel.css';
+import { Link } from 'react-router-dom';
 import { apiClient } from '../../../api/client';
 import { ConfidenceRing } from '../shared/ConfidenceRing';
 import { PostImage } from '../shared/PostImage';
@@ -17,6 +18,7 @@ import {
   findNodeByType,
   verbFor,
   isSuggestion,
+  statusLabel,
   postImageSrc,
 } from '../shared/types';
 
@@ -25,6 +27,7 @@ interface OrbitaPanelProps {
   graph: ContextGraphResponse | null;
   token: string | null;
   onChanged: () => void;
+  accountId?: number | null;
 }
 
 interface ArcSource {
@@ -59,7 +62,7 @@ const HUMANIZE: Record<string, string> = {
 
 const STAGE_H = 198;
 
-export const OrbitaPanel: React.FC<OrbitaPanelProps> = ({ decision, graph, token, onChanged }) => {
+export const OrbitaPanel: React.FC<OrbitaPanelProps> = ({ decision, graph, token, onChanged, accountId }) => {
   const [detail, setDetail] = useState<DecisionDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [audit, setAudit] = useState<AuditTrail | null>(null);
@@ -394,13 +397,20 @@ export const OrbitaPanel: React.FC<OrbitaPanelProps> = ({ decision, graph, token
 
         <div className="orbita-foot">
           {isSuggestion(decision) ? (
-            decision.status === 'suggested' ? (
-              <button type="button" className="hm-btn hm-btn-accept" disabled={busy} onClick={acceptSuggestion}>
-                <i className="bi bi-check-circle" /> Aplicar a Ajustes
-              </button>
-            ) : (
-              <span className="orbita-note">Sugerencia {decision.status === 'accepted' ? 'aceptada' : decision.status}.</span>
-            )
+            <>
+              {decision.status === 'suggested' ? (
+                <button type="button" className="hm-btn hm-btn-accept" disabled={busy} onClick={acceptSuggestion}>
+                  <i className="bi bi-check-circle" /> Aplicar a la estrategia
+                </button>
+              ) : (
+                <span className="orbita-note">Sugerencia {statusLabel(decision.status)}.</span>
+              )}
+              {accountId != null && (
+                <Link to={`/strategy?account=${accountId}&tab=publicacion`} className="hm-btn orbita-strategy-link">
+                  <i className="bi bi-sliders" /> Ver en estrategia
+                </Link>
+              )}
+            </>
           ) : (
             <button type="button" className="hm-btn hm-btn-danger" onClick={() => setCorrecting((v) => !v)}>
               <i className="bi bi-x-circle" /> Corregir esta decisión

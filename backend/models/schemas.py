@@ -147,6 +147,9 @@ TelegramMessage.model_rebuild()
 
 
 # --- Modelos de Agente Autónomo ---
+MAX_REFERENCE_ACCOUNTS = 5
+
+
 class AgentConfig(BaseModel):
     account_type: Literal["personal", "professional"] = "personal"
     sector: Optional[str] = None
@@ -155,12 +158,13 @@ class AgentConfig(BaseModel):
     style_guide: Optional[str] = None
     default_tone: Literal["energetic", "professional", "casual", "inspirational"] = "energetic"
     default_language: Literal["es", "en"] = "es"
-    posting_frequency: Literal["daily", "few_times_week", "once_or_twice_week", "weekly"] = "few_times_week"
+    # Ya no llega al agente (manda el mix); opcional e ignorada al guardar
+    posting_frequency: Optional[Literal["daily", "few_times_week", "once_or_twice_week", "weekly"]] = None
     best_times: list[str] = ["09:00", "18:00"]
     content_pillars: list[str] = []
     hashtag_strategy: Literal["minimal", "moderate", "maximum"] = "moderate"
     caption_voice: Optional[Literal["personal", "professional"]] = None
-    reference_accounts: list[str] = []
+    reference_accounts: list[str] = Field(default=[], max_length=MAX_REFERENCE_ACCOUNTS)
     posts_per_week: int = 3
     scheduling_mode: Literal["fixed", "flexible"] = "flexible"
     preferred_days: list[str] = []
@@ -168,6 +172,41 @@ class AgentConfig(BaseModel):
     # Filtro anti-slop por cuenta (migración 033); None = no se modifica
     humanizer_enabled: Optional[bool] = None
     banned_phrases: Optional[list[str]] = None
+
+
+class AgentConfigPatch(BaseModel):
+    """Guardado por pestaña (AD-7): solo se escriben los campos enviados."""
+    account_type: Optional[Literal["personal", "professional"]] = None
+    sector: Optional[str] = None
+    purpose: Optional[str] = None
+    target_audience: Optional[str] = None
+    style_guide: Optional[str] = None
+    default_tone: Optional[Literal["energetic", "professional", "casual", "inspirational"]] = None
+    default_language: Optional[Literal["es", "en"]] = None
+    best_times: Optional[list[str]] = None
+    content_pillars: Optional[list[str]] = None
+    hashtag_strategy: Optional[Literal["minimal", "moderate", "maximum"]] = None
+    caption_voice: Optional[Literal["personal", "professional"]] = None
+    reference_accounts: Optional[list[str]] = Field(default=None, max_length=MAX_REFERENCE_ACCOUNTS)
+    scheduling_mode: Optional[Literal["fixed", "flexible"]] = None
+    preferred_days: Optional[list[str]] = None
+    content_type_mix: Optional[dict] = None
+    humanizer_enabled: Optional[bool] = None
+    banned_phrases: Optional[list[str]] = None
+
+
+class StrategyIssue(BaseModel):
+    code: str
+    severity: Literal["error", "warning", "info"]
+    field: str
+    tab: Literal["marca", "publicacion", "referentes"]
+    message: str
+
+
+class StrategyDiagnosticsResponse(BaseModel):
+    issues: list[StrategyIssue] = []
+    context_preview: str
+    profile_audit: "ProfileAuditResponse"
 
 class VisualAnalysis(BaseModel):
     drive_file_id: str
@@ -585,3 +624,6 @@ class DmFunnelRequest(BaseModel):
 class DmFunnelResponse(BaseModel):
     delivery_dm: str = Field(..., min_length=1)
     follow_ups: list[str] = Field(..., min_length=2, max_length=2)
+
+
+StrategyDiagnosticsResponse.model_rebuild()

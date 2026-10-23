@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { getFirstOfDayOfMonth } from '../../features/agent/AgentStrategyDrawer';
-import type { MonthlyCampaign } from '../../features/agent/AgentStrategyDrawer';
+import { getFirstOfDayOfMonth } from '../../utils/campaign';
+import type { MonthlyCampaign } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { apiClient } from '../../api/client';
 import './MonthlyFocusBanner.css';
@@ -9,9 +9,11 @@ import './MonthlyFocusBanner.css';
 interface MonthlyFocusBannerProps {
   accountId: number | null;
   currentDate: Date;
+  /** Cambia cuando el panel de campaña modifica la campaña, para recargarla. */
+  refreshKey?: number;
 }
 
-export const MonthlyFocusBanner: React.FC<MonthlyFocusBannerProps> = ({ accountId, currentDate }) => {
+export const MonthlyFocusBanner: React.FC<MonthlyFocusBannerProps> = ({ accountId, currentDate, refreshKey = 0 }) => {
   const { token } = useAuth();
   const [campaign, setCampaign] = useState<MonthlyCampaign | null>(null);
   const [loading, setLoading] = useState(false);
@@ -35,7 +37,7 @@ export const MonthlyFocusBanner: React.FC<MonthlyFocusBannerProps> = ({ accountI
       .finally(() => {
         setLoading(false);
       });
-  }, [token, accountId, currentDate]);
+  }, [token, accountId, currentDate, refreshKey]);
 
   if (loading || !accountId) {
     return null;
@@ -46,8 +48,8 @@ export const MonthlyFocusBanner: React.FC<MonthlyFocusBannerProps> = ({ accountI
       <div className="monthly-focus-banner monthly-focus-banner--empty p-3 mb-4 rounded-3 d-flex align-items-center gap-2">
         <i className="bi bi-info-circle text-white-50" />
         <span className="text-white-50 small">Sin campaña mensual configurada para este mes.</span>
-        <Link to="/settings" className="ms-auto small fw-semibold text-decoration-none" style={{ color: '#a78bfa' }}>
-          Configurar en Estrategia del Agente →
+        <Link to={`/strategy?account=${accountId}`} className="ms-auto small fw-semibold text-decoration-none banner-strategy-link">
+          Ver estrategia →
         </Link>
       </div>
     );
@@ -68,6 +70,9 @@ export const MonthlyFocusBanner: React.FC<MonthlyFocusBannerProps> = ({ accountI
           <h6 className="mb-0 fw-bold text-white banner-title">{campaign.title}</h6>
           <p className="mb-0 text-white-50 small banner-description">{campaign.description}</p>
         </div>
+        <Link to={`/strategy?account=${accountId}`} className="ms-auto small fw-semibold text-decoration-none banner-strategy-link">
+          Ver estrategia →
+        </Link>
       </div>
       {weeks.length > 0 && (
         <div className="d-flex gap-2 flex-wrap">

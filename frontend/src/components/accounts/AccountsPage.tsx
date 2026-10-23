@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import 'bootstrap-icons/font/bootstrap-icons.css';
-import { AgentStrategyDrawer } from '../../features/agent/AgentStrategyDrawer';
+import { Link } from 'react-router-dom';
 import { apiClient, ApiError } from '../../api/client';
 import type { InstagramAccount, LoginType } from '../../types';
 import { AccountTimezoneSettings } from './AccountTimezoneSettings';
@@ -36,7 +36,6 @@ const AccountsPage: React.FC = () => {
   const [telegramLinking, setTelegramLinking] = useState<number | null>(null);
   const [telegramUnlinking, setTelegramUnlinking] = useState<number | null>(null);
   const [linkTokens, setLinkTokens] = useState<Record<number, string>>({});
-  const [drawerAccount, setDrawerAccount] = useState<InstagramAccount | null>(null);
   const [driveSaving, setDriveSaving] = useState<number | null>(null);
   const [driveUnlinking, setDriveUnlinking] = useState<number | null>(null);
   const [driveInputs, setDriveInputs] = useState<Record<number, string>>({});
@@ -450,33 +449,24 @@ const AccountsPage: React.FC = () => {
 
                 {/* Strategy */}
                 <div className="st-card-row">
-                  <button
-                    className="st-btn st-btn-accent"
-                    style={{ width: '100%', justifyContent: 'center' }}
-                    onClick={() => setDrawerAccount(account)}
+                  <Link
+                    to={`/strategy?account=${account.id}`}
+                    className="st-btn st-btn-accent st-strategy-link"
                   >
                     <i className="bi bi-robot"></i>
-                    Configurar Estrategia
+                    Estrategia →
                     {account.sector && (
-                      <span className="st-badge st-badge-success" style={{ fontSize: '0.65rem', marginLeft: 4 }}>
+                      <span className="st-badge st-badge-success st-strategy-badge">
                         Activa
                       </span>
                     )}
-                  </button>
+                  </Link>
                 </div>
               </div>
             );
           })}
         </div>
       )}
-
-      <AgentStrategyDrawer
-        accountId={drawerAccount?.id ?? 0}
-        accountUsername={drawerAccount?.username ?? undefined}
-        show={drawerAccount !== null}
-        onHide={() => setDrawerAccount(null)}
-        onSave={fetchAccounts}
-      />
 
       {loginChooser && (
         <LoginMethodModal

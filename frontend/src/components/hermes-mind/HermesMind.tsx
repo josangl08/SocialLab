@@ -294,6 +294,7 @@ export const HermesMind: React.FC<HermesMindProps> = ({ accountId: accountIdProp
           graph={graph}
           token={token}
           onChanged={() => setRefreshKey((k) => k + 1)}
+          accountId={accountId}
         />
         <ExpedientesPanel
           decisions={visibleDecisions}

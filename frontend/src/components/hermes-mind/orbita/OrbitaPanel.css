@@ -247,3 +247,8 @@
   gap: 8px;
   margin-top: 8px;
 }
+
+.orbita-strategy-link {
+  text-decoration: none;
+  margin-left: 8px;
+}

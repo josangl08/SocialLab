@@ -1,6 +1,9 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import AccountsPage from '../components/accounts/AccountsPage';
+
+const renderPage = () => render(<MemoryRouter><AccountsPage /></MemoryRouter>);
 
 describe('AccountsPage Component', () => {
   const mockToken = 'mock-auth-token-xyz';
@@ -92,7 +95,7 @@ describe('AccountsPage Component', () => {
   });
 
   test('renders page title and list of accounts with badges', async () => {
-    render(<AccountsPage />);
+    renderPage();
 
     // Wait for loading to finish and accounts to show
     await waitFor(() => {
@@ -114,7 +117,7 @@ describe('AccountsPage Component', () => {
   });
 
   test('shows "Reconectar" for a token_invalid account even with a future expires_at', async () => {
-    render(<AccountsPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('@revoked_user')).toBeInTheDocument();
@@ -126,7 +129,7 @@ describe('AccountsPage Component', () => {
   });
 
   test('allows disconnecting a account with confirmation', async () => {
-    render(<AccountsPage />);
+    renderPage();
 
     // Wait for accounts to load
     await waitFor(() => {
@@ -161,7 +164,7 @@ describe('AccountsPage Component', () => {
       json: () => Promise.resolve([]),
     });
 
-    render(<AccountsPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText(/No tienes cuentas de Instagram conectadas/i)).toBeInTheDocument();
@@ -169,7 +172,7 @@ describe('AccountsPage Component', () => {
   });
 
   test('renders Telegram section: Link Telegram when chat ID is null, Linked badge when chat ID is set', async () => {
-    render(<AccountsPage />);
+    renderPage();
 
     // Wait for accounts to load
     await waitFor(() => {
@@ -188,7 +191,7 @@ describe('AccountsPage Component', () => {
   });
 
   test('clicking Link Telegram calls generate-link-token and displays the linking token', async () => {
-    render(<AccountsPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('@expired_user')).toBeInTheDocument();
@@ -214,7 +217,7 @@ describe('AccountsPage Component', () => {
   });
 
   test('clicking Unlink calls API to clear telegram_chat_id and updates state', async () => {
-    render(<AccountsPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('@active_user')).toBeInTheDocument();
@@ -242,7 +245,7 @@ describe('AccountsPage Component', () => {
   // --- Google Drive OAuth Extension Tests ---
 
   test('renders "Conectar Drive" button placeholder when driveConnected is false', async () => {
-    render(<AccountsPage />);
+    renderPage();
     await waitFor(() => {
       expect(screen.getByText('@active_user')).toBeInTheDocument();
     });
@@ -265,7 +268,7 @@ describe('AccountsPage Component', () => {
       });
     });
 
-    render(<AccountsPage />);
+    renderPage();
     await waitFor(() => {
       expect(screen.getByText('@active_user')).toBeInTheDocument();
     });
@@ -283,7 +286,7 @@ describe('AccountsPage Component', () => {
 
     const replaceStateSpy = vi.spyOn(window.history, 'replaceState');
 
-    render(<AccountsPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(replaceStateSpy).toHaveBeenCalled();
@@ -298,7 +301,7 @@ describe('AccountsPage Component', () => {
     window.location = { ...originalLocation, search: '?instagram_error=no_linked_page' } as any;
     const replaceStateSpy = vi.spyOn(window.history, 'replaceState');
 
-    render(<AccountsPage />);
+    renderPage();
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/cuenta profesional de Instagram vinculada/);
     expect(replaceStateSpy).toHaveBeenCalled();
@@ -331,7 +334,7 @@ describe('AccountsPage Component', () => {
       ok: true,
       json: () => Promise.resolve(url.includes('/api/drive/status') ? { connected: false } : mixedAccounts),
     }));
-    render(<AccountsPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText('@fb_user')).toBeInTheDocument());
   };
 
@@ -408,5 +411,11 @@ describe('AccountsPage Component', () => {
       expect(window.location.href).toContain('account_id=2');
     });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  test('cada tarjeta enlaza a su página de estrategia', async () => {
+    renderPage();
+    const links = await screen.findAllByRole('link', { name: /Estrategia →/ });
+    expect(links[0].getAttribute('href')).toMatch(/^\/strategy\?account=\d+$/);
   });
 });

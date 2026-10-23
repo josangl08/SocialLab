@@ -273,3 +273,21 @@ def test_get_edit_prompt_image_select_resolves_account_folder_first():
     assert "supabase_get_account" in prompt
     assert "instagram_account_id=7" in prompt
     assert "drive_folder_id" in prompt
+
+
+def test_dispatch_telegram_proposal_links_strategy_when_suggestions_pending():
+    from services.agent_service import _dispatch_telegram_proposal
+
+    supabase = MagicMock()
+    supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+        data=[{"id": "p1", "slots": []}]
+    )
+    supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value \
+        .execute.return_value = MagicMock(data=[{"id": 9}])
+
+    with patch("services.telegram_service.TelegramService") as mock_tg:
+        mock_tg.return_value.send_proposal_card = AsyncMock()
+        _dispatch_telegram_proposal(supabase, 7, {"telegram_chat_id": 123, "user_id": "u"}, "p1")
+
+    kwargs = mock_tg.return_value.send_proposal_card.call_args.kwargs
+    assert kwargs["strategy_url"].endswith("/strategy?account=7&tab=publicacion")

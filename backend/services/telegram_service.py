@@ -721,14 +721,21 @@ class TelegramService:
             logger.warning(f"No se pudo preparar la imagen para Telegram: {e}")
             return None
 
-    async def send_proposal_card(self, chat_id: str, proposal_id: str, slots: list, user_id: str = None) -> None:
+    async def send_proposal_card(
+        self, chat_id: str, proposal_id: str, slots: list, user_id: str = None,
+        strategy_url: Optional[str] = None,
+    ) -> None:
         supabase = get_supabase_admin_client()
+
+        header = "📅 *Weekly content proposal* — review and approve each day:"
+        if strategy_url:
+            header += f"\n💡 Hermes tiene sugerencias para tu estrategia: {strategy_url}"
 
         # 1. Header message with global approve/reject buttons
         async with httpx.AsyncClient() as client:
             resp = await client.post(self._bot_url("sendMessage"), json={
                 "chat_id": chat_id,
-                "text": "📅 *Weekly content proposal* — review and approve each day:",
+                "text": header,
                 "parse_mode": "Markdown",
                 "reply_markup": {"inline_keyboard": [[
                     {"text": "Approve all ✅", "callback_data": f"proposal:approve:{proposal_id}"},

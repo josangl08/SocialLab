@@ -1,0 +1,7 @@
+.swm-help { color: var(--sl-text-muted); }
+.swm-question { font-size: 0.88rem; font-weight: 600; margin-bottom: 8px; }
+.swm-table { font-size: 0.8rem; }
+.swm-table th { color: var(--sl-text-dim); font-weight: 600; }
+.swm-from { color: var(--sl-text-muted); }
+.swm-to { color: var(--sl-purple-light); }
+.swm-same td { opacity: 0.55; }

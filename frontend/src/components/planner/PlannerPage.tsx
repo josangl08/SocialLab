@@ -6,6 +6,7 @@ import EditPostForm from '../posts/EditPostForm';
 import WeeklyProposalPanel from './WeeklyProposalPanel';
 import StorySequence from '../studio/StorySequence';
 import { MonthlyFocusBanner } from './MonthlyFocusBanner';
+import { MonthlyCampaignPanel } from './MonthlyCampaignPanel';
 import { useAuth } from '../../context/AuthContext';
 import { apiClient, ApiError } from '../../api/client';
 import type { Post, InstagramAccount, ContentProposal, AgentLog } from '../../types';
@@ -22,6 +23,8 @@ const PlannerPage: React.FC = () => {
   const [aiTriggering, setAiTriggering] = useState(false);
   const [aiStatus, setAiStatus] = useState<string | null>(null);
   const [primaryAccountId, setPrimaryAccountId] = useState<number | null>(null);
+  const [campaignKey, setCampaignKey] = useState(0);
+  const bumpCampaign = useCallback(() => setCampaignKey(k => k + 1), []);
   const [accounts, setAccounts] = useState<InstagramAccount[]>([]);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [agentStartedAt, setAgentStartedAt] = useState<number | null>(null);
@@ -248,7 +251,8 @@ const PlannerPage: React.FC = () => {
         {view === 'calendar'
           ? (
             <>
-              <MonthlyFocusBanner accountId={primaryAccountId} currentDate={plannerViewDate} />
+              <MonthlyFocusBanner accountId={primaryAccountId} currentDate={plannerViewDate} refreshKey={campaignKey} />
+              <MonthlyCampaignPanel accountId={primaryAccountId} currentDate={plannerViewDate} onCampaignChanged={bumpCampaign} />
               <CalendarView
                 onNewPost={openNewPost}
                 onEdit={openEditDrawer}

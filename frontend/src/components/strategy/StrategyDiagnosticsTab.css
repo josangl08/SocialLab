@@ -1,0 +1,55 @@
+.sdt-ok { color: #86efac; }
+.sdt-help { color: var(--sl-text-muted); }
+
+.sdt-sev { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+.sdt-sev--error   { color: #f87171; }
+.sdt-sev--warning { color: #fbbf24; }
+.sdt-sev--info    { color: #93c5fd; }
+
+.sdt-issues { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+
+.sdt-issue {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.85);
+  background: var(--sl-surface);
+  border-left: 3px solid;
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.sdt-issue--error   { border-left-color: #f87171; }
+.sdt-issue--warning { border-left-color: #fbbf24; }
+.sdt-issue--info    { border-left-color: #93c5fd; }
+
+.sdt .sdt-fix {
+  background: none;
+  border: none;
+  color: var(--sl-purple-light);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  padding: 0;
+}
+
+.sdt-preview {
+  white-space: pre-wrap;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.8);
+  background: var(--sl-surface);
+  border: 1px solid var(--sl-border);
+  border-radius: 8px;
+  padding: 12px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.sdt-score { font-weight: 700; color: var(--sl-purple-light); }
+
+.sdt-audit { list-style: none; padding: 0; margin: 0 0 12px; font-size: 0.82rem; }
+.sdt-audit li { padding: 3px 0; }
+.sdt-audit .is-passed { color: #86efac; }
+.sdt-audit .is-failed { color: rgba(255, 255, 255, 0.85); }
+.sdt-tip { color: var(--sl-text-muted); }

@@ -5,6 +5,7 @@ from typing import Optional
 
 from database.supabase_client import get_supabase_admin_client
 from models.schemas import AgentLog
+from config import FRONTEND_URL
 from services.hermes.orchestrator import run_session
 
 logger = logging.getLogger(__name__)
@@ -75,13 +76,21 @@ def _dispatch_telegram_proposal(supabase, account_id: int, account: dict, propos
         return f"telegram_dispatch_failed: proposal {proposal_id} not found"
     proposal = proposal_res.data[0]
 
+    # Enlace a la pestaña Publicación si quedan sugerencias pendientes (AD-7)
+    strategy_url = None
+    pending_res = supabase.table('agent_decisions').select('id')\
+        .eq('account_id', account_id).eq('status', 'suggested').limit(1).execute()
+    if pending_res.data:
+        strategy_url = f"{FRONTEND_URL}/strategy?account={account_id}&tab=publicacion"
+
     try:
         from services.telegram_service import TelegramService
         loop = asyncio.new_event_loop()
         try:
             loop.run_until_complete(
                 TelegramService().send_proposal_card(
-                    str(chat_id), proposal['id'], proposal['slots'], str(account.get('user_id', ''))
+                    str(chat_id), proposal['id'], proposal['slots'], str(account.get('user_id', '')),
+                    strategy_url=strategy_url,
                 )
             )
         finally:

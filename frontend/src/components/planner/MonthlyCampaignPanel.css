@@ -1,0 +1,49 @@
+.mcp-pending {
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(129, 140, 248, 0.35);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  color: #fff;
+}
+
+.mcp-pending .bi-robot { color: #a5b4fc; }
+.mcp-muted { color: var(--sl-text-muted); }
+
+.mcp-form {
+  background: var(--sl-surface);
+  border: 1px solid var(--sl-border);
+  border-radius: 12px;
+  padding: 16px;
+  color: #fff;
+}
+
+.mcp-label { display: block; font-size: 0.8rem; color: rgba(255, 255, 255, 0.7); margin-bottom: 6px; }
+
+.form-control.mcp-input {
+  background: var(--sl-surface);
+  border: 1px solid var(--sl-border);
+  color: #fff;
+  color-scheme: dark;
+  resize: none;
+}
+
+.form-control.mcp-input:focus { background: var(--sl-surface); color: #fff; }
+.mcp-date { max-width: 150px; }
+
+.mcp-milestone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--sl-border);
+  border-radius: 8px;
+  padding: 4px 8px;
+  margin-bottom: 6px;
+}
+
+.mcp-milestone-date { color: #a5b4fc; font-family: monospace; }
+.mcp-milestone .mcp-remove { background: none; border: none; color: #f87171; padding: 0; }
+.mcp-week { min-width: 72px; font-size: 0.8rem; color: var(--sl-text-muted); }
+.mcp-saved { color: #86efac; }
