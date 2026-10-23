@@ -275,7 +275,34 @@ class TestCommentsTriageFallback:
                 assert resp.status_code == 200
                 data = resp.json()
                 assert data["source"] == "unavailable"
+                assert data["unavailable_reason"] == "api_error"
                 assert data["comments"] == []
+        finally:
+            _restore_override(get_user_supabase_client, prev_db)
+
+    @pytest.mark.parametrize("extra, reason", [
+        ({"post_type": "story"}, "story"),
+        ({"post_type": "STORIES"}, "story"),
+        ({"post_type": "IMAGE", "is_collaboration": True}, "collaboration"),
+    ])
+    def test_story_and_collaboration_skip_graph_api(self, auth_client, extra, reason):
+        """Stories y colaboraciones devuelven unavailable con su motivo sin llamar a la Graph API."""
+        sample_post = {"id": 4, "instagram_account_id": 10, "instagram_post_id": "1789", **extra}
+        mock_db = MockSupabaseClient({
+            "posts": [sample_post],
+            "instagram_accounts": [{"id": 10, "long_lived_access_token": "tok", "login_type": "instagram"}],
+        })
+
+        prev_db = app.dependency_overrides.get(get_user_supabase_client)
+        app.dependency_overrides[get_user_supabase_client] = lambda: mock_db
+
+        try:
+            with patch("services.instagram_insights.requests.get") as mock_get:
+                resp = auth_client.get("/content/comments/4/triage")
+            assert resp.status_code == 200
+            assert resp.json()["source"] == "unavailable"
+            assert resp.json()["unavailable_reason"] == reason
+            mock_get.assert_not_called()
         finally:
             _restore_override(get_user_supabase_client, prev_db)
 
@@ -300,6 +327,7 @@ class TestCommentsTriageFallback:
             resp = auth_client.get("/content/comments/3/triage")
             assert resp.status_code == 200
             assert resp.json()["source"] == "unavailable"
+            assert resp.json()["unavailable_reason"] == "not_published"
         finally:
             _restore_override(get_user_supabase_client, prev_db)
 

@@ -547,6 +547,8 @@ class CommentTriageItem(BaseModel):
 class CommentsTriageResponse(BaseModel):
     source: Literal["api", "unavailable", "manual"]
     comments: list[CommentTriageItem] = []
+    # Solo con source="unavailable": por qué no se pudieron leer de Instagram
+    unavailable_reason: Optional[Literal["not_published", "story", "collaboration", "api_error"]] = None
 
 
 class CommentsTriageManualRequest(BaseModel):

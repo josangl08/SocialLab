@@ -1,12 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { contentApi } from '../../api/content';
-import type { CommentTriageItem, CommentTriageSource, StrategyMode } from '../../types';
+import type {
+  CommentTriageItem,
+  CommentTriageSource,
+  CommentTriageUnavailableReason,
+  StrategyMode,
+} from '../../types';
 import './CommentTriage.css';
 
 interface CommentTriageProps {
   postId: number;
   strategyMode?: StrategyMode;
 }
+
+const UNAVAILABLE_MESSAGES: Record<CommentTriageUnavailableReason, string> = {
+  not_published: 'Este post aún no está publicado en Instagram, así que no tiene comentarios que leer.',
+  story: 'Las Stories no tienen comentarios en Instagram: las respuestas llegan como mensajes directos.',
+  collaboration: 'Este post es una colaboración publicada desde otra cuenta: Instagram solo deja leer los comentarios de los posts propios.',
+  api_error: 'No se pudieron leer los comentarios de Instagram. Si vuelve a pasar, reconecta la cuenta desde Cuentas.',
+};
 
 const LABEL_LABELS: Record<string, { text: string; className: string }> = {
   lead:      { text: 'Lead',      className: 'triage-badge-lead' },
@@ -18,6 +30,7 @@ const LABEL_LABELS: Record<string, { text: string; className: string }> = {
 
 export const CommentTriage: React.FC<CommentTriageProps> = ({ postId, strategyMode }) => {
   const [source, setSource] = useState<CommentTriageSource | null>(null);
+  const [unavailableReason, setUnavailableReason] = useState<CommentTriageUnavailableReason>('api_error');
   const [comments, setComments] = useState<CommentTriageItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +54,7 @@ export const CommentTriage: React.FC<CommentTriageProps> = ({ postId, strategyMo
         if (!mounted) return;
         setSource(res.source);
         setComments(res.comments || []);
+        setUnavailableReason(res.unavailable_reason ?? 'api_error');
         if (res.source === 'unavailable') {
           setShowManualPaste(true);
         }
@@ -133,9 +147,8 @@ export const CommentTriage: React.FC<CommentTriageProps> = ({ postId, strategyMo
       {!loading && source === 'unavailable' && (
         <div className="alert alert-warning py-2 mt-3" data-testid="unavailable-notice">
           <i className="bi bi-exclamation-triangle me-1"></i>
-          No se pudieron leer los comentarios de Instagram (se requiere el permiso{' '}
-          <code>instagram_business_manage_comments</code>). Puedes pegar los comentarios manualmente
-          para analizarlos.
+          {UNAVAILABLE_MESSAGES[unavailableReason]} Puedes pegar los comentarios manualmente para
+          analizarlos.
         </div>
       )}
 

@@ -92,7 +92,26 @@ describe('CommentTriage Component', () => {
     expect(await screen.findByText('Copiado')).toBeInTheDocument();
   });
 
-  test('muestra aviso de permisos y formulario manual cuando source es unavailable', async () => {
+  test.each([
+    ['story', /Las Stories no tienen comentarios/],
+    ['collaboration', /colaboración publicada desde otra cuenta/],
+    ['not_published', /aún no está publicado/],
+    ['api_error', /No se pudieron leer los comentarios/],
+  ] as const)('aviso según el motivo %s', async (reason, text) => {
+    vi.mocked(contentApi.getCommentsTriage).mockResolvedValue({
+      source: 'unavailable',
+      comments: [],
+      unavailable_reason: reason,
+    });
+
+    render(<CommentTriage postId={10} />);
+
+    const notice = await screen.findByTestId('unavailable-notice');
+    expect(notice).toHaveTextContent(text);
+    expect(notice).not.toHaveTextContent(/instagram_business_manage_comments/);
+  });
+
+  test('muestra aviso y formulario manual cuando source es unavailable', async () => {
     vi.mocked(contentApi.getCommentsTriage).mockResolvedValue({
       source: 'unavailable',
       comments: [],
@@ -101,7 +120,7 @@ describe('CommentTriage Component', () => {
     render(<CommentTriage postId={10} />);
 
     const notice = await screen.findByTestId('unavailable-notice');
-    expect(notice).toHaveTextContent(/instagram_business_manage_comments/i);
+    expect(notice).toHaveTextContent(/No se pudieron leer los comentarios/);
     expect(
       screen.getByPlaceholderText(/¿Cuánto cuesta el servicio\?/i)
     ).toBeInTheDocument();

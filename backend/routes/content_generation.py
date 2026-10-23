@@ -48,6 +48,7 @@ from models.schemas import (
 from services import content_formats
 from services.analytics import AnalyticsService
 from services.instagram_insights import fetch_live_profile, fetch_media_comments
+from services.publisher.instagram_publisher import STORY_POST_TYPES
 from services.content_quality import (
     lint_caption,
     humanize,
@@ -635,7 +636,9 @@ async def get_post_comments_triage(
     supabase: Client = Depends(get_user_supabase_client),
 ) -> CommentsTriageResponse:
     """Triaje de los comentarios de un post publicado (lectura Graph API cacheada 15 min)."""
-    post_res = supabase.table('posts').select('id, instagram_account_id, instagram_post_id').eq('id', post_id).execute()
+    post_res = supabase.table('posts').select(
+        'id, instagram_account_id, instagram_post_id, post_type, is_collaboration'
+    ).eq('id', post_id).execute()
     if not post_res.data:
         raise HTTPException(status_code=404, detail="Post no encontrado")
     post = post_res.data[0]
@@ -643,7 +646,13 @@ async def get_post_comments_triage(
     account_id = post.get('instagram_account_id')
     media_id = post.get('instagram_post_id')
     if not account_id or not media_id:
-        return CommentsTriageResponse(source="unavailable", comments=[])
+        return CommentsTriageResponse(source="unavailable", unavailable_reason="not_published")
+    # Sin llamada a la API: las Stories no tienen comentarios (las respuestas son DMs) y los
+    # posts de colaboración son de otra cuenta, cuyos comentarios no se pueden leer
+    if (post.get('post_type') or '').upper() in STORY_POST_TYPES:
+        return CommentsTriageResponse(source="unavailable", unavailable_reason="story")
+    if post.get('is_collaboration'):
+        return CommentsTriageResponse(source="unavailable", unavailable_reason="collaboration")
 
     acc_res = supabase.table('instagram_accounts').select('*').eq('id', account_id).execute()
     if not acc_res.data:
@@ -658,10 +667,10 @@ async def get_post_comments_triage(
             # No se registra el mensaje: la URL lleva el access_token
             status = e.response.status_code if e.response is not None else None
             logger.warning(f"Graph API rechazó la lectura de comentarios del post {post_id} (HTTP {status})")
-            return CommentsTriageResponse(source="unavailable", comments=[])
+            return CommentsTriageResponse(source="unavailable", unavailable_reason="api_error")
         except Exception as e:
             logger.warning(f"No se pudieron leer los comentarios del post {post_id}: {type(e).__name__}")
-            return CommentsTriageResponse(source="unavailable", comments=[])
+            return CommentsTriageResponse(source="unavailable", unavailable_reason="api_error")
         content_formats.set_comments_in_cache(str(media_id), raw_comments)
 
     mode = await content_formats.resolve_strategy_mode(account_id)

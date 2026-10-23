@@ -378,9 +378,12 @@ export interface CommentTriageItem {
   suggested_reply: string;
 }
 
+export type CommentTriageUnavailableReason = 'not_published' | 'story' | 'collaboration' | 'api_error';
+
 export interface CommentsTriageResponse {
   source: CommentTriageSource;
   comments: CommentTriageItem[];
+  unavailable_reason?: CommentTriageUnavailableReason | null;
 }
 
 export interface CommentsTriageManualRequest {
