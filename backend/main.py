@@ -384,6 +384,16 @@ async def startup_event():
             max_instances=1
         )
         logger.info("✅ Cron job de caducidad de tokens de Instagram configurado (diario 07:00)")
+
+        from services.instagram_token import refresh_expiring_tokens
+        scheduler.scheduler.add_job(
+            refresh_expiring_tokens,
+            trigger=CronTrigger(hour=3),
+            id='refresh_instagram_tokens',
+            replace_existing=True,
+            max_instances=1
+        )
+        logger.info("✅ Cron job de renovación de tokens de Instagram Login configurado (diario 03:00)")
         
         scheduler.scheduler.add_job(
             run_agent_for_all_accounts,

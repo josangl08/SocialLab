@@ -145,3 +145,16 @@ def test_sync_story_insights_cron_job_registered_at_minute_30():
     assert "minute=30" in content or "minute='30'" in content
     assert "max_instances=1" in content
 
+
+def test_refresh_instagram_tokens_cron_job_registered_at_hour_3():
+    """El job refresh_instagram_tokens debe registrarse con CronTrigger(hour=3), max_instances=1 y replace_existing=True (AD-5)."""
+    from pathlib import Path
+    import main
+
+    main_py_path = Path(main.__file__).parent / "main.py"
+    content = main_py_path.read_text(encoding="utf-8")
+    assert "refresh_instagram_tokens" in content
+    assert "hour=3" in content or "hour='3'" in content
+    assert "max_instances=1" in content
+
+

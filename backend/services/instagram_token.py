@@ -4,6 +4,8 @@ Tokens de las cuentas de Instagram.
 Facebook Login: el token de usuario no caduca (`expires_at: 0` en debug_token):
 lo que obliga a reconectar es la caducidad del acceso a datos (90 días desde el último login), que
 Meta solo renueva con un nuevo login. `instagram_accounts.expires_at` guarda esa fecha.
+
+Instagram Login: token largo de 60 días que se renueva con `ig_refresh_token` antes de caducar.
 """
 import asyncio
 import logging
@@ -25,6 +27,8 @@ REMINDER_DAYS = (7, 3, 1)
 INSTAGRAM_OAUTH_TOKEN_URL = "https://api.instagram.com/oauth/access_token"
 INSTAGRAM_GRAPH_HOST = "https://graph.instagram.com"
 DEFAULT_TOKEN_SECONDS = 60 * 24 * 60 * 60
+# Meta solo renueva tokens con más de 24 h; a 15 días de caducar siempre se cumple
+REFRESH_WINDOW_DAYS = 15
 
 
 class NoLinkedInstagramAccountError(ValueError):
@@ -247,3 +251,50 @@ def _save_account(state_data: Dict, row: Dict) -> None:
             {'user_id': sociallab_user_id, **row},
             on_conflict='user_id,instagram_business_account_id'
         ).execute()
+
+
+def refresh_expiring_tokens() -> Dict[str, int]:
+    """
+    Job diario: renueva los tokens de Instagram Login que caducan en menos de REFRESH_WINDOW_DAYS.
+    Error OAuth 190 → token_invalid; error de red o 5xx → sin cambios (se reintenta mañana).
+    Idempotente: una cuenta renovada sale del filtro. Un fallo en una cuenta no corta las demás.
+    """
+    counts = {'refreshed': 0, 'invalidated': 0, 'skipped': 0}
+    db = get_supabase_admin_client()
+    threshold = datetime.now(timezone.utc) + timedelta(days=REFRESH_WINDOW_DAYS)
+    accounts = db.table('instagram_accounts')\
+        .select('id, long_lived_access_token')\
+        .eq('login_type', 'instagram')\
+        .eq('token_invalid', False)\
+        .eq('is_active', True)\
+        .lt('expires_at', threshold.isoformat())\
+        .execute().data or []
+
+    for account in accounts:
+        try:
+            response = requests.get(f"{INSTAGRAM_GRAPH_HOST}/refresh_access_token", params={
+                'grant_type': 'ig_refresh_token',
+                'access_token': decrypt_token(account['long_lived_access_token']),
+            }, timeout=10)
+            data = response.json() if response.status_code < 500 else {}
+
+            if response.status_code == 200 and data.get('access_token'):
+                expires_in = data.get('expires_in') or DEFAULT_TOKEN_SECONDS
+                db.table('instagram_accounts').update({
+                    'long_lived_access_token': encrypt_token(data['access_token']),
+                    'expires_at': (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat(),
+                }).eq('id', account['id']).execute()
+                counts['refreshed'] += 1
+            elif (data.get('error') or {}).get('code') == 190:
+                db.table('instagram_accounts').update({'token_invalid': True}).eq('id', account['id']).execute()
+                counts['invalidated'] += 1
+                logger.warning(f"Token de la cuenta {account['id']} rechazado por Instagram: pendiente de reconectar")
+            else:
+                counts['skipped'] += 1
+                logger.warning(f"No se pudo renovar el token de la cuenta {account['id']}: status {response.status_code}")
+        except Exception as e:
+            counts['skipped'] += 1
+            logger.error(f"❌ Error renovando el token de la cuenta {account.get('id')}: {e}")
+
+    logger.info(f"Renovación de tokens de Instagram: {counts}")
+    return counts
