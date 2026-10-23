@@ -91,7 +91,7 @@ def test_metrics_from_business_discovery():
     assert top[0]["caption_first_line"] == "Antiguo"
     assert top[1]["permalink"].startswith("https://instagram.com/p/")
     assert metrics["median_engagement_rate"] == 5.0
-    assert "masamadre" in metrics["themes"]
+    assert any("#masamadre" in c for c in metrics["top_captions"])
 
 
 def test_analysis_calls_api_and_caches(env):
@@ -196,3 +196,18 @@ def test_long_first_line_is_cut_at_125_chars():
     data = {"followers_count": 10, "media": {"data": [_media(1, 5, 0, "IMAGE", long_caption)]}}
     line = ra.compute_reference_metrics(data, NOW)["top_posts"][0]["caption_first_line"]
     assert len(line) == 126 and line.endswith("…")
+
+
+def test_reference_much_bigger_than_account_is_not_comparable():
+    assert ra._is_comparable(1_000_000, 4_000) is False
+    assert ra._is_comparable(100_000, 4_000) is True
+    assert ra._is_comparable(100_000, None) is None
+
+
+def test_summary_flags_non_comparable_references():
+    summary = ra.summarize_references({"references": [
+        {"username": "natgeo", "status": "ok", "followers": 10, "posts_per_week": 6, "comparable": False,
+         "format_mix": {}, "hook_formulas": [], "top_posts": []},
+    ]})
+    assert "mucho más grande que tu cuenta" in summary
+

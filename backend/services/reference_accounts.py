@@ -4,8 +4,8 @@ Graph API, sin LLM. Cada referente se analiza como mucho una vez cada 7 días
 (24 h si falló) y el resultado se guarda en reference_account_snapshots.
 """
 
+import json
 import logging
-import re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from statistics import median
@@ -15,6 +15,7 @@ import requests
 
 from database.supabase_client import get_supabase_admin_client
 from services.content_quality import score_hook
+from services.gemini_service import generate_gemini_content_sync
 from services.hermes.memory import record_agent_decision
 from utils.encryption import decrypt_token
 from utils.graph_api import graph_url
@@ -29,6 +30,9 @@ TOP_POSTS = 3
 MAX_NEW_PILLARS = 3
 MIX_GAP_PP = 20
 HOOK_MAX_CHARS = 125
+CAPTION_EXCERPT_CHARS = 300
+# Un referente con más de N veces tus seguidores no sirve para comparar mix ni frecuencia
+MAX_SIZE_RATIO = 50
 
 _DISCOVERY_FIELDS = (
     "business_discovery.username({username}){{username,followers_count,media_count,"
@@ -42,17 +46,6 @@ _NOT_FOUND_SUBCODE = 2207013
 
 # Formato de Business Discovery → clave del content_type_mix propio
 FORMAT_TO_MIX = {"REELS": "reel", "CAROUSEL_ALBUM": "carousel", "IMAGE": "post"}
-
-_WORD_RE = re.compile(r"#?[\wáéíóúüñ]{5,}", re.IGNORECASE)
-_STOPWORDS = {
-    "about", "after", "again", "because", "before", "being", "could", "every", "first", "great",
-    "their", "there", "these", "thing", "think", "those", "today", "where", "which", "while",
-    "would", "your", "porque", "cuando", "donde", "desde", "entre", "hasta", "sobre",
-    "todos", "todas", "nuestro", "nuestra", "vuestro", "estos", "estas", "tiene", "tienen", "hacer",
-    "siempre", "nunca", "puede", "pueden", "también", "gracias", "mucho", "mucha", "muchos", "mejor",
-    "aquí", "ahora", "algo", "cada", "otra", "otro", "esta", "este", "para", "pero", "como", "link",
-}
-
 
 class BusinessDiscoveryError(Exception):
     def __init__(self, status: str, message: str):
@@ -104,15 +97,6 @@ def _first_line(caption: Optional[str]) -> str:
     return line if len(line) <= HOOK_MAX_CHARS else line[:HOOK_MAX_CHARS].rstrip() + "…"
 
 
-def _themes(captions: List[str]) -> Dict[str, int]:
-    """Hashtags y palabras clave (≥5 letras, sin stopwords) de los captions."""
-    counter: Counter = Counter()
-    for caption in captions:
-        terms = {m.lower().lstrip("#") for m in _WORD_RE.findall(caption or "")}
-        counter.update(t for t in terms if t not in _STOPWORDS and not t.isdigit())
-    return dict(counter.most_common(15))
-
-
 def compute_reference_metrics(data: Dict[str, Any], now: Optional[datetime] = None) -> Dict[str, Any]:
     """Métricas de AD-10 a partir de la respuesta de Business Discovery."""
     now = now or datetime.now(timezone.utc)
@@ -155,7 +139,8 @@ def compute_reference_metrics(data: Dict[str, Any], now: Optional[datetime] = No
         "top_posts": top_posts,
         "hook_formulas": [name for name, _ in formulas.most_common(3)],
         "median_engagement_rate": round(median([_rate(m) for m in media]), 2) if media else None,
-        "themes": _themes([m.get("caption") or "" for m in top]),
+        # Captions de los top posts para extraer temas con Gemini (AD-11)
+        "top_captions": [(m.get("caption") or "")[:CAPTION_EXCERPT_CHARS] for m in top if m.get("caption")],
     }
 
 
@@ -167,7 +152,13 @@ def _is_fresh(snapshot: Dict[str, Any], now: datetime) -> bool:
     return now - fetched < ttl
 
 
-def _to_analysis(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+def _is_comparable(followers: Optional[int], own_followers: Optional[int]) -> Optional[bool]:
+    if not followers or not own_followers:
+        return None
+    return followers <= own_followers * MAX_SIZE_RATIO
+
+
+def _to_analysis(snapshot: Dict[str, Any], own_followers: Optional[int] = None) -> Dict[str, Any]:
     payload = snapshot.get("payload") or {}
     return {
         "username": snapshot["username"],
@@ -177,7 +168,8 @@ def _to_analysis(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         **{k: payload.get(k) for k in (
             "followers", "posts_per_week", "format_mix", "top_posts", "hook_formulas", "median_engagement_rate",
         )},
-        "themes": payload.get("themes") or {},
+        "comparable": _is_comparable(payload.get("followers"), own_followers),
+        "top_captions": payload.get("top_captions") or [],
     }
 
 
@@ -187,7 +179,7 @@ def analyze_reference_accounts(account_id: int, force_refresh: bool = False) -> 
     supabase = get_supabase_admin_client()
     acc_res = supabase.table("instagram_accounts").select(
         "id, reference_accounts, content_pillars, content_type_mix, instagram_business_account_id, "
-        "long_lived_access_token, login_type"
+        "long_lived_access_token, login_type, followers_count, default_language"
     ).eq("id", account_id).execute()
     account = acc_res.data[0] if acc_res.data else {}
     usernames = [str(u).strip().lstrip("@") for u in (account.get("reference_accounts") or []) if str(u).strip()]
@@ -220,7 +212,7 @@ def analyze_reference_accounts(account_id: int, force_refresh: bool = False) -> 
             snapshots[username] = row
 
     analysis = {
-        "references": [_to_analysis(snapshots[u]) for u in usernames],
+        "references": [_to_analysis(snapshots[u], account.get("followers_count")) for u in usernames],
         "refreshed": bool(stale),
     }
     analysis["summary"] = summarize_references(analysis)
@@ -241,8 +233,10 @@ def summarize_references(analysis: Dict[str, Any]) -> str:
     for r in ok[:5]:
         mix = ", ".join(f"{k.lower()} {v}%" for k, v in (r.get("format_mix") or {}).items() if v)
         hooks = ", ".join(r.get("hook_formulas") or []) or "sin fórmula clara"
+        size_note = " (mucho más grande que tu cuenta: tómalo como inspiración, no como ritmo)" \
+            if r.get("comparable") is False else ""
         lines.append(
-            f"- @{r['username']}: {r.get('followers') or 0} seguidores, {r.get('posts_per_week')} posts/semana "
+            f"- @{r['username']}: {r.get('followers') or 0} seguidores{size_note}, {r.get('posts_per_week')} posts/semana "
             f"({mix or 'sin datos de formato'}); ganchos que mejor le funcionan: {hooks}."
         )
     best = max(
@@ -285,6 +279,34 @@ def _redistribute(total: int, shares: Dict[str, float]) -> Dict[str, int]:
     return result
 
 
+def _new_pillars_from_captions(pillars: List[str], refs: List[Dict[str, Any]], language: str) -> List[str]:
+    """Hasta MAX_NEW_PILLARS temas recurrentes en los top posts de los referentes que
+    no cubren los pilares actuales, en el idioma de la cuenta. Una llamada a Gemini por
+    análisis (solo cuando se ha refrescado); si falla, no se sugiere nada."""
+    captions = [f"@{r['username']}: {c}" for r in refs for c in (r.get("top_captions") or [])]
+    if not captions:
+        return []
+    lang = {"es": "español", "en": "inglés"}.get(language, language)
+    prompt = (
+        "Eres estratega de contenido de Instagram. Estos son los captions de las publicaciones "
+        "con más engagement de las cuentas de referencia de un usuario:\n"
+        + "\n".join(f"- {c}" for c in captions)
+        + f"\n\nPilares de contenido actuales del usuario: {', '.join(pillars) or 'ninguno'}.\n"
+        f"Identifica como máximo {MAX_NEW_PILLARS} temas que se repitan en varias publicaciones y que "
+        "NO estén ya cubiertos por los pilares actuales (ni con otras palabras). Cada tema en 1-4 "
+        f"palabras, en {lang}, con formato de pilar de contenido. Si no hay ninguno claro, devuelve "
+        'una lista vacía. Devuelve SOLO este JSON: {"pillars": ["tema", ...]}'
+    )
+    try:
+        data = json.loads(generate_gemini_content_sync(prompt, json_mode=True))
+    except Exception as e:
+        logger.warning(f"Temas de referentes sin Gemini: {e}")
+        return []
+    lowered = [p.lower() for p in pillars]
+    themes = [str(t).strip() for t in (data.get("pillars") or []) if str(t).strip()]
+    return [t for t in themes if t.lower() not in lowered][:MAX_NEW_PILLARS]
+
+
 def suggest_from_references(account: Dict[str, Any], analysis: Dict[str, Any]) -> List[str]:
     """Registra sugerencias de pilares y mix derivadas de los referentes (status
     'suggested'), sin duplicar una igual pendiente. Devuelve los tipos creados."""
@@ -294,23 +316,16 @@ def suggest_from_references(account: Dict[str, Any], analysis: Dict[str, Any]) -
         return []
     created: List[str] = []
 
-    # Pilares: temas recurrentes (≥2 apariciones en top posts) que no están en los pilares
+    # Pilares: temas recurrentes en los top posts que no cubren los pilares actuales
     pillars = [str(p) for p in (account.get("content_pillars") or []) if str(p).strip()]
-    lowered = [p.lower() for p in pillars]
-    totals: Counter = Counter()
-    for r in ok:
-        totals.update(r.get("themes") or {})
-    new = [
-        t for t, n in totals.most_common()
-        if n >= 2 and not any(t in p or p in t for p in lowered)
-    ][:MAX_NEW_PILLARS]
+    new = _new_pillars_from_captions(pillars, ok, account.get("default_language") or "es")
     if new:
         suggested_pillars = pillars + new
         if not _already_pending(account_id, "suggest_pillars_change", "suggested_content_pillars", suggested_pillars):
             record_agent_decision(
                 account_id=account_id, session_id=None, decision_type="suggest_pillars_change",
                 status="suggested", confidence_score=0.5,
-                rationale=f"Tus referentes hablan a menudo de {', '.join(new)} en sus publicaciones con más engagement.",
+                rationale=f"Tus referentes tratan a menudo {', '.join(new)} en sus publicaciones con más engagement.",
                 tool_args={
                     "source": "reference_accounts",
                     "configured_content_pillars": pillars,
@@ -318,6 +333,11 @@ def suggest_from_references(account: Dict[str, Any], analysis: Dict[str, Any]) -
                 },
             )
             created.append("suggest_pillars_change")
+
+    # Mix y frecuencia: solo referentes de un tamaño comparable
+    ok = [r for r in ok if r.get("comparable") is not False]
+    if not ok:
+        return created
 
     # Mix: formato medio de los referentes vs. el propio (sin stories)
     mix = {k: v for k, v in (account.get("content_type_mix") or {}).items() if isinstance(v, int)}

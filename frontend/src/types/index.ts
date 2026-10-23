@@ -193,6 +193,8 @@ export interface ReferenceAnalysis {
   format_mix?: Record<'REELS' | 'CAROUSEL_ALBUM' | 'IMAGE', number> | null;
   top_posts?: ReferenceTopPost[] | null;
   hook_formulas?: string[] | null;
+  /** false: más de 50 veces tus seguidores (no se usa para sugerir mix ni frecuencia) */
+  comparable?: boolean | null;
   fetched_at?: string | null;
 }
 

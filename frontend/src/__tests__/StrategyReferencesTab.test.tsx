@@ -10,7 +10,7 @@ const ANALYSIS = {
   summary: '',
   references: [
     {
-      username: 'chef_pro', status: 'ok', followers: 12500, posts_per_week: 4.5,
+      username: 'chef_pro', status: 'ok', followers: 12500, posts_per_week: 4.5, comparable: false,
       format_mix: { REELS: 60, CAROUSEL_ALBUM: 20, IMAGE: 20 }, hook_formulas: ['Curiosidad'],
       top_posts: [{ caption_first_line: 'Nadie te cuenta esto', media_type: 'REELS', engagement_rate: 8.2,
                     permalink: 'https://instagram.com/p/abc' }],
@@ -76,5 +76,10 @@ describe('StrategyReferencesTab', () => {
     renderTab({ ...DRAFT, reference_accounts: ['a', 'b', 'c', 'd', 'e'] });
     expect(screen.getByText('5/5')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Máximo 5')).toBeDisabled();
+  });
+
+  test('flags references much bigger than the account', async () => {
+    renderTab();
+    expect(await screen.findByText(/Mucho más grande que tu cuenta/)).toBeInTheDocument();
   });
 });

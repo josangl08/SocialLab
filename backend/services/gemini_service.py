@@ -91,6 +91,25 @@ def _sync_generate_content(prompt: str, model_name: str, json_mode: bool = False
         raise Exception(f"El modelo {model_name} no pudo generar una respuesta válida.")
     return response.text.strip()
 
+def generate_gemini_content_sync(
+    prompt: str,
+    model_names: Optional[List[str]] = None,
+    json_mode: bool = False,
+) -> str:
+    """Versión síncrona de generate_gemini_content para servicios que ya corren en un
+    hilo (p. ej. el análisis de referentes): mismo orden de modelos y salto ante 429."""
+    last_exception: Optional[Exception] = None
+    for model_name in model_names or PREFERRED_GEMINI_MODELS:
+        try:
+            return _sync_generate_content(prompt, model_name, json_mode)
+        except Exception as e:
+            last_exception = e
+            if _is_quota_exhausted(e):
+                logger.warning(f"Cuota excedida para el modelo {model_name}. Intentando con el siguiente... Detalles: {e}")
+                continue
+            raise
+    raise last_exception or Exception("No se especificaron modelos para generar contenido.")
+
 async def generate_gemini_content(
     prompt: str,
     model_names: Optional[List[str]] = None,

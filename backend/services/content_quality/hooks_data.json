@@ -19,7 +19,10 @@
       "patterns": [
         "^¿?[yY] si (todo|lo que|te dijera)",
         "^¿?[pP]or qué sigues creyendo que",
-        "^¿?[sS]eguro que necesitas"
+        "^¿?[sS]eguro que necesitas",
+        "^what if (everything|all) you",
+        "^why do you still believe",
+        "^are you sure you need"
       ],
       "best_for": ["commercial_campaign", "personal_storyline"]
     },
@@ -31,7 +34,10 @@
         "^(la mayoría|el 90%|el 99%|casi todos) (hace|cree|falla|está)",
         "^[dD]eja de perder el tiempo en",
         "^[eE]l gran error de",
-        "^[nN]adie habla de esto"
+        "^[nN]adie habla de esto",
+        "^most people (do|get|are|think)",
+        "^stop wasting (your )?time",
+        "^nobody (talks|is talking) about"
       ],
       "best_for": ["commercial_campaign"]
     },
@@ -43,7 +49,11 @@
         "^[pP]erdí (\\d+|[0-9]+|€|\\$)",
         "^[mM]e costó (\\d+|[0-9]+|€|\\$)",
         "^[cC]ómo perdí",
-        "^[eE]l error que me costó"
+        "^[eE]l error que me costó",
+        "^i lost (\\$|€|\\d)",
+        "^it cost me (\\$|€|\\d)",
+        "^how i lost",
+        "^the mistake that cost me"
       ],
       "best_for": ["commercial_campaign"]
     },
@@ -54,7 +64,10 @@
       "patterns": [
         "^[cC]ómo (conseguí|logré|generé|alcancé) (\\d+|[0-9]+)",
         "^(de 0 a|de 0 a \\d+)",
-        "^(\\d+|[0-9]+) (euros|dólares|clientes|seguidores|leads) en"
+        "^(\\d+|[0-9]+) (euros|dólares|clientes|seguidores|leads) en",
+        "^how i (made|got|grew|reached) (\\$|€)?\\d",
+        "^from 0 to",
+        "^\\d+ (dollars|clients|followers|leads) in"
       ],
       "best_for": ["commercial_campaign"]
     },
@@ -66,7 +79,11 @@
         "^[eE]ran las \\d+",
         "^[hH]ace (un año|dos años|unos meses|días)",
         "^[tT]odo empezó cuando",
-        "^[eE]l día que"
+        "^[eE]l día que",
+        "^it was \\d",
+        "^(a year|two years|months|days) ago",
+        "^it all started when",
+        "^the day (i|we)"
       ],
       "best_for": ["personal_storyline"]
     },
@@ -77,7 +94,10 @@
       "patterns": [
         "^[eE]l (\\d+|[0-9]+)% de",
         "^\\d+ de cada \\d+",
-        "^[sS]olo el (\\d+|[0-9]+)%"
+        "^[sS]olo el (\\d+|[0-9]+)%",
+        "^\\d+% of",
+        "^\\d+ (out )?of (every )?\\d+",
+        "^only \\d+%"
       ],
       "best_for": ["commercial_campaign"]
     },
@@ -89,7 +109,11 @@
         "^\\d+ errores que",
         "^[eE]l mayor error al",
         "^[sS]i estás cometiendo este error",
-        "^[dD]eja de cometer"
+        "^[dD]eja de cometer",
+        "^\\d+ mistakes",
+        "^the (biggest|worst) mistake",
+        "^if you'?re making this mistake",
+        "^stop making"
       ],
       "best_for": ["commercial_campaign", "personal_storyline"]
     },
@@ -101,7 +125,11 @@
         "^[lL]o que nadie te cuenta",
         "^[lL]o que las marcas no dicen",
         "^[eE]l secreto de",
-        "^[lL]o que aprendí detrás de"
+        "^[lL]o que aprendí detrás de",
+        "^what nobody tells you",
+        "^what (brands|they) don'?t tell you",
+        "^the secret (to|of|behind)",
+        "^what i learned behind"
       ],
       "best_for": ["commercial_campaign"]
     },
@@ -113,7 +141,11 @@
         "^[dD]e .+ a .+ en",
         "^[aA]ntes vs [dD]espués",
         "^[aA]sí cambió mi",
-        "^[pP]asé de"
+        "^[pP]asé de",
+        "^from .+ to .+ in",
+        "^before (vs|and) after",
+        "^how my .+ changed",
+        "^i went from"
       ],
       "best_for": ["personal_storyline", "commercial_campaign"]
     },
@@ -125,7 +157,11 @@
         "^[uU]na verdad incómoda",
         "^[nN]o te va a gustar leer esto",
         "^[lL]a dolorosa verdad",
-        "^[hH]ablemos de lo que nadie quiere"
+        "^[hH]ablemos de lo que nadie quiere",
+        "^an uncomfortable truth",
+        "^you won'?t like (reading|hearing) this",
+        "^the (painful|hard) truth",
+        "^let'?s talk about what nobody"
       ],
       "best_for": ["personal_storyline", "commercial_campaign"]
     },
@@ -136,7 +172,9 @@
       "patterns": [
         "^[sS]i tuviera que empezar",
         "^[sS]i volviera a empezar",
-        "^[sS]i empezara de cero"
+        "^[sS]i empezara de cero",
+        "^if i (had to|could) start (over|again|from scratch)",
+        "^if i started from (zero|scratch)"
       ],
       "best_for": ["commercial_campaign", "personal_storyline"]
     },
@@ -146,7 +184,9 @@
       "template": "Cómo logré [Meta deseada] sin [Obstáculo temido / Método tradicional].",
       "patterns": [
         "^[cC]ómo .+ sin (invertir|gastar|publicar|usar|morir|matarme)",
-        "^[lL]ogré .+ sin"
+        "^[lL]ogré .+ sin",
+        "^how i .+ without",
+        "^i .+ without (spending|investing|posting)"
       ],
       "best_for": ["commercial_campaign"]
     },
@@ -156,7 +196,9 @@
       "template": "Deja de hacer [Hábito común] si quieres [Resultado].",
       "patterns": [
         "^[dD]eja de (hacer|usar|publicar|creer|comprar|intentar)",
-        "^[pP]ara de hacer"
+        "^[pP]ara de hacer",
+        "^stop (doing|using|posting|believing|buying|trying)",
+        "^quit doing"
       ],
       "best_for": ["commercial_campaign"]
     },
@@ -167,7 +209,10 @@
       "patterns": [
         "^[lL]a regla de( los)? \\d+",
         "^[eE]l método de \\d+ pasos",
-        "^[eE]l framework que uso"
+        "^[eE]l framework que uso",
+        "^the \\d+[- ]step",
+        "^the \\d+ rule",
+        "^the framework i use"
       ],
       "best_for": ["commercial_campaign"]
     },
@@ -178,7 +223,10 @@
       "patterns": [
         "^[lL]a mayor lección",
         "^[lL]o más importante que aprendí",
-        "^[uU]na lección que tardé"
+        "^[uU]na lección que tardé",
+        "^the (biggest|most expensive) lesson",
+        "^the most important thing i learned",
+        "^a lesson (it )?took me"
       ],
       "best_for": ["personal_storyline"]
     },
@@ -188,7 +236,9 @@
       "template": "Por qué el 99% de [Personas] fracasa al intentar [Meta].",
       "patterns": [
         "^[pP]or qué el (90%|95%|99%|la mayoría) (fracasa|falla|no lo consigue)",
-        "^[pP]or qué casi nadie logra"
+        "^[pP]or qué casi nadie logra",
+        "^why (90|95|99)% (of .+ )?(fail|never)",
+        "^why (almost )?no ?one (manages|succeeds)"
       ],
       "best_for": ["commercial_campaign"]
     },
@@ -199,7 +249,10 @@
       "patterns": [
         "^[eE]l truco (poco conocido|secreto|que nadie usa)",
         "^[eE]l hack que cambió",
-        "^[uU]n pequeño truco"
+        "^[uU]n pequeño truco",
+        "^the (little[- ]known|secret) (trick|hack)",
+        "^the hack that changed",
+        "^a (small|simple) trick"
       ],
       "best_for": ["commercial_campaign"]
     },
@@ -211,7 +264,11 @@
         "^[tT]engo que admitir",
         "^[uU]na confesión honesta",
         "^[nN]unca había contado esto",
-        "^[fF]racasé estrepitosamente"
+        "^[fF]racasé estrepitosamente",
+        "^i (have|need) to admit",
+        "^an honest confession",
+        "^i'?ve never (told|shared) this",
+        "^i failed (miserably|badly)"
       ],
       "best_for": ["personal_storyline"]
     },
@@ -223,7 +280,11 @@
         "^[mM]ira (detenidamente|atentamente|bien)",
         "^[fF]íjate en",
         "^[nN]o mires solo",
-        "^[eE]l detalle que nadie ve"
+        "^[eE]l detalle que nadie ve",
+        "^look (closely|carefully) at",
+        "^(notice|look at) the",
+        "^don'?t just look at",
+        "^the detail (nobody|no one) (sees|notices)"
       ],
       "best_for": ["personal_storyline", "commercial_campaign"]
     },
@@ -235,7 +296,10 @@
         "^[sS]i te cuesta",
         "^[sS]i estás cansado de",
         "^[sS]i sufres con",
-        "^[sS]i no consigues"
+        "^[sS]i no consigues",
+        "^if you struggle (with|to)",
+        "^if you'?re tired of",
+        "^if you can'?t (seem to )?(get|stop)"
       ],
       "best_for": ["commercial_campaign"]
     },
@@ -246,7 +310,10 @@
       "patterns": [
         "^[pP]robé .+ durante \\d+ días",
         "^[hH]ice un experimento",
-        "^[qQ]ué pasó cuando probé"
+        "^[qQ]ué pasó cuando probé",
+        "^i tried .+ for \\d+ days",
+        "^i (ran|did) an experiment",
+        "^what happened when i tried"
       ],
       "best_for": ["personal_storyline", "commercial_campaign"]
     },
@@ -257,7 +324,10 @@
       "patterns": [
         "^.+ es exactamente como",
         "^¿?[qQ]ué tienen en común",
-        "^[lL]a analogía perfecta"
+        "^[lL]a analogía perfecta",
+        "^.+ is exactly like",
+        "^what do .+ have in common",
+        "^the perfect analogy"
       ],
       "best_for": ["personal_storyline", "commercial_campaign"]
     },
@@ -268,7 +338,9 @@
       "patterns": [
         "^[lL]a única herramienta",
         "^[eE]l único hábito",
-        "^[sS]olo necesitas una cosa"
+        "^[sS]olo necesitas una cosa",
+        "^the only (tool|habit|thing) you (really )?need",
+        "^you only need one"
       ],
       "best_for": ["commercial_campaign"]
     },
@@ -280,7 +352,11 @@
         "^[eE]n los próximos (meses|años)",
         "^[eE]l futuro de",
         "^[pP]redicción para",
-        "^[aA]sí va a cambiar"
+        "^[aA]sí va a cambiar",
+        "^in the next (few )?(months|years)",
+        "^the future of",
+        "^(my )?prediction for",
+        "^this is how .+ will change"
       ],
       "best_for": ["commercial_campaign"]
     },
@@ -291,7 +367,10 @@
       "patterns": [
         "^[eE]l mito de( que)?",
         "^[dD]esmintiendo el mayor mito",
-        "^[nN]o necesitas .+ para"
+        "^[nN]o necesitas .+ para",
+        "^the myth (that|of)",
+        "^debunking the",
+        "^you don'?t need .+ to"
       ],
       "best_for": ["commercial_campaign", "personal_storyline"]
     },
@@ -302,7 +381,10 @@
       "patterns": [
         "^[gG]uía (definitiva|completa|paso a paso)",
         "^[cC]ómo dominar .+ en \\d+ pasos",
-        "^[pP]aso a paso para"
+        "^[pP]aso a paso para",
+        "^the (ultimate|complete|step[- ]by[- ]step) guide",
+        "^how to master .+ in \\d+ steps",
+        "^step[- ]by[- ]step"
       ],
       "best_for": ["commercial_campaign"]
     }

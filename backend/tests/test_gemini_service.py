@@ -212,3 +212,12 @@ async def test_analyze_image_vision_tolerant_defaults_when_omitted(mock_get_clie
     assert result["content_type_fit"] == "feed_post"
     assert result["suggested_hook"] == ""
     assert result["theme"] == "cafe"
+
+
+def test_generate_gemini_content_sync_falls_back_on_quota():
+    from services.gemini_service import generate_gemini_content_sync
+    with patch("services.gemini_service._sync_generate_content",
+               side_effect=[_quota_exhausted_error(), "ok"]) as gen:
+        assert generate_gemini_content_sync("p", model_names=["a", "b"], json_mode=True) == "ok"
+    assert [c.args[1] for c in gen.call_args_list] == ["a", "b"]
+    assert gen.call_args.args[2] is True

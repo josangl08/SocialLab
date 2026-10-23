@@ -87,6 +87,11 @@ export const StrategyReferencesTab: React.FC<StrategyReferencesTabProps> = ({
                   </a>
                   {ref.status === 'ok' && <span className="srt-followers">{formatNumber(ref.followers)} seguidores</span>}
                 </header>
+                {ref.comparable === false && (
+                  <p className="srt-size-note small">
+                    Mucho más grande que tu cuenta: sirve de inspiración, pero no se usa para sugerirte mix ni frecuencia.
+                  </p>
+                )}
                 {ref.status !== 'ok' ? (
                   <p className="srt-warning small mb-0">
                     <i className="bi bi-exclamation-triangle me-1" />

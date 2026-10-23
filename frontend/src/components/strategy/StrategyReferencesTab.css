@@ -25,3 +25,6 @@
 .srt-top li { margin-bottom: 4px; }
 .srt-top a { color: #93c5fd; }
 .srt-rate { margin-left: 6px; color: var(--sl-purple-light); font-weight: 600; }
+.srt-size-note { color: var(--sl-text-muted); font-style: italic; margin-bottom: 8px; }
+.srt-top a { overflow-wrap: anywhere; }
+

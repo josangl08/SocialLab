@@ -222,6 +222,8 @@ class ReferenceAnalysis(BaseModel):
     top_posts: Optional[list[ReferenceTopPost]] = None
     hook_formulas: Optional[list[str]] = None
     median_engagement_rate: Optional[float] = None
+    # False si tiene más de 50 veces tus seguidores: no se usa para sugerir mix ni frecuencia
+    comparable: Optional[bool] = None
     fetched_at: Optional[str] = None
 
 
